@@ -19,8 +19,6 @@ export type RadarDatum = {
 
 type RadarChartProps = {
   data: RadarDatum[];
-  /** Optional second layer, same axes/order as `data` — real current progress overlaid on the potential shape, rendered in a lighter tint so both are readable at once. Omit entirely for the single-layer onboarding usage. */
-  currentData?: RadarDatum[];
   size?: number;
   maxValue?: number;
 };
@@ -48,8 +46,14 @@ function pointsToString(points: [number, number][]): string {
  * center, which lands exactly on the chart's own center (cx, cy) — so every
  * point grows outward along its real radial line, not just a generic pop.
  * The grid (rings/spokes/labels) stays static — only the data reads as "new".
+ *
+ * Deliberately single-layer only. A second "current progress" layer nested
+ * inside this one was tried and reverted — even framed as "observation, not
+ * score," an outer shape a smaller one sits inside of reads as a target the
+ * user is falling short of, no matter the label. See training-radar.tsx for
+ * the honest alternative: a self-normalized shape with no implied ceiling.
  */
-export function RadarChart({ data, currentData, size = 220, maxValue = 100 }: RadarChartProps) {
+export function RadarChart({ data, size = 220, maxValue = 100 }: RadarChartProps) {
   const colors = useAppColors();
   const cx = size / 2;
   const cy = size / 2;
@@ -57,9 +61,6 @@ export function RadarChart({ data, currentData, size = 220, maxValue = 100 }: Ra
   const count = data.length;
 
   const dataPoints = data.map((d, i) =>
-    polarPoint(cx, cy, radius * Math.max(0, Math.min(1, d.value / maxValue)), axisAngle(i, count))
-  );
-  const currentPoints = currentData?.map((d, i) =>
     polarPoint(cx, cy, radius * Math.max(0, Math.min(1, d.value / maxValue)), axisAngle(i, count))
   );
 
@@ -102,19 +103,6 @@ export function RadarChart({ data, currentData, size = 220, maxValue = 100 }: Ra
           {dataPoints.map(([x, y], i) => (
             <Circle key={i} cx={x} cy={y} r={3.5} fill="#438C63" />
           ))}
-          {currentPoints ? (
-            <>
-              <Polygon
-                points={pointsToString(currentPoints)}
-                fill="rgba(143,209,168,0.4)"
-                stroke="#8FD1A8"
-                strokeWidth={2}
-              />
-              {currentPoints.map(([x, y], i) => (
-                <Circle key={i} cx={x} cy={y} r={3} fill="#8FD1A8" />
-              ))}
-            </>
-          ) : null}
         </Svg>
       </ReanimatedAnimated.View>
 

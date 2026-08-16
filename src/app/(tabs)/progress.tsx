@@ -114,16 +114,6 @@ export default function ProgressScreen() {
   const scheduledPast = weeks.flat().filter((d) => d.isScheduled && d.completed !== null);
   const completedPast = scheduledPast.filter((d) => d.completed);
   const completionRate = scheduledPast.length > 0 ? Math.round((completedPast.length / scheduledPast.length) * 100) : null;
-  // "Current" is potential scaled by how much of the scheduled plan actually
-  // got completed in the range above — the only thing this app's real data
-  // can honestly speak to (no weight/rep tracking to measure strength or fat
-  // loss directly). Omitted entirely (not a zeroed-out shape) until there's
-  // at least one resolved scheduled day, so a brand-new account doesn't show
-  // a collapsed pentagon that reads as broken rather than "no data yet."
-  const currentPillars =
-    completionRate !== null
-      ? potential.pillars.map((p) => ({ label: p.label, value: Math.round((p.value * completionRate) / 100) }))
-      : undefined;
 
   // Gated independently — capacityTrend reads session-history's energy log
   // (real data going back as far as that's been tracked), stimulusDebt reads
@@ -135,6 +125,26 @@ export default function ProgressScreen() {
   const showDebt = trainingState !== null && trainingState.stimulusDebt.tier !== 'insufficient';
   const bankedAreas = trainingState
     ? BODY_AREA_ORDER.filter((area) => trainingState.stimulusDebt.value[area].debtSets > 0)
+    : [];
+
+  // The shape of real training done, not a score against a target — no
+  // "total assigned" denominator anywhere in this computation. Each axis is
+  // self-normalized against the user's OWN busiest area, not an external
+  // 0–100 ideal, so whichever area they've done most of always reaches the
+  // outer ring by definition. A quiet month still produces a full-reaching
+  // shape (just possibly a lopsided one) instead of a shrunken one — the
+  // chart can never read as "you didn't do enough," only "here's the
+  // pattern." See radar-chart.tsx's own doc comment for why this replaced
+  // the earlier current-vs-potential overlay design.
+  const hasMovementData = bodyAreaBreakdown ? BODY_AREA_ORDER.some((area) => bodyAreaBreakdown[area].completed > 0) : false;
+  const maxAreaCompleted = bodyAreaBreakdown
+    ? Math.max(1, ...BODY_AREA_ORDER.map((area) => bodyAreaBreakdown[area].completed))
+    : 1;
+  const movementShapeData = bodyAreaBreakdown
+    ? BODY_AREA_ORDER.map((area) => ({
+        label: BODY_AREA_LABELS[area],
+        value: Math.round((bodyAreaBreakdown[area].completed / maxAreaCompleted) * 100),
+      }))
     : [];
 
   return (
@@ -155,15 +165,8 @@ export default function ProgressScreen() {
               <RadarChart
                 size={220}
                 data={potential.pillars.map((p) => ({ label: p.label, value: p.value }))}
-                currentData={currentPillars}
               />
             </View>
-            {currentPillars ? (
-              <View style={styles.legendRow}>
-                <LegendDot styles={styles} style={styles.legendDotPotential} label="Potential" />
-                <LegendDot styles={styles} style={styles.legendDotCurrent} label={`Current (${completionRate}%)`} />
-              </View>
-            ) : null}
             <Text style={styles.potentialValue}>{potential.overall}%</Text>
             <Text style={styles.potentialLabel}>Overall Potential</Text>
             {potential.leadPillars.length > 0 ? (
@@ -276,6 +279,14 @@ export default function ProgressScreen() {
           <Text style={styles.sectionKicker}>TRAINING BALANCE</Text>
           {bodyAreaBreakdown && BODY_AREA_ORDER.some((area) => bodyAreaBreakdown[area].total > 0) ? (
             <View style={styles.card}>
+              {hasMovementData ? (
+                <>
+                  <View style={styles.movementRadarWrap}>
+                    <RadarChart size={172} data={movementShapeData} />
+                  </View>
+                  <Text style={styles.movementShapeCaption}>Your movement this month — no target, just the pattern.</Text>
+                </>
+              ) : null}
               {BODY_AREA_ORDER.map((area, index) => {
                 const { completed, total } = bodyAreaBreakdown[area];
                 return (
@@ -474,6 +485,18 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.surfaceDivider,
     },
+    movementRadarWrap: {
+      alignItems: 'center',
+      marginTop: 4,
+    },
+    movementShapeCaption: {
+      textAlign: 'center',
+      marginTop: 4,
+      marginBottom: 12,
+      color: colors.textTertiary,
+      fontSize: 11,
+      fontFamily: 'Geist-Medium',
+    },
     // Plain numbers, no fill bar — the vault's brand system treats progress
     // bars as permanently off-limits (same reasoning as dropping streaks:
     // a bar reads as a score to chase, a number is just a fact).
@@ -651,21 +674,16 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       backgroundColor: '#438C63',
       borderColor: '#5FBE84',
     },
+    // Neutral, not alarm-red — a day that passed without a session is a
+    // fact, not a failure. Same reasoning as dropping streaks: the visual
+    // language shouldn't punish a quiet day any more than the copy does.
     gridCellMissed: {
-      backgroundColor: 'rgba(229,72,77,0.12)',
-      borderColor: 'rgba(229,72,77,0.4)',
+      backgroundColor: colors.pillBg,
+      borderColor: colors.pillBorder,
     },
     gridCellPending: {
       backgroundColor: 'transparent',
       borderColor: colors.pillBorder,
-    },
-    legendDotPotential: {
-      backgroundColor: 'rgba(67,140,99,0.28)',
-      borderColor: '#438C63',
-    },
-    legendDotCurrent: {
-      backgroundColor: 'rgba(143,209,168,0.4)',
-      borderColor: '#8FD1A8',
     },
     legendRow: {
       flexDirection: 'row',

@@ -9,18 +9,25 @@
  * what generateBaselinePlan (src/lib/engine/baseline-plan.ts) expects.
  *
  * Every mapping below is a named design decision, not a guess buried in
- * code — see the comment on each. Two are worth calling out up front:
+ * code — see the comment on each. Three are worth calling out up front:
  *
  * - focusAreas is always ['full']. Vervein's onboarding never asks which
  *   body area to prioritize (unlike the vault's own Screen 3), so the only
  *   honest choice is "train everything," not fabricating a per-goal split
  *   the user was never actually asked about.
- * - conditions / standingSymptomTags / movementRestrictions are always [].
- *   The condition-gating modules (M2, M5) haven't been ported — two Chief
+ * - conditions / standingSymptomTags are always []. The condition-gating
+ *   modules (M2, M5's symptom half) haven't been ported — two Chief
  *   Architect Audit findings (unvalidated hard-safety filters, missing
  *   consent-schema representation) are still open against that part of the
  *   vault's design, so this app doesn't collect or apply that data yet.
  *   See baseline-plan.ts's own doc comment for the same scope boundary.
+ * - movementRestrictions IS real and DOES apply — unlike conditions, this
+ *   is self-reported capability ("my body doesn't do this"), not a
+ *   diagnosis-derived exclusion, so it doesn't carry the same
+ *   unvalidated-clinical-assumption risk the audit flagged. Collected via
+ *   Settings > Movement (movement-restrictions-sheet.tsx), passed straight
+ *   through to constraint-resolution.ts, which already validates and
+ *   applies it — the wiring was always there, just unfed until now.
  */
 
 import type { ConstraintProfile, Equipment, FocusArea, Intensity, SessionDay } from '@/lib/engine/types';
@@ -116,6 +123,6 @@ export function profileToOnboardingContext(profile: UserProfile): OnboardingCont
     conditionProfile: constraintProfileFor(profile),
     conditions: [],
     standingSymptomTags: [],
-    movementRestrictions: [],
+    movementRestrictions: profile.movementRestrictions ?? [],
   };
 }

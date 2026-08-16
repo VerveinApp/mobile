@@ -33,6 +33,8 @@ export type UserProfile = {
   weightKg?: string;
   /** Self-reported, from lib/conditions.ts's fixed list — collected only, per the Chief Architect Audit's C3 finding. Nothing in plan-preview.ts or onboarding-to-engine.ts reads this field; it exists for the user's own record and for a future validation process, not to gate exercise selection today. */
   conditions?: string[];
+  /** Self-reported, from lib/movement-restrictions.ts's fixed list — unlike `conditions`, this one IS read (onboarding-to-engine.ts passes it straight through to the engine's real, already-wired movementRestrictions exclusion). `undefined` = never answered; `[]` = explicitly answered "none of these." */
+  movementRestrictions?: string[];
 };
 
 export async function saveProfile(profile: UserProfile) {

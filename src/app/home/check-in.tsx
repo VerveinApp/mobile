@@ -53,7 +53,7 @@ import {
   LogoMarkAccentGraphic,
   LogoMarkGraphic,
 } from '@/components/auth/create-account-graphics';
-import { ENERGY_LABELS, EnergyGauge, MOOD_COLORS, type EnergyScore } from '@/components/home/energy-gauge';
+import { ENERGY_LABELS, EnergyGauge, type EnergyScore } from '@/components/home/energy-gauge';
 import { SuccessCheckmark } from '@/components/onboarding/success-checkmark';
 import { useAppTheme } from '@/lib/theme-context';
 
@@ -497,7 +497,7 @@ export default function EnergyCheckInScreen() {
               {deltaText}
             </Text>
 
-            <View style={[styles.resolvedEnergyChip, { borderColor: MOOD_COLORS[energy] }]}>
+            <View style={styles.resolvedEnergyChip}>
               <Text style={styles.energyChipValue} maxFontSizeMultiplier={1.2}>
                 {energy}
               </Text>
@@ -918,6 +918,13 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       alignItems: 'center',
       paddingTop: 180,
     },
+    // Fixed border color, not mood-dependent — brand elements shouldn't
+    // change with user state, only content does (the number/label inside
+    // already say what energy was picked; the chip's own color doesn't
+    // need to repeat that). The gauge's 5-color dial is a different case
+    // (a fixed, always-present legend showing all 5 positions at once, not
+    // a single element whose own appearance shifts with state) and is
+    // unaffected by this.
     resolvedEnergyChip: {
       marginTop: 24,
       alignSelf: 'center',
@@ -928,6 +935,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       gap: 6,
       paddingVertical: 6,
       borderWidth: 2,
+      borderColor: '#438C63',
       borderRadius: 2,
       backgroundColor: colors.pillBg,
     },

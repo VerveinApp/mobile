@@ -22,6 +22,7 @@ import { clearProfile, getProfile } from '@/lib/user-profile';
 import { AdjustPlanSheet } from '@/components/settings/adjust-plan-sheet';
 import { BiometricsSheet } from '@/components/settings/biometrics-sheet';
 import { ConditionsSheet } from '@/components/settings/conditions-sheet';
+import { MovementRestrictionsSheet } from '@/components/settings/movement-restrictions-sheet';
 
 const UNIT_OPTIONS: { id: UnitSystem; label: string }[] = [
   { id: 'imperial', label: 'ft / lb' },
@@ -57,6 +58,7 @@ export default function SettingsScreen() {
   const biometricsSheetRef = useRef<BottomSheetModal>(null);
   const adjustPlanSheetRef = useRef<BottomSheetModal>(null);
   const conditionsSheetRef = useRef<BottomSheetModal>(null);
+  const movementRestrictionsSheetRef = useRef<BottomSheetModal>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -91,6 +93,7 @@ export default function SettingsScreen() {
   const biometricsHover = useHoverFade();
   const adjustPlanHover = useHoverFade();
   const conditionsHover = useHoverFade();
+  const movementRestrictionsHover = useHoverFade();
   const progressHover = useHoverFade();
   const imperialInteraction = { hover: useHoverFade(), press: useLiquidPress() };
   const metricInteraction = { hover: useHoverFade(), press: useLiquidPress() };
@@ -222,6 +225,14 @@ export default function SettingsScreen() {
               label="Health Conditions"
               onPress={() => conditionsSheetRef.current?.present()}
               hover={conditionsHover}
+            />
+            <NavRow
+              styles={styles}
+              colors={colors}
+              icon="figure.walk"
+              label="Movement"
+              onPress={() => movementRestrictionsSheetRef.current?.present()}
+              hover={movementRestrictionsHover}
               last
             />
           </View>
@@ -404,6 +415,7 @@ export default function SettingsScreen() {
       <BiometricsSheet ref={biometricsSheetRef} />
       <AdjustPlanSheet ref={adjustPlanSheetRef} />
       <ConditionsSheet ref={conditionsSheetRef} />
+      <MovementRestrictionsSheet ref={movementRestrictionsSheetRef} />
     </View>
   );
 }
