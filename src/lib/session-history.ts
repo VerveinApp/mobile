@@ -198,34 +198,10 @@ export async function getRecentWeeks(scheduledDays: string[] | null, weekCount =
   return weeks;
 }
 
-/**
- * Consecutive scheduled days completed, walking back from today. A
- * scheduled day still in progress today doesn't break the streak — only a
- * scheduled day that's already passed and wasn't completed does. Real
- * count, not a fabricated number: a brand-new account genuinely starts at 0.
- */
-export async function getCurrentStreak(scheduledDays: string[] | null): Promise<number> {
-  if (!scheduledDays || scheduledDays.length === 0) return 0;
-
-  const entries = await readAll();
-  const byDate = new Map(entries.map((e) => [e.date, e.completed]));
-  const todayStr = localDateStr();
-
-  let streak = 0;
-  const cursor = new Date();
-  for (let i = 0; i < MAX_ENTRIES; i++) {
-    const dateStr = localDateStr(cursor);
-    const weekday = WEEKDAY_NAMES[cursor.getDay()];
-    if (scheduledDays.includes(weekday)) {
-      const completed = byDate.get(dateStr);
-      if (completed === true) {
-        streak++;
-      } else if (dateStr !== todayStr) {
-        break;
-      }
-      // else: today, still in progress — doesn't count yet, doesn't break either.
-    }
-    cursor.setDate(cursor.getDate() - 1);
-  }
-  return streak;
-}
+// Deliberately no streak-counting function here. The research vault this
+// engine was ported from has an explicit Founder Decision against it
+// ("Streaks counter replaced with a weekly recap... someone who has a bad
+// week is exactly who's supposed to feel safe here, not guilty") and it's
+// on that vault's own Anti-Roadmap as a permanent never-build. If a future
+// change wants a "how am I doing" signal, use getWeekActivity/
+// getRecentWeeks' real completedCount instead of reintroducing this.

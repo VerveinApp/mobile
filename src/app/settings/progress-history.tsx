@@ -9,8 +9,8 @@ import { useHoverFade } from '@/lib/button-interactions';
 import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import {
   deleteSessionHistoryEntry,
-  getCurrentStreak,
   getSessionHistory,
+  getWeekActivity,
   type SessionHistoryEntry,
 } from '@/lib/session-history';
 import { useAppColors } from '@/lib/theme-context';
@@ -25,8 +25,8 @@ function formatEntryDate(dateStr: string): string {
 
 /**
  * The real log behind "Progress & History" — every stored session entry,
- * most recent first, plus the same streak count Profile shows. No trend
- * charts or fabricated deltas here, just the actual local record.
+ * most recent first, plus how many happened this week. No streak counter,
+ * trend charts, or fabricated deltas here, just the actual local record.
  */
 export default function ProgressHistoryScreen() {
   const insets = useSafeAreaInsets();
@@ -35,7 +35,7 @@ export default function ProgressHistoryScreen() {
   const backHover = useHoverFade();
   const [entries, setEntries] = useState<SessionHistoryEntry[]>([]);
   const [workoutLogs, setWorkoutLogs] = useState<Map<string, WorkoutLogExercise[]>>(new Map());
-  const [streak, setStreak] = useState(0);
+  const [thisWeekCount, setThisWeekCount] = useState(0);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -48,7 +48,7 @@ export default function ProgressHistoryScreen() {
       const trainingDays = profile?.days ? profile.days.split(',') : null;
       setEntries(history);
       setWorkoutLogs(new Map(logs.map((l) => [l.date, l.exercises])));
-      setStreak(await getCurrentStreak(trainingDays));
+      setThisWeekCount((await getWeekActivity(trainingDays)).completedCount);
       setLoaded(true);
     })();
   }, []);
@@ -87,8 +87,8 @@ export default function ProgressHistoryScreen() {
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.summaryRow}>
             <View style={styles.summaryCard}>
-              <Text style={styles.summaryValue}>{streak}</Text>
-              <Text style={styles.summaryLabel}>Day Streak</Text>
+              <Text style={styles.summaryValue}>{thisWeekCount}</Text>
+              <Text style={styles.summaryLabel}>This Week</Text>
             </View>
             <View style={styles.summaryCard}>
               <Text style={styles.summaryValue}>{completedCount}</Text>

@@ -37,7 +37,6 @@ import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview, type PlanExercise } from '@/lib/plan-preview';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import {
-  getCurrentStreak,
   getSessionFeedback,
   getSessionNote,
   recordSessionCompletion,
@@ -132,8 +131,8 @@ export default function EnergyCheckInScreen() {
   // input) — only editable here, in the 'checkin' branch; once "Start
   // session" is tapped it's fixed for the day, same as energy itself.
   const [symptomTags, setSymptomTags] = useState<Set<string>>(new Set());
-  // The post-session counterpart to Home's momentum note — same "only ever
-  // earned" rule, computed once the real post-session streak is known.
+  // The post-session counterpart to Home's weekly recap — same "only ever
+  // earned, never a streak" rule.
   const [postSessionNote, setPostSessionNote] = useState<string | null>(null);
   // Guided per-exercise timer — exercises are worked one at a time, in
   // order; the next one only unlocks once the current one's timer reaches
@@ -174,15 +173,13 @@ export default function EnergyCheckInScreen() {
         // computation either way, not just the done-screen display fields.
         setSymptomTags(new Set(loadedTodaySession.symptomTags));
         if (loadedTodaySession.completed) {
-          const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
-          const [existingNote, existingFeedback, streak] = await Promise.all([
+          const [existingNote, existingFeedback] = await Promise.all([
             getSessionNote(localDateStr()),
             getSessionFeedback(localDateStr()),
-            getCurrentStreak(trainingDays),
           ]);
           if (existingNote) setNoteText(existingNote);
           if (existingFeedback) setFeedbackGiven(existingFeedback);
-          setPostSessionNote(getPostSessionNote(streak, loadedTodaySession.energy));
+          setPostSessionNote(getPostSessionNote(loadedTodaySession.energy));
         }
       }
     })();
@@ -334,12 +331,8 @@ export default function EnergyCheckInScreen() {
     // Re-passes the same tags picked at Start — saveTodaySession replaces
     // the whole record each call, so omitting this would silently wipe them.
     saveTodaySession(energy, true, Array.from(symptomTags));
-    // Awaited specifically because getCurrentStreak below needs today's
-    // completion already written to read a genuinely fresh streak, not a
-    // stale one from before this session finished.
     await recordSessionCompletion(true, energy);
-    const trainingDays = profile?.days ? profile.days.split(',') : null;
-    setPostSessionNote(getPostSessionNote(await getCurrentStreak(trainingDays), energy));
+    setPostSessionNote(getPostSessionNote(energy));
     saveWorkoutLog(
       localDateStr(),
       preview.exercises.map((exercise) => ({

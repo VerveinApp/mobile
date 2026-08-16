@@ -9,7 +9,7 @@ import { RadarChart } from '@/components/onboarding/radar-chart';
 import { hapticSelect } from '@/lib/haptics';
 import type { BodyArea } from '@/lib/plan-preview';
 import { computePotential, type PotentialResult } from '@/lib/potential-score';
-import { getCurrentStreak, getRecentWeeks, type WeekDay } from '@/lib/session-history';
+import { getRecentWeeks, type WeekDay } from '@/lib/session-history';
 import { useAppColors } from '@/lib/theme-context';
 import { getTrainingState } from '@/lib/training-state';
 import type { TrainingState } from '@/lib/engine/training-state';
@@ -49,7 +49,6 @@ export default function ProgressScreen() {
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [potential, setPotential] = useState<PotentialResult | null>(null);
-  const [streak, setStreak] = useState(0);
   const [weeks, setWeeks] = useState<WeekDay[][]>([]);
   const [bodyAreaBreakdown, setBodyAreaBreakdown] = useState<BodyAreaBreakdown | null>(null);
   const [trainingState, setTrainingState] = useState<TrainingState | null>(null);
@@ -64,7 +63,6 @@ export default function ProgressScreen() {
         const profile = await getProfile();
         const trainingDays = profile?.days ? profile.days.split(',') : null;
         setPotential(computePotential(profile ?? {}));
-        setStreak(await getCurrentStreak(trainingDays));
         setWeeks(await getRecentWeeks(trainingDays, weekCount));
         setBodyAreaBreakdown(await getBodyAreaBreakdown());
         setTrainingState(await getTrainingState());
@@ -78,7 +76,6 @@ export default function ProgressScreen() {
     const profile = await getProfile();
     const trainingDays = profile?.days ? profile.days.split(',') : null;
     setPotential(computePotential(profile ?? {}));
-    setStreak(await getCurrentStreak(trainingDays));
     setWeeks(await getRecentWeeks(trainingDays, weekCount));
     setBodyAreaBreakdown(await getBodyAreaBreakdown());
     setTrainingState(await getTrainingState());
@@ -230,8 +227,8 @@ export default function ProgressScreen() {
           </View>
           <View style={styles.summaryRow}>
             <View style={styles.summaryCard}>
-              <Text style={styles.summaryValue}>{streak}</Text>
-              <Text style={styles.summaryLabel}>Day Streak</Text>
+              <Text style={styles.summaryValue}>{completedPast.length}</Text>
+              <Text style={styles.summaryLabel}>Logged Sessions</Text>
             </View>
             <View style={styles.summaryCard}>
               <Text style={styles.summaryValue}>{completionRate !== null ? `${completionRate}%` : '—'}</Text>
@@ -281,21 +278,15 @@ export default function ProgressScreen() {
             <View style={styles.card}>
               {BODY_AREA_ORDER.map((area, index) => {
                 const { completed, total } = bodyAreaBreakdown[area];
-                const ratio = total > 0 ? completed / total : 0;
                 return (
                   <View
                     key={area}
                     style={[styles.balanceRow, index < BODY_AREA_ORDER.length - 1 && styles.rowDivider]}
                   >
-                    <View style={styles.balanceRowTop}>
-                      <Text style={styles.balanceLabel}>{BODY_AREA_LABELS[area]}</Text>
-                      <Text style={styles.balanceCount}>
-                        {completed}/{total}
-                      </Text>
-                    </View>
-                    <View style={styles.balanceTrack}>
-                      <View style={[styles.balanceFill, { width: `${Math.round(ratio * 100)}%` }]} />
-                    </View>
+                    <Text style={styles.balanceLabel}>{BODY_AREA_LABELS[area]}</Text>
+                    <Text style={styles.balanceCount}>
+                      {completed}/{total}
+                    </Text>
                   </View>
                 );
               })}
@@ -483,14 +474,14 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.surfaceDivider,
     },
+    // Plain numbers, no fill bar — the vault's brand system treats progress
+    // bars as permanently off-limits (same reasoning as dropping streaks:
+    // a bar reads as a score to chase, a number is just a fact).
     balanceRow: {
-      paddingVertical: 12,
-    },
-    balanceRowTop: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      marginBottom: 8,
+      paddingVertical: 12,
     },
     balanceLabel: {
       color: colors.text,
@@ -501,17 +492,6 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       color: colors.textSecondary,
       fontSize: 12,
       fontFamily: 'Geist-SemiBold',
-    },
-    balanceTrack: {
-      height: 6,
-      borderRadius: 3,
-      backgroundColor: colors.pillBg,
-      overflow: 'hidden',
-    },
-    balanceFill: {
-      height: '100%',
-      borderRadius: 3,
-      backgroundColor: '#438C63',
     },
     trendRow: {
       flexDirection: 'row',

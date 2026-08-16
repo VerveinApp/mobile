@@ -14,7 +14,6 @@ import {
   formatDays,
   GOAL_LABELS,
 } from '@/lib/profile-labels';
-import { getCurrentStreak } from '@/lib/session-history';
 import { COMMITMENT_LEVELS } from '@/lib/commitment-levels';
 import { useAppColors } from '@/lib/theme-context';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
@@ -26,7 +25,6 @@ export default function ProfileScreen() {
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [streak, setStreak] = useState(0);
   const [loaded, setLoaded] = useState(false);
 
   // useFocusEffect (not useEffect) — this tab stays mounted while Settings'
@@ -36,10 +34,7 @@ export default function ProfileScreen() {
     useCallback(() => {
       (async () => {
         const p = await getProfile();
-        const trainingDays = p?.days ? p.days.split(',') : null;
-        const currentStreak = await getCurrentStreak(trainingDays);
         setProfile(p);
-        setStreak(currentStreak);
         setLoaded(true);
       })();
     }, [])
@@ -105,15 +100,6 @@ export default function ProfileScreen() {
           </View>
           <Text style={styles.name}>{profile?.name?.trim() || 'Your Profile'}</Text>
           {profile?.email ? <Text style={styles.email}>{profile.email}</Text> : null}
-
-          {streak > 0 ? (
-            <View style={styles.streakPill}>
-              <SymbolView name="flame.fill" size={12} tintColor="#E8823C" />
-              <Text style={styles.streakText}>
-                {streak}-day streak
-              </Text>
-            </View>
-          ) : null}
         </View>
 
         <View style={styles.section}>
@@ -243,23 +229,6 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       color: colors.textSecondary,
       fontSize: 12.5,
       fontFamily: 'Geist-Medium',
-    },
-    streakPill: {
-      marginTop: 12,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      borderRadius: 14,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: 'rgba(232,130,60,0.35)',
-      backgroundColor: 'rgba(232,130,60,0.1)',
-    },
-    streakText: {
-      color: '#E8823C',
-      fontSize: 12,
-      fontFamily: 'Geist-SemiBold',
     },
     section: {
       gap: 12,

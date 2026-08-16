@@ -8,12 +8,12 @@ import { getCalibration } from '@/lib/calibration';
 import { getDeloadNudge } from '@/lib/deload';
 import { DEFAULT_CALIBRATION } from '@/lib/engine/personal-calibration';
 import type { DeloadNudge, UserCalibration } from '@/lib/engine/types';
-import { getMomentumNote } from '@/lib/momentum';
+import { getWeeklyRecap } from '@/lib/momentum';
 import { hasCompletedOnboarding, loadOnboardingDraft, ONBOARDING_STEP_ROUTES } from '@/lib/onboarding-draft';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
 import { computePotential, type PotentialResult } from '@/lib/potential-score';
-import { getCurrentStreak, getWeekActivity, type WeekDay } from '@/lib/session-history';
+import { getWeekActivity, type WeekDay } from '@/lib/session-history';
 import { useAppColors } from '@/lib/theme-context';
 import { getTodaySession, type TodaySession } from '@/lib/today-session';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
@@ -65,7 +65,6 @@ export default function SummaryScreen() {
     completedCount: number;
     scheduledCount: number;
   } | null>(null);
-  const [streak, setStreak] = useState(0);
   const [calibration, setCalibration] = useState<UserCalibration | null>(null);
   const [deloadNudge, setDeloadNudge] = useState<DeloadNudge | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -115,13 +114,9 @@ export default function SummaryScreen() {
       setDeloadNudge(loadedDeloadNudge);
 
       const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
-      const [activity, currentStreak] = await Promise.all([
-        getWeekActivity(trainingDays),
-        getCurrentStreak(trainingDays),
-      ]);
+      const activity = await getWeekActivity(trainingDays);
       if (cancelled) return;
       setWeekActivity(activity);
-      setStreak(currentStreak);
       setStatus('ready');
     })();
     return () => {
@@ -149,12 +144,7 @@ export default function SummaryScreen() {
         setCalibration(loadedCalibration);
         setDeloadNudge(loadedDeloadNudge);
         const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
-        const [activity, currentStreak] = await Promise.all([
-          getWeekActivity(trainingDays),
-          getCurrentStreak(trainingDays),
-        ]);
-        setWeekActivity(activity);
-        setStreak(currentStreak);
+        setWeekActivity(await getWeekActivity(trainingDays));
       })();
     }, [status])
   );
@@ -172,12 +162,7 @@ export default function SummaryScreen() {
     setCalibration(loadedCalibration);
     setDeloadNudge(loadedDeloadNudge);
     const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
-    const [activity, currentStreak] = await Promise.all([
-      getWeekActivity(trainingDays),
-      getCurrentStreak(trainingDays),
-    ]);
-    setWeekActivity(activity);
-    setStreak(currentStreak);
+    setWeekActivity(await getWeekActivity(trainingDays));
     setRefreshing(false);
   }, []);
 
@@ -232,7 +217,7 @@ export default function SummaryScreen() {
   const isRestDay = trainingDays !== null && !trainingDays.includes(today);
   const firstName = profile?.name?.trim().split(' ')[0];
   const sessionLabel = SESSION_LABEL_BY_GOAL[profile?.goal ?? ''] ?? 'Training Session';
-  const momentum = getMomentumNote(streak, weekActivity);
+  const weeklyRecap = getWeeklyRecap(weekActivity);
 
   return (
     <View style={styles.root}>
@@ -243,7 +228,7 @@ export default function SummaryScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.textSecondary} />
         }
       >
-        <Header styles={styles} firstName={firstName} momentum={momentum} />
+        <Header styles={styles} firstName={firstName} weeklyRecap={weeklyRecap} />
 
         {deloadNudge?.triggered && deloadNudge.message ? (
           <View style={styles.deloadBanner}>
@@ -274,11 +259,11 @@ export default function SummaryScreen() {
 function Header({
   styles,
   firstName,
-  momentum,
+  weeklyRecap,
 }: {
   styles: ReturnType<typeof createStyles>;
   firstName?: string;
-  momentum: { text: string; hasStreak: boolean } | null;
+  weeklyRecap: string | null;
 }) {
   const hover = useHoverFade();
   const press = useLiquidPress();
@@ -292,14 +277,9 @@ function Header({
           {firstName ? `, ${firstName}` : ''}
         </Text>
         <Text style={styles.dateText}>{formatToday()}</Text>
-        {momentum ? (
+        {weeklyRecap ? (
           <View style={styles.momentumRow}>
-            {momentum.hasStreak ? (
-              <SymbolView name="flame.fill" size={11} tintColor="#E8823C" style={styles.momentumIcon} />
-            ) : null}
-            <Text style={[styles.momentumText, momentum.hasStreak && styles.momentumTextStreak]}>
-              {momentum.text}
-            </Text>
+            <Text style={styles.momentumText}>{weeklyRecap}</Text>
           </View>
         ) : null}
       </View>
@@ -383,15 +363,20 @@ function YourFitness({
           ? 'A steady session fits well today.'
           : 'Consider taking it easier today.';
 
+  // Observational, not a nudge — no "back on track" framing for a quiet
+  // week, since the exact user this app is for is someone who should feel
+  // safe having one, not guilty. The real numbers are already shown above;
+  // this is just plain context, same register regardless of how the week
+  // went.
   const ratio = weekActivity.scheduledCount > 0 ? weekActivity.completedCount / weekActivity.scheduledCount : 0;
   const consistencyNote =
     weekActivity.scheduledCount === 0
-      ? "Let's get your first session in."
+      ? 'No sessions logged yet.'
       : ratio >= 0.75
-        ? "You're building real momentum."
+        ? 'Most sessions logged this week.'
         : ratio >= 0.25
-          ? 'Stay consistent to build momentum.'
-          : "Let's get back on track this week.";
+          ? 'Some sessions logged this week.'
+          : 'A quieter week so far.';
 
   return (
     <View style={styles.section}>
@@ -513,16 +498,13 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       lineHeight: 16,
       fontFamily: 'Geist-Medium',
     },
-    momentumIcon: {
-      marginRight: 5,
-    },
+    // Neutral, not a celebratory accent — this is an observation ("3
+    // sessions this week"), never a score, so it reads the same as any
+    // other plain fact on the screen rather than drawing extra attention.
     momentumText: {
-      color: '#5FBE84',
+      color: colors.textSecondary,
       fontSize: 12,
-      fontFamily: 'Geist-SemiBold',
-    },
-    momentumTextStreak: {
-      color: '#E8823C',
+      fontFamily: 'Geist-Medium',
     },
     avatarHit: {
       width: 40,
