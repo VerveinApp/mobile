@@ -17,6 +17,8 @@ export type TodaySession = {
   date: string;
   energy: EnergyScore;
   completed: boolean;
+  /** Symptom tags picked at check-in time (see lib/symptom-tags.ts) — persisted alongside energy so reopening the app same-day re-derives the identical plan, not a symptom-blind one. */
+  symptomTags: string[];
 };
 
 function today() {
@@ -29,15 +31,17 @@ export async function getTodaySession(): Promise<TodaySession | null> {
     const raw = await AsyncStorage.getItem(KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as TodaySession;
-    return parsed.date === today() ? parsed : null;
+    if (parsed.date !== today()) return null;
+    // Entries saved before symptomTags existed won't have the field.
+    return { ...parsed, symptomTags: parsed.symptomTags ?? [] };
   } catch {
     return null;
   }
 }
 
-export async function saveTodaySession(energy: EnergyScore, completed: boolean) {
+export async function saveTodaySession(energy: EnergyScore, completed: boolean, symptomTags: string[] = []) {
   try {
-    const session: TodaySession = { date: today(), energy, completed };
+    const session: TodaySession = { date: today(), energy, completed, symptomTags };
     await AsyncStorage.setItem(KEY, JSON.stringify(session));
   } catch {
     // Worst case the app re-asks for a check-in it already had — same as a first check-in.

@@ -8,23 +8,25 @@
  *      (onboarding-to-engine.ts) and generate the standing baseline plan
  *      (baseline-plan.ts).
  *   2. Re-derive TODAY's EffectiveConstraintSet from the check-in's energy
- *      score (constraint-resolution.ts, M5) and re-run M6 filtering against
- *      it (exercise-filtering.ts). This is what lets a low-energy day
- *      actually exclude too-intense exercises from the pool, not just do
- *      less of the same ones — the baseline-time filter alone can't do this,
- *      since it has no energy score yet.
+ *      score and any symptom tags picked at check-in (constraint-
+ *      resolution.ts, M5) and re-run M6 filtering against it (exercise-
+ *      filtering.ts). This is what lets a low-energy or symptomatic day
+ *      actually exclude unsuitable exercises from the pool, not just do
+ *      less of the same ones — the baseline-time filter alone can't do
+ *      this, since it has no energy score or acute tags yet.
  *   3. Check the Fallback trigger (fallback-logic.ts, M7): an empty pool or
  *      Energy Score 1 always resolves to the same two always-available
  *      recovery exercises, never an invented minimum session.
  *   4. Otherwise, scale sets/duration per exercise by the real multiplier
- *      chain — energy × calibration, no symptom/condition multipliers since
- *      this app doesn't collect those yet (volume-scaling.ts, M8).
+ *      chain — energy × symptom-tag overrides × calibration, no condition
+ *      multiplier since this app doesn't collect that yet (volume-
+ *      scaling.ts, M8).
  *   5. Assemble the session and compute total duration honestly — only
  *      summing exercises that actually carry a duration figure, never
  *      inventing one for the rest (workout-assembly.ts, M10).
- *   6. Build the explanation from the real per-energy templates plus a
- *      calibration-aware line, replacing the old hand-written 5-line table
- *      (explanation-string.ts, M11).
+ *   6. Build the explanation from the real per-energy templates plus any
+ *      firing symptom-tag lines and a calibration-aware line, replacing the
+ *      old hand-written 5-line table (explanation-string.ts, M11).
  *
  * SCOPE NOTE — `goal` isn't read here, on purpose, not as an oversight. The
  * vault's own engine treats `primaryGoal` as "cosmetic only — never read by
@@ -32,11 +34,16 @@
  * driven by equipment ceiling, intensity ceiling, focus areas, and today's
  * energy, not by which of the four marketing-facing goals the user picked.
  *
- * SCOPE NOTE — symptom-tag and condition-profile gating (M2, the TAG_LINES
- * half of M11, and the symptom/condition terms in M5/M8's multiplier chains)
- * stay unported: this app collects no symptom or condition data yet, so
- * those parameters are always passed as empty arrays / neutral defaults.
- * See onboarding-to-engine.ts and baseline-plan.ts for the same boundary.
+ * SCOPE NOTE — acute symptom tags (picked fresh at each check-in, see
+ * home/check-in.tsx and lib/symptom-tags.ts) ARE collected and DO flow
+ * through here now — into the daily constraint re-filter (M5), the volume
+ * multiplier chain (M8), and the explanation's TAG_LINES (M11). What's
+ * still unported: STANDING symptom tags (asked once, persisting daily —
+ * deliberately not built, see symptom-tags.ts's own scope note) and the
+ * full condition-profile / contraindication system (M2's medical-condition
+ * half), which stays collect-only-never-gating per the Chief Architect
+ * Audit's own C3 finding until a real validation process exists. Those two
+ * remain empty arrays / neutral defaults below.
  */
 
 import { generateBaselinePlan } from '@/lib/engine/baseline-plan';
@@ -45,6 +52,7 @@ import { buildExplanation } from '@/lib/engine/explanation-string';
 import { filterAndSubstitute } from '@/lib/engine/exercise-filtering';
 import { checkFallbackTrigger } from '@/lib/engine/fallback-logic';
 import { ENERGY_MODIFIER_TABLE } from '@/lib/engine/reference/energy-modifier-table';
+import { SYMPTOM_OVERRIDE_TABLE } from '@/lib/engine/reference/symptom-override-table';
 import type { DailyCheckIn, Exercise, ScaledExerciseList, UserCalibration } from '@/lib/engine/types';
 import { scaleVolume } from '@/lib/engine/volume-scaling';
 import { assembleWorkout } from '@/lib/engine/workout-assembly';
@@ -79,12 +87,26 @@ export type PlanPreviewResult = {
   /** Real, from the user's actual equipment answer. */
   equipmentNote: string;
   exercises: PlanExercise[];
+  /**
+   * Minimal decision-trace data — not shown in the UI directly. Feeds
+   * engine/training-state.ts's (M20) Stimulus Ledger/Debt fold once a
+   * session is actually finished (see lib/decision-trace-log.ts and
+   * check-in.tsx's handleFinishSession). Recomputed on every call along
+   * with everything else above; only persisted at the one real moment a
+   * session completes, not on every gauge-drag re-render.
+   */
+  trace: {
+    fallbackFired: boolean;
+    gate1Exclusions: { exerciseId: string; excludedBy: string }[];
+    deliveredExercises: { exerciseId: string; adapted_sets: number | null }[];
+  };
 };
 
 export function computePlanPreview(
   input: PlanPreviewInput,
   energy: EnergyLevel,
-  calibration: UserCalibration
+  calibration: UserCalibration,
+  acuteSymptomTags: string[] = []
 ): PlanPreviewResult {
   const ctx = profileToOnboardingContext(input);
   const baselinePlan = generateBaselinePlan(ctx, LOCAL_USER_ID);
@@ -94,7 +116,7 @@ export function computePlanPreview(
     userId: LOCAL_USER_ID,
     date: localDateStr(),
     energyScore: energy,
-    acuteSymptomTags: [],
+    acuteSymptomTags,
     skipped: false,
   };
   const dailyConstraints = computeEffectiveConstraints(
@@ -106,6 +128,11 @@ export function computePlanPreview(
     ctx.conditions
   );
   const filterResult = filterAndSubstitute(baselinePlan, dailyConstraints);
+
+  // Standing ∪ acute, deduplicated — the same merge M13 does before both
+  // the volume-scaling multiplier lookup and the explanation's tag lines.
+  const activeTags = [...new Set([...ctx.standingSymptomTags, ...acuteSymptomTags])];
+  const activeSymptomOverrides = activeTags.map((t) => SYMPTOM_OVERRIDE_TABLE[t]).filter(Boolean);
 
   // Step 3 — Fallback check.
   const fallback = checkFallbackTrigger(filterResult.filtered.length, energy, false);
@@ -122,7 +149,13 @@ export function computePlanPreview(
     // Energy Score 1, but that path is already fully claimed by Fallback
     // above, so this only ever runs for 2–5.
     const energyModifier = ENERGY_MODIFIER_TABLE[energy];
-    const volumeResult = scaleVolume(filterResult.filtered, energyModifier, [], ctx.conditionProfile.volumeStance, calibration.multiplier);
+    const volumeResult = scaleVolume(
+      filterResult.filtered,
+      energyModifier,
+      activeSymptomOverrides,
+      ctx.conditionProfile.volumeStance,
+      calibration.multiplier
+    );
 
     if (volumeResult.kind === 'stacking-transition-signal') {
       // Unreachable today — volume-scaling.ts's own FD-3 gap always evaluates
@@ -140,8 +173,15 @@ export function computePlanPreview(
   // Step 5 — assembly (honest totalDuration).
   const { workout } = assembleWorkout(assembledExercises, isRestDay);
 
-  // Step 6 — explanation. activeTags is always [] (see this file's scope note).
-  const { explanation } = buildExplanation(energy, [], calibration, assembledExercises, workout.totalDuration, overallSetsPct);
+  // Step 6 — explanation.
+  const { explanation } = buildExplanation(
+    energy,
+    activeTags,
+    calibration,
+    assembledExercises,
+    workout.totalDuration,
+    overallSetsPct
+  );
 
   // ScaledExercise doesn't carry body_area — zip against filterResult.filtered
   // by index rather than a second by-id lookup, since scaleVolume's map()
@@ -168,11 +208,27 @@ export function computePlanPreview(
 
   const equipmentNote = `Selected from your ${ENVIRONMENT_LABELS[input.environment ?? ''] ?? 'equipment'} setup.`;
 
+  // Fallback-branch exercises are full Exercise objects with an `id`, not a
+  // ScaledExercise's `exerciseId`/`adapted_sets` — but ledger/debt folds
+  // over these exclude every fallback-fired run anyway (the real engine's
+  // own design: M8 never ran, so no planned dose exists to record), so
+  // `adapted_sets: null` here is correct, not a gap.
+  const deliveredExercises = assembledExercises.map((ex) =>
+    'exerciseId' in ex
+      ? { exerciseId: ex.exerciseId, adapted_sets: ex.adapted_sets }
+      : { exerciseId: ex.id, adapted_sets: null }
+  );
+
   return {
     exerciseCount: exercises.length,
     durationMin: workout.totalDuration,
     explanation,
     equipmentNote,
     exercises,
+    trace: {
+      fallbackFired: isRestDay,
+      gate1Exclusions: filterResult.gate1Exclusions,
+      deliveredExercises,
+    },
   };
 }

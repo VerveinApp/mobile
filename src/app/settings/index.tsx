@@ -21,6 +21,7 @@ import { getUnitSystem, setUnitSystem, type UnitSystem } from '@/lib/unit-prefer
 import { clearProfile, getProfile } from '@/lib/user-profile';
 import { AdjustPlanSheet } from '@/components/settings/adjust-plan-sheet';
 import { BiometricsSheet } from '@/components/settings/biometrics-sheet';
+import { ConditionsSheet } from '@/components/settings/conditions-sheet';
 
 const UNIT_OPTIONS: { id: UnitSystem; label: string }[] = [
   { id: 'imperial', label: 'ft / lb' },
@@ -55,6 +56,7 @@ export default function SettingsScreen() {
   const [appLockLabel, setAppLockLabel] = useState('App Lock');
   const biometricsSheetRef = useRef<BottomSheetModal>(null);
   const adjustPlanSheetRef = useRef<BottomSheetModal>(null);
+  const conditionsSheetRef = useRef<BottomSheetModal>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -88,6 +90,7 @@ export default function SettingsScreen() {
   const privacyHover = useHoverFade();
   const biometricsHover = useHoverFade();
   const adjustPlanHover = useHoverFade();
+  const conditionsHover = useHoverFade();
   const progressHover = useHoverFade();
   const imperialInteraction = { hover: useHoverFade(), press: useLiquidPress() };
   const metricInteraction = { hover: useHoverFade(), press: useLiquidPress() };
@@ -211,6 +214,14 @@ export default function SettingsScreen() {
               label="Body & Biometrics"
               onPress={() => biometricsSheetRef.current?.present()}
               hover={biometricsHover}
+            />
+            <NavRow
+              styles={styles}
+              colors={colors}
+              icon="heart.text.square"
+              label="Health Conditions"
+              onPress={() => conditionsSheetRef.current?.present()}
+              hover={conditionsHover}
               last
             />
           </View>
@@ -392,6 +403,7 @@ export default function SettingsScreen() {
 
       <BiometricsSheet ref={biometricsSheetRef} />
       <AdjustPlanSheet ref={adjustPlanSheetRef} />
+      <ConditionsSheet ref={conditionsSheetRef} />
     </View>
   );
 }

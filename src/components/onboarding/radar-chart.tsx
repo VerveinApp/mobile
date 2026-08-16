@@ -19,6 +19,8 @@ export type RadarDatum = {
 
 type RadarChartProps = {
   data: RadarDatum[];
+  /** Optional second layer, same axes/order as `data` — real current progress overlaid on the potential shape, rendered in a lighter tint so both are readable at once. Omit entirely for the single-layer onboarding usage. */
+  currentData?: RadarDatum[];
   size?: number;
   maxValue?: number;
 };
@@ -47,7 +49,7 @@ function pointsToString(points: [number, number][]): string {
  * point grows outward along its real radial line, not just a generic pop.
  * The grid (rings/spokes/labels) stays static — only the data reads as "new".
  */
-export function RadarChart({ data, size = 220, maxValue = 100 }: RadarChartProps) {
+export function RadarChart({ data, currentData, size = 220, maxValue = 100 }: RadarChartProps) {
   const colors = useAppColors();
   const cx = size / 2;
   const cy = size / 2;
@@ -55,6 +57,9 @@ export function RadarChart({ data, size = 220, maxValue = 100 }: RadarChartProps
   const count = data.length;
 
   const dataPoints = data.map((d, i) =>
+    polarPoint(cx, cy, radius * Math.max(0, Math.min(1, d.value / maxValue)), axisAngle(i, count))
+  );
+  const currentPoints = currentData?.map((d, i) =>
     polarPoint(cx, cy, radius * Math.max(0, Math.min(1, d.value / maxValue)), axisAngle(i, count))
   );
 
@@ -97,6 +102,19 @@ export function RadarChart({ data, size = 220, maxValue = 100 }: RadarChartProps
           {dataPoints.map(([x, y], i) => (
             <Circle key={i} cx={x} cy={y} r={3.5} fill="#438C63" />
           ))}
+          {currentPoints ? (
+            <>
+              <Polygon
+                points={pointsToString(currentPoints)}
+                fill="rgba(143,209,168,0.4)"
+                stroke="#8FD1A8"
+                strokeWidth={2}
+              />
+              {currentPoints.map(([x, y], i) => (
+                <Circle key={i} cx={x} cy={y} r={3} fill="#8FD1A8" />
+              ))}
+            </>
+          ) : null}
         </Svg>
       </ReanimatedAnimated.View>
 

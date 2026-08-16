@@ -1,7 +1,7 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TrajectoryBars } from '@/components/onboarding/trajectory-bars';
@@ -11,6 +11,8 @@ import type { BodyArea } from '@/lib/plan-preview';
 import { computePotential, type PotentialResult } from '@/lib/potential-score';
 import { getCurrentStreak, getRecentWeeks, type WeekDay } from '@/lib/session-history';
 import { useAppColors } from '@/lib/theme-context';
+import { getTrainingState } from '@/lib/training-state';
+import type { TrainingState } from '@/lib/engine/training-state';
 import { getProfile } from '@/lib/user-profile';
 import { getBodyAreaBreakdown, type BodyAreaBreakdown } from '@/lib/workout-log';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
@@ -24,6 +26,16 @@ const BODY_AREA_LABELS: Record<BodyArea, string> = {
   full: 'Full Body',
 };
 const BODY_AREA_ORDER: BodyArea[] = ['upper', 'lower', 'core', 'full'];
+const TREND_LABEL: Record<'improving' | 'stable' | 'declining', string> = {
+  improving: 'Improving',
+  stable: 'Steady',
+  declining: 'Trending down',
+};
+const TREND_ICON: Record<'improving' | 'stable' | 'declining', SFSymbol> = {
+  improving: 'arrow.up.right',
+  stable: 'arrow.right',
+  declining: 'arrow.down.right',
+};
 
 /**
  * The real "trend detail" destination Profile's potential card links to.
@@ -40,6 +52,7 @@ export default function ProgressScreen() {
   const [streak, setStreak] = useState(0);
   const [weeks, setWeeks] = useState<WeekDay[][]>([]);
   const [bodyAreaBreakdown, setBodyAreaBreakdown] = useState<BodyAreaBreakdown | null>(null);
+  const [trainingState, setTrainingState] = useState<TrainingState | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [gridRange, setGridRange] = useState<'week' | 'month'>('month');
@@ -54,6 +67,7 @@ export default function ProgressScreen() {
         setStreak(await getCurrentStreak(trainingDays));
         setWeeks(await getRecentWeeks(trainingDays, weekCount));
         setBodyAreaBreakdown(await getBodyAreaBreakdown());
+        setTrainingState(await getTrainingState());
         setLoaded(true);
       })();
     }, [weekCount])
@@ -67,6 +81,7 @@ export default function ProgressScreen() {
     setStreak(await getCurrentStreak(trainingDays));
     setWeeks(await getRecentWeeks(trainingDays, weekCount));
     setBodyAreaBreakdown(await getBodyAreaBreakdown());
+    setTrainingState(await getTrainingState());
     setRefreshing(false);
   }, [weekCount]);
 
@@ -102,6 +117,28 @@ export default function ProgressScreen() {
   const scheduledPast = weeks.flat().filter((d) => d.isScheduled && d.completed !== null);
   const completedPast = scheduledPast.filter((d) => d.completed);
   const completionRate = scheduledPast.length > 0 ? Math.round((completedPast.length / scheduledPast.length) * 100) : null;
+  // "Current" is potential scaled by how much of the scheduled plan actually
+  // got completed in the range above — the only thing this app's real data
+  // can honestly speak to (no weight/rep tracking to measure strength or fat
+  // loss directly). Omitted entirely (not a zeroed-out shape) until there's
+  // at least one resolved scheduled day, so a brand-new account doesn't show
+  // a collapsed pentagon that reads as broken rather than "no data yet."
+  const currentPillars =
+    completionRate !== null
+      ? potential.pillars.map((p) => ({ label: p.label, value: Math.round((p.value * completionRate) / 100) }))
+      : undefined;
+
+  // Gated independently — capacityTrend reads session-history's energy log
+  // (real data going back as far as that's been tracked), stimulusDebt reads
+  // decision-trace-log (only started recording with this feature), so an
+  // existing account can have one without the other for a while. Each
+  // "insufficient" tier means exactly what it says: not enough real
+  // observations yet, not zero — never shown as a confident claim either way.
+  const showTrend = trainingState !== null && trainingState.capacityTrend.tier !== 'insufficient';
+  const showDebt = trainingState !== null && trainingState.stimulusDebt.tier !== 'insufficient';
+  const bankedAreas = trainingState
+    ? BODY_AREA_ORDER.filter((area) => trainingState.stimulusDebt.value[area].debtSets > 0)
+    : [];
 
   return (
     <View style={styles.root}>
@@ -118,8 +155,18 @@ export default function ProgressScreen() {
           <Text style={styles.sectionKicker}>YOUR POTENTIAL</Text>
           <View style={styles.card}>
             <View style={styles.radarWrap}>
-              <RadarChart size={220} data={potential.pillars.map((p) => ({ label: p.label, value: p.value }))} />
+              <RadarChart
+                size={220}
+                data={potential.pillars.map((p) => ({ label: p.label, value: p.value }))}
+                currentData={currentPillars}
+              />
             </View>
+            {currentPillars ? (
+              <View style={styles.legendRow}>
+                <LegendDot styles={styles} style={styles.legendDotPotential} label="Potential" />
+                <LegendDot styles={styles} style={styles.legendDotCurrent} label={`Current (${completionRate}%)`} />
+              </View>
+            ) : null}
             <Text style={styles.potentialValue}>{potential.overall}%</Text>
             <Text style={styles.potentialLabel}>Overall Potential</Text>
             {potential.leadPillars.length > 0 ? (
@@ -258,6 +305,56 @@ export default function ProgressScreen() {
               <SymbolView name="figure.strengthtraining.traditional" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />
               <Text style={styles.emptyText}>
                 Finish a session and check off exercises to see your training balance here.
+              </Text>
+            </View>
+          )}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionKicker}>TRAINING LOAD</Text>
+          {showTrend || showDebt ? (
+            <View style={styles.card}>
+              {showTrend && trainingState ? (
+                <View style={[styles.trendRow, showDebt && styles.rowDivider]}>
+                  <SymbolView
+                    name={TREND_ICON[trainingState.capacityTrend.value]}
+                    size={15}
+                    tintColor={trainingState.capacityTrend.value === 'improving' ? '#5FBE84' : colors.textSecondary}
+                  />
+                  <Text style={styles.trendText}>
+                    Energy trend: <Text style={styles.trendValue}>{TREND_LABEL[trainingState.capacityTrend.value]}</Text>
+                  </Text>
+                </View>
+              ) : null}
+              {showDebt ? (
+                bankedAreas.length > 0 ? (
+                  <>
+                    <Text style={styles.debtHint}>
+                      Banked volume — sets your plan called for that a lower-energy day trimmed, ready to make up on a
+                      stronger one.
+                    </Text>
+                    {bankedAreas.map((area, index) => (
+                      <View
+                        key={area}
+                        style={[styles.debtRow, index < bankedAreas.length - 1 && styles.rowDivider]}
+                      >
+                        <Text style={styles.balanceLabel}>{BODY_AREA_LABELS[area]}</Text>
+                        <Text style={styles.debtValue}>
+                          {trainingState?.stimulusDebt.value[area].debtSets} sets banked
+                        </Text>
+                      </View>
+                    ))}
+                  </>
+                ) : (
+                  <Text style={styles.debtHint}>No banked volume right now — recent sessions delivered what your plan called for.</Text>
+                )
+              ) : null}
+            </View>
+          ) : (
+            <View style={styles.emptyCard}>
+              <SymbolView name="chart.line.uptrend.xyaxis" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />
+              <Text style={styles.emptyText}>
+                Finish a few more sessions to see your energy trend and banked volume here.
               </Text>
             </View>
           )}
@@ -416,6 +513,39 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       borderRadius: 3,
       backgroundColor: '#438C63',
     },
+    trendRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingVertical: 12,
+    },
+    trendText: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      fontFamily: 'Geist-Medium',
+    },
+    trendValue: {
+      color: colors.text,
+      fontFamily: 'Geist-SemiBold',
+    },
+    debtHint: {
+      paddingVertical: 12,
+      color: colors.textTertiary,
+      fontSize: 11.5,
+      lineHeight: 16,
+      fontFamily: 'Geist-Medium',
+    },
+    debtRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 12,
+    },
+    debtValue: {
+      color: '#5FBE84',
+      fontSize: 12.5,
+      fontFamily: 'Geist-SemiBold',
+    },
     emptyCard: {
       borderRadius: 16,
       borderWidth: StyleSheet.hairlineWidth,
@@ -548,6 +678,14 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     gridCellPending: {
       backgroundColor: 'transparent',
       borderColor: colors.pillBorder,
+    },
+    legendDotPotential: {
+      backgroundColor: 'rgba(67,140,99,0.28)',
+      borderColor: '#438C63',
+    },
+    legendDotCurrent: {
+      backgroundColor: 'rgba(143,209,168,0.4)',
+      borderColor: '#8FD1A8',
     },
     legendRow: {
       flexDirection: 'row',

@@ -8,6 +8,7 @@ import { getCalibration } from '@/lib/calibration';
 import { getDeloadNudge } from '@/lib/deload';
 import { DEFAULT_CALIBRATION } from '@/lib/engine/personal-calibration';
 import type { DeloadNudge, UserCalibration } from '@/lib/engine/types';
+import { getMomentumNote } from '@/lib/momentum';
 import { hasCompletedOnboarding, loadOnboardingDraft, ONBOARDING_STEP_ROUTES } from '@/lib/onboarding-draft';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
@@ -39,22 +40,6 @@ function getGreeting(): string {
 
 function formatToday(): string {
   return new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-}
-
-/**
- * Only ever says something earned — a real streak or a genuinely strong
- * completion ratio. No fallback filler for a quiet week, since fabricated
- * encouragement is exactly what this app's mockup data has to avoid.
- */
-function getMomentumNote(
-  streak: number,
-  weekActivity: { completedCount: number; scheduledCount: number }
-): { text: string; hasStreak: boolean } | null {
-  if (streak >= 2) return { text: `${streak}-day streak — keep it going`, hasStreak: true };
-  if (weekActivity.scheduledCount > 0 && weekActivity.completedCount / weekActivity.scheduledCount >= 0.75) {
-    return { text: 'Building solid momentum', hasStreak: false };
-  }
-  return null;
 }
 
 /**

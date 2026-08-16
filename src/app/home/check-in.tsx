@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Animated,
@@ -26,19 +27,24 @@ import { SymbolView } from 'expo-symbols';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { getCalibration, submitSessionFeedback } from '@/lib/calibration';
 import { getLastCheckIn, recordCheckIn, type CheckInRecord } from '@/lib/check-in-history';
+import { recordDecisionTrace } from '@/lib/decision-trace-log';
 import { DEFAULT_CALIBRATION } from '@/lib/engine/personal-calibration';
 import type { FeedbackResponse, UserCalibration } from '@/lib/engine/types';
+import { formatTimerClock, getExerciseTimerSeconds } from '@/lib/exercise-timer';
 import { hapticImpactLight, hapticSelect, hapticSuccess, hapticWarning } from '@/lib/haptics';
+import { getPostSessionNote } from '@/lib/momentum';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
-import { computePlanPreview } from '@/lib/plan-preview';
+import { computePlanPreview, type PlanExercise } from '@/lib/plan-preview';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import {
+  getCurrentStreak,
   getSessionFeedback,
   getSessionNote,
   recordSessionCompletion,
   saveSessionFeedback,
   saveSessionNote,
 } from '@/lib/session-history';
+import { SYMPTOM_TAG_LABELS, SYMPTOM_TAGS } from '@/lib/symptom-tags';
 import { getTodaySession, saveTodaySession } from '@/lib/today-session';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
 import { saveWorkoutLog } from '@/lib/workout-log';
@@ -122,13 +128,30 @@ export default function EnergyCheckInScreen() {
   // of the three buttons, then locked to whatever they picked (real feedback
   // isn't editable after the fact any more than the session itself is).
   const [feedbackGiven, setFeedbackGiven] = useState<FeedbackResponse | null>(null);
+  // Symptom tags picked on the check-in screen (M2/M5's real acute-tag
+  // input) — only editable here, in the 'checkin' branch; once "Start
+  // session" is tapped it's fixed for the day, same as energy itself.
+  const [symptomTags, setSymptomTags] = useState<Set<string>>(new Set());
+  // The post-session counterpart to Home's momentum note — same "only ever
+  // earned" rule, computed once the real post-session streak is known.
+  const [postSessionNote, setPostSessionNote] = useState<string | null>(null);
+  // Guided per-exercise timer — exercises are worked one at a time, in
+  // order; the next one only unlocks once the current one's timer reaches
+  // 0 (the countdown itself lives in the ExerciseTimer subcomponent below,
+  // keyed by this index so switching exercises remounts it with a fresh
+  // timer rather than needing an effect to reset one). Doesn't persist
+  // across an app kill mid-session (today-session.ts only remembers energy/
+  // symptoms/completion, not workout progress) — reopening mid-'resolved'
+  // restarts at exercise 0. A real, deliberate simplification, not an
+  // oversight.
+  const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
 
-  const toggleExerciseDone = (name: string) => {
+  const toggleSymptomTag = (tag: string) => {
     hapticSelect();
-    setCompletedExercises((prev) => {
+    setSymptomTags((prev) => {
       const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
       return next;
     });
   };
@@ -147,13 +170,19 @@ export default function EnergyCheckInScreen() {
       if (loadedTodaySession) {
         setEnergy(loadedTodaySession.energy);
         setSessionState(loadedTodaySession.completed ? 'done' : 'resolved');
+        // Restored regardless of completed/resolved — this feeds preview's
+        // computation either way, not just the done-screen display fields.
+        setSymptomTags(new Set(loadedTodaySession.symptomTags));
         if (loadedTodaySession.completed) {
-          const [existingNote, existingFeedback] = await Promise.all([
+          const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
+          const [existingNote, existingFeedback, streak] = await Promise.all([
             getSessionNote(localDateStr()),
             getSessionFeedback(localDateStr()),
+            getCurrentStreak(trainingDays),
           ]);
           if (existingNote) setNoteText(existingNote);
           if (existingFeedback) setFeedbackGiven(existingFeedback);
+          setPostSessionNote(getPostSessionNote(streak, loadedTodaySession.energy));
         }
       }
     })();
@@ -170,6 +199,21 @@ export default function EnergyCheckInScreen() {
     saveSessionFeedback(localDateStr(), response);
     const updated = await submitSessionFeedback(response);
     setCalibration(updated);
+  };
+
+  // The only way off the "done" screen besides an edge-swipe gesture, which
+  // has no visible affordance and is easy to miss right after a session
+  // just ended — a real user got stuck here with no visible way out.
+  // canGoBack() covers the rare case this screen was reached with nothing
+  // pushed before it (e.g. a cold deep link), same guard as onboarding-nav's
+  // goBack().
+  const handleBackToHome = () => {
+    hapticImpactLight();
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)' as never);
+    }
   };
 
   const today = WEEKDAY_NAMES[new Date().getDay()];
@@ -209,15 +253,28 @@ export default function EnergyCheckInScreen() {
   const preview = useMemo(
     () =>
       energy !== null
-        ? computePlanPreview(profile ?? {}, energy, calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION })
+        ? computePlanPreview(
+            profile ?? {},
+            energy,
+            calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
+            Array.from(symptomTags)
+          )
         : null,
-    [profile, energy, calibration]
+    [profile, energy, calibration, symptomTags]
   );
   // The baseline ("Good") session — comparing against it is what makes the
   // adaptation legible on the resolved view, not just implied by a sentence.
+  // Symptom tags are held constant against `preview` (only energy differs)
+  // so the delta below isolates the energy effect, not a symptom effect too.
   const baseline = useMemo(
-    () => computePlanPreview(profile ?? {}, 4, calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION }),
-    [profile, calibration]
+    () =>
+      computePlanPreview(
+        profile ?? {},
+        4,
+        calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
+        Array.from(symptomTags)
+      ),
+    [profile, calibration, symptomTags]
   );
   const exerciseDelta = preview ? baseline.exerciseCount - preview.exerciseCount : 0;
   const deltaText =
@@ -237,21 +294,52 @@ export default function EnergyCheckInScreen() {
           : 'Lower than last time.'
       : null;
 
+  const currentExercise = preview?.exercises[currentExerciseIndex] ?? null;
+  const isLastExercise = preview ? currentExerciseIndex >= preview.exercises.length - 1 : false;
+  // Derived, not separately tracked — completedExercises is already the
+  // real source of truth for "is this one done," so there's no second copy
+  // of that fact to keep in sync (and no reset-on-exercise-change effect
+  // needed for it either).
+  const currentExerciseTimerDone = currentExercise ? completedExercises.has(currentExercise.name) : false;
+
+  // Called by ExerciseTimer's own effect when its countdown reaches 0 — a
+  // plain callback, not itself inside an effect here, so setState here is
+  // exactly the ordinary "handle a child's event" case, not the "derive
+  // state from a dependency" one the set-state-in-effect rule is about.
+  const handleExerciseTimerComplete = (exerciseName: string) => {
+    hapticSuccess();
+    setCompletedExercises((prev) => new Set(prev).add(exerciseName));
+  };
+
+  const handleNextExercise = () => {
+    if (!currentExerciseTimerDone) return; // still gated — button should already be disabled, this is the safety check
+    hapticImpactLight();
+    setCurrentExerciseIndex((i) => i + 1);
+  };
+
   const handleStartSession = () => {
     if (energy === null) return;
+    setCurrentExerciseIndex(0);
     if (energy === 1) hapticWarning();
     else if (energy === 5) hapticSuccess();
     else hapticImpactLight();
     recordCheckIn(energy);
-    saveTodaySession(energy, false);
+    saveTodaySession(energy, false, Array.from(symptomTags));
     setSessionState('resolved');
   };
 
-  const handleFinishSession = () => {
-    if (energy === null || !preview) return;
+  const handleFinishSession = async () => {
+    if (energy === null || !preview || !currentExerciseTimerDone) return;
     hapticSuccess();
-    saveTodaySession(energy, true);
-    recordSessionCompletion(true, energy);
+    // Re-passes the same tags picked at Start — saveTodaySession replaces
+    // the whole record each call, so omitting this would silently wipe them.
+    saveTodaySession(energy, true, Array.from(symptomTags));
+    // Awaited specifically because getCurrentStreak below needs today's
+    // completion already written to read a genuinely fresh streak, not a
+    // stale one from before this session finished.
+    await recordSessionCompletion(true, energy);
+    const trainingDays = profile?.days ? profile.days.split(',') : null;
+    setPostSessionNote(getPostSessionNote(await getCurrentStreak(trainingDays), energy));
     saveWorkoutLog(
       localDateStr(),
       preview.exercises.map((exercise) => ({
@@ -260,6 +348,7 @@ export default function EnergyCheckInScreen() {
         completed: completedExercises.has(exercise.name),
       }))
     );
+    recordDecisionTrace(localDateStr(), preview.trace);
     setSessionState('done');
   };
 
@@ -304,15 +393,16 @@ export default function EnergyCheckInScreen() {
             key="check-in"
             entering={FadeIn.duration(CROSS_FADE_MS)}
             exiting={FadeOut.duration(CROSS_FADE_MS)}
+            style={styles.checkinFlow}
           >
-            <Text style={styles.title} maxFontSizeMultiplier={1.3}>
+            <Text style={styles.checkinTitle} maxFontSizeMultiplier={1.3}>
               {"How's your "}
               <Text style={styles.titleAccent}>energy</Text>
               {' today?'}
             </Text>
-            <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>Your plan adapts to what you tell it.</Text>
+            <Text style={styles.checkinSubtitle} maxFontSizeMultiplier={1.4}>Your plan adapts to what you tell it.</Text>
 
-            <View style={styles.gaugeWrap}>
+            <View style={styles.checkinGaugeWrap}>
               <EnergyGauge
                 size={260}
                 canvasScale={scale}
@@ -323,7 +413,7 @@ export default function EnergyCheckInScreen() {
             </View>
 
             {preview ? (
-              <ReanimatedAnimated.View key={energy} entering={FadeIn.duration(220)} style={styles.explanationBlock}>
+              <ReanimatedAnimated.View key={energy} entering={FadeIn.duration(220)} style={styles.checkinExplanationBlock}>
                 <Text style={styles.explanationText} maxFontSizeMultiplier={1.4}>
                   {preview.explanation}
                 </Text>
@@ -335,8 +425,36 @@ export default function EnergyCheckInScreen() {
               </ReanimatedAnimated.View>
             ) : null}
 
+            {energy !== null ? (
+              <View style={styles.symptomSection}>
+                <Text style={styles.noteLabel} maxFontSizeMultiplier={1.3}>
+                  ANYTHING GOING ON TODAY? (OPTIONAL)
+                </Text>
+                <View style={styles.symptomChipRow}>
+                  {SYMPTOM_TAGS.map((tag) => {
+                    const active = symptomTags.has(tag);
+                    return (
+                      <Pressable
+                        key={tag}
+                        style={[styles.symptomChip, active && styles.symptomChipActive]}
+                        onPress={() => toggleSymptomTag(tag)}
+                        hitSlop={2}
+                      >
+                        <Text
+                          style={[styles.symptomChipText, active && styles.symptomChipTextActive]}
+                          maxFontSizeMultiplier={1.2}
+                        >
+                          {SYMPTOM_TAG_LABELS[tag]}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : null}
+
             <Pressable
-              style={styles.primaryButtonHit}
+              style={styles.checkinPrimaryButtonHit}
               onPress={handleStartSession}
               disabled={energy === null}
               onHoverIn={ctaHover.onHoverIn}
@@ -379,13 +497,14 @@ export default function EnergyCheckInScreen() {
             key="resolved"
             entering={FadeIn.duration(CROSS_FADE_MS)}
             exiting={FadeOut.duration(CROSS_FADE_MS)}
+            style={styles.resolvedFlow}
           >
-            <Text style={styles.title} maxFontSizeMultiplier={1.3}>Today&apos;s session</Text>
-            <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>
+            <Text style={styles.checkinTitle} maxFontSizeMultiplier={1.3}>Today&apos;s session</Text>
+            <Text style={styles.checkinSubtitle} maxFontSizeMultiplier={1.4}>
               {deltaText}
             </Text>
 
-            <View style={[styles.energyChip, { borderColor: MOOD_COLORS[energy] }]}>
+            <View style={[styles.resolvedEnergyChip, { borderColor: MOOD_COLORS[energy] }]}>
               <Text style={styles.energyChipValue} maxFontSizeMultiplier={1.2}>
                 {energy}
               </Text>
@@ -394,20 +513,43 @@ export default function EnergyCheckInScreen() {
               </Text>
             </View>
 
-            <View style={styles.exerciseCard}>
+            {currentExercise && !currentExerciseTimerDone ? (
+              <ExerciseTimer
+                key={currentExerciseIndex}
+                exercise={currentExercise}
+                onComplete={() => handleExerciseTimerComplete(currentExercise.name)}
+                styles={styles}
+                colors={colors}
+              />
+            ) : currentExercise ? (
+              <View style={styles.timerSection}>
+                <Text style={styles.timerExerciseName} maxFontSizeMultiplier={1.2} numberOfLines={1}>
+                  {currentExercise.name}
+                </Text>
+                <Text style={styles.timerDoneText} maxFontSizeMultiplier={1.2}>
+                  Done — {isLastExercise ? 'finish below' : 'next exercise unlocked'}
+                </Text>
+              </View>
+            ) : null}
+
+            <View style={styles.resolvedExerciseCard}>
               <View pointerEvents="none" style={styles.exerciseCardSheen} />
               <Text style={styles.exerciseLogHint} maxFontSizeMultiplier={1.3}>
-                Tap an exercise as you complete it
+                One at a time — the next exercise unlocks when the timer above finishes
               </Text>
               {preview.exercises.map((exercise, index) => {
                 const isDone = completedExercises.has(exercise.name);
+                const isCurrent = index === currentExerciseIndex && !isDone;
+                const isUpcoming = index > currentExerciseIndex;
                 return (
                   <View key={exercise.name}>
                     {index > 0 ? <View style={styles.exerciseDivider} /> : null}
-                    <Pressable
-                      style={styles.exerciseRow}
-                      onPress={() => toggleExerciseDone(exercise.name)}
-                      hitSlop={4}
+                    <View
+                      style={[
+                        styles.exerciseRow,
+                        isCurrent && styles.exerciseRowCurrent,
+                        isUpcoming && styles.exerciseRowUpcoming,
+                      ]}
                     >
                       <View style={styles.exerciseNameRow}>
                         <View style={[styles.exerciseCheckbox, isDone && styles.exerciseCheckboxDone]}>
@@ -425,7 +567,7 @@ export default function EnergyCheckInScreen() {
                           {formatExerciseStat(exercise)}
                         </Text>
                       </View>
-                    </Pressable>
+                    </View>
                   </View>
                 );
               })}
@@ -435,14 +577,21 @@ export default function EnergyCheckInScreen() {
             </View>
 
             <Pressable
-              style={styles.primaryButtonHit}
-              onPress={handleFinishSession}
+              style={styles.checkinPrimaryButtonHit}
+              onPress={isLastExercise ? handleFinishSession : handleNextExercise}
+              disabled={!currentExerciseTimerDone}
               onHoverIn={finishHover.onHoverIn}
               onHoverOut={finishHover.onHoverOut}
               onPressIn={finishPress.onPressIn}
               onPressOut={finishPress.onPressOut}
             >
-              <Animated.View style={[styles.primaryButtonVisual, { transform: [{ scale: finishPress.scale }] }]}>
+              <Animated.View
+                style={[
+                  styles.primaryButtonVisual,
+                  !currentExerciseTimerDone && styles.primaryButtonDisabled,
+                  { transform: [{ scale: finishPress.scale }] },
+                ]}
+              >
                 <Animated.View
                   pointerEvents="none"
                   style={[
@@ -459,7 +608,9 @@ export default function EnergyCheckInScreen() {
                     { opacity: finishPress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
                   ]}
                 />
-                <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>Finish session</Text>
+                <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>
+                  {isLastExercise ? 'Finish session' : 'Next exercise'}
+                </Text>
                 <View style={styles.buttonArrow}>
                   <ArrowUpIconGraphic size={24} />
                 </View>
@@ -478,7 +629,7 @@ export default function EnergyCheckInScreen() {
               Session complete
             </Text>
             <Text style={styles.doneSubtitle} maxFontSizeMultiplier={1.4}>
-              Nice work. See you tomorrow.
+              {postSessionNote ?? 'Nice work. See you tomorrow.'}
             </Text>
 
             <View style={styles.feedbackSection}>
@@ -518,11 +669,83 @@ export default function EnergyCheckInScreen() {
                 maxFontSizeMultiplier={1.3}
               />
             </View>
+
+            <Pressable style={styles.doneBackButton} onPress={handleBackToHome} hitSlop={8}>
+              <Text style={styles.doneBackButtonText} maxFontSizeMultiplier={1.2}>Back to Home</Text>
+            </Pressable>
           </ReanimatedAnimated.View>
         )}
       </ReanimatedAnimated.View>
       </View>
     </KeyboardAvoidingView>
+  );
+}
+
+/**
+ * The guided countdown for a single exercise — deliberately its own
+ * component, keyed by exercise index from the parent, rather than timer
+ * state living in EnergyCheckInScreen with an effect to reset it on every
+ * exercise change. Switching exercises remounts this with a fresh
+ * `useState(() => getExerciseTimerSeconds(exercise))` instead, which is the
+ * React-recommended way to reset state on a prop change — no "sync state to
+ * a dependency" effect needed, and it's what keeps the tick/completion
+ * effects below clean (setState only ever happens inside a timeout
+ * callback or via the onComplete prop, never synchronously in an effect
+ * body).
+ */
+function ExerciseTimer({
+  exercise,
+  onComplete,
+  styles,
+  colors,
+}: {
+  exercise: PlanExercise;
+  onComplete: () => void;
+  styles: ReturnType<typeof createStyles>;
+  colors: ReturnType<typeof useAppTheme>['colors'];
+}) {
+  const [secondsLeft, setSecondsLeft] = useState(() => getExerciseTimerSeconds(exercise));
+  const [active, setActive] = useState(true);
+
+  // The tick — a chained setTimeout keyed on secondsLeft itself (rather
+  // than a single setInterval) so it can't drift and self-corrects every
+  // render; setState happens inside the timeout callback, not the effect
+  // body itself.
+  useEffect(() => {
+    if (!active || secondsLeft <= 0) return;
+    const id = setTimeout(() => setSecondsLeft((s) => Math.max(0, s - 1)), 1000);
+    return () => clearTimeout(id);
+  }, [active, secondsLeft]);
+
+  // Notifies the parent exactly once, the moment the countdown reaches 0 —
+  // calling a prop function from an effect (not this component's own
+  // setState) is the standard "tell my parent something happened" pattern.
+  useEffect(() => {
+    if (secondsLeft === 0) onComplete();
+  }, [secondsLeft, onComplete]);
+
+  const togglePause = () => {
+    hapticSelect();
+    setActive((a) => !a);
+  };
+
+  return (
+    <View style={styles.timerSection}>
+      <Text style={styles.timerExerciseName} maxFontSizeMultiplier={1.2} numberOfLines={1}>
+        {exercise.name}
+      </Text>
+      <Text style={styles.timerClock} maxFontSizeMultiplier={1.1}>
+        {formatTimerClock(secondsLeft)}
+      </Text>
+      {secondsLeft > 0 ? (
+        <Pressable style={styles.timerPauseButton} onPress={togglePause} hitSlop={8}>
+          <SymbolView name={active ? 'pause.fill' : 'play.fill'} size={12} tintColor={colors.text} />
+          <Text style={styles.timerPauseText} maxFontSizeMultiplier={1.2}>
+            {active ? 'Pause' : 'Resume'}
+          </Text>
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
 
@@ -621,6 +844,163 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       fontSize: 11,
       fontFamily: 'Geist-Medium',
     },
+    // Flow-based counterparts of title/subtitle/gaugeWrap/explanationBlock,
+    // used only by the 'checkin' branch — that branch now needs to fit a
+    // variable amount of content (the symptom picker only appears once
+    // energy is picked), which a stack of hand-tuned absolute positions
+    // can't accommodate safely. The rest-day branch still uses the
+    // original absolute-positioned title/subtitle above, untouched.
+    checkinFlow: {
+      alignItems: 'center',
+      paddingTop: 180,
+    },
+    checkinTitle: {
+      paddingHorizontal: 44,
+      color: colors.text,
+      fontSize: 24,
+      lineHeight: 30,
+      letterSpacing: -0.3,
+      textAlign: 'center',
+      fontFamily: 'Geist-Bold',
+    },
+    checkinSubtitle: {
+      marginTop: 8,
+      paddingHorizontal: 56,
+      color: colors.textSecondary,
+      fontSize: 12,
+      lineHeight: 17,
+      textAlign: 'center',
+      fontFamily: 'Geist-Regular',
+    },
+    checkinGaugeWrap: {
+      marginTop: 24,
+      alignItems: 'center',
+    },
+    checkinExplanationBlock: {
+      marginTop: 16,
+      paddingHorizontal: 40,
+      alignItems: 'center',
+    },
+    symptomSection: {
+      marginTop: 24,
+      width: 325,
+    },
+    symptomChipRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    symptomChip: {
+      paddingHorizontal: 11,
+      paddingVertical: 7,
+      borderRadius: 14,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.surfaceBorder,
+      backgroundColor: colors.surface,
+    },
+    symptomChipActive: {
+      borderColor: '#438C63',
+      backgroundColor: 'rgba(67,140,99,0.18)',
+    },
+    symptomChipText: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      fontFamily: 'Geist-Medium',
+    },
+    symptomChipTextActive: {
+      color: '#5FBE84',
+      fontFamily: 'Geist-SemiBold',
+    },
+    checkinPrimaryButtonHit: {
+      marginTop: 28,
+      width: 285,
+      height: 38,
+    },
+    // Flow-based counterpart to title/subtitle/energyChip/exerciseCard,
+    // same reasoning as checkinFlow above — this branch now needs to fit a
+    // timer block whose presence/height doesn't change, but which sits
+    // between two other blocks that do (deltaText's line count, the
+    // exercise list's row count), so absolute pixel offsets aren't safe.
+    resolvedFlow: {
+      alignItems: 'center',
+      paddingTop: 180,
+    },
+    resolvedEnergyChip: {
+      marginTop: 24,
+      alignSelf: 'center',
+      width: 100,
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      justifyContent: 'center',
+      gap: 6,
+      paddingVertical: 6,
+      borderWidth: 2,
+      borderRadius: 2,
+      backgroundColor: colors.pillBg,
+    },
+    timerSection: {
+      marginTop: 20,
+      width: 325,
+      alignItems: 'center',
+      paddingVertical: 16,
+      borderRadius: 14,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.surfaceBorder,
+      backgroundColor: colors.surface,
+    },
+    timerExerciseName: {
+      paddingHorizontal: 20,
+      color: colors.textSecondary,
+      fontSize: 12.5,
+      fontFamily: 'Geist-SemiBold',
+    },
+    timerClock: {
+      marginTop: 6,
+      color: colors.text,
+      fontSize: 34,
+      letterSpacing: -0.5,
+      fontFamily: 'Geist-Black',
+      fontVariant: ['tabular-nums'],
+    },
+    timerPauseButton: {
+      marginTop: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 14,
+      paddingVertical: 6,
+      borderRadius: 14,
+      backgroundColor: colors.pillBg,
+    },
+    timerPauseText: {
+      color: colors.text,
+      fontSize: 11.5,
+      fontFamily: 'Geist-SemiBold',
+    },
+    timerDoneText: {
+      marginTop: 8,
+      color: '#5FBE84',
+      fontSize: 11.5,
+      fontFamily: 'Geist-SemiBold',
+    },
+    resolvedExerciseCard: {
+      marginTop: 16,
+      width: 325,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.surfaceBorder,
+      backgroundColor: colors.surface,
+      overflow: 'hidden',
+    },
+    exerciseRowCurrent: {
+      marginHorizontal: -18,
+      paddingHorizontal: 18,
+      backgroundColor: 'rgba(67,140,99,0.1)',
+    },
+    exerciseRowUpcoming: {
+      opacity: 0.45,
+    },
     restDayLinkHit: {
       position: 'absolute',
       left: 0,
@@ -637,23 +1017,8 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     // The collapsed stand-in for the gauge once energy's locked in for the
     // day — same neobrutalist flat-block language as the trajectory bars and
     // the onboarding potential score, mood-colored border to carry the color
-    // language over from the gauge itself.
-    energyChip: {
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      top: 288,
-      alignSelf: 'center',
-      width: 100,
-      flexDirection: 'row',
-      alignItems: 'baseline',
-      justifyContent: 'center',
-      gap: 6,
-      paddingVertical: 6,
-      borderWidth: 2,
-      borderRadius: 2,
-      backgroundColor: colors.pillBg,
-    },
+    // language over from the gauge itself. (Position comes from
+    // resolvedEnergyChip above — this is just the shared value/label text.)
     energyChipValue: {
       color: colors.text,
       fontSize: 20,
@@ -663,18 +1028,6 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       color: colors.textSecondary,
       fontSize: 11,
       fontFamily: 'Geist-SemiBold',
-    },
-    exerciseCard: {
-      position: 'absolute',
-      left: 25,
-      top: 344,
-      width: 325,
-      paddingHorizontal: 18,
-      borderRadius: 10,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
-      backgroundColor: colors.surface,
-      overflow: 'hidden',
     },
     exerciseCardSheen: {
       position: 'absolute',
@@ -828,12 +1181,20 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       fontFamily: 'Geist-Regular',
       textAlignVertical: 'top',
     },
-    primaryButtonHit: {
-      position: 'absolute',
-      left: 46,
-      top: 656,
-      width: 285,
-      height: 38,
+    doneBackButton: {
+      marginTop: 24,
+      width: 325,
+      paddingVertical: 12,
+      borderRadius: 6,
+      backgroundColor: '#29563a',
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.1)',
+      alignItems: 'center',
+    },
+    doneBackButtonText: {
+      color: '#ffffff',
+      fontSize: 12,
+      fontFamily: 'Geist-SemiBold',
     },
     primaryButtonVisual: {
       width: '100%',
