@@ -43,7 +43,7 @@ export function TabButton({ children, isFocused, ...props }: TabTriggerSlotProps
       <ThemedView
         type={isFocused ? 'backgroundSelected' : 'backgroundElement'}
         style={styles.tabButtonView}>
-        <ThemedText type="small" themeColor={isFocused ? 'text' : 'textSecondary'}>
+        <ThemedText type="small" themeColor={isFocused ? 'text' : 'textSecondary'} maxFontSizeMultiplier={1.2}>
           {children}
         </ThemedText>
       </ThemedView>
@@ -55,8 +55,8 @@ export function CustomTabList(props: TabListProps) {
   return (
     <View {...props} style={styles.tabListContainer}>
       <ThemedView type="backgroundElement" style={styles.innerContainer}>
-        <ThemedText type="smallBold" style={styles.brandText}>
-          Vervein
+        <ThemedText type="smallBold" style={styles.brandText} maxFontSizeMultiplier={1.2}>
+          VerveIn
         </ThemedText>
 
         {props.children}

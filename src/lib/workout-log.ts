@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { exerciseLibrary } from '@/lib/engine/exercise-library';
+import type { MovementPattern } from '@/lib/engine/types';
 import type { BodyArea } from '@/lib/plan-preview';
 
 const KEY = 'vervein.workoutLog.v1';
@@ -95,6 +97,39 @@ export async function getBodyAreaBreakdown(): Promise<BodyAreaBreakdown> {
     for (const exercise of entry.exercises) {
       breakdown[exercise.bodyArea].total += 1;
       if (exercise.completed) breakdown[exercise.bodyArea].completed += 1;
+    }
+  }
+  return breakdown;
+}
+
+export type MovementPatternBreakdown = Partial<Record<MovementPattern, { completed: number; total: number }>>;
+
+/**
+ * Same real-data tally as getBodyAreaBreakdown, one level more granular —
+ * per logged exercise, resolves its real movement_patterns via the library
+ * (workout-log.ts only stores name/bodyArea/completed, not patterns, so
+ * this is a join at read time, not a schema change). An exercise with
+ * multiple patterns (e.g. a squat-to-press) counts toward each one — it
+ * genuinely trained both qualities, so double-counting here is correct, not
+ * a bug. Exercises whose name no longer resolves in the library (unlikely,
+ * but the library is not literally immutable across app updates) are
+ * silently skipped rather than guessed at. Partial, not a full Record,
+ * because a pattern nothing was ever logged against shouldn't render as a
+ * zero row — see progress.tsx's own "only show what's real" filtering.
+ */
+export async function getMovementPatternBreakdown(): Promise<MovementPatternBreakdown> {
+  const entries = await readAll();
+  const breakdown: MovementPatternBreakdown = {};
+  for (const entry of entries) {
+    for (const exercise of entry.exercises) {
+      const libraryExercise = exerciseLibrary.getByName(exercise.name);
+      if (!libraryExercise) continue;
+      for (const pattern of libraryExercise.movement_patterns) {
+        const current = breakdown[pattern] ?? { completed: 0, total: 0 };
+        current.total += 1;
+        if (exercise.completed) current.completed += 1;
+        breakdown[pattern] = current;
+      }
     }
   }
   return breakdown;

@@ -53,7 +53,16 @@ import { filterAndSubstitute } from '@/lib/engine/exercise-filtering';
 import { checkFallbackTrigger } from '@/lib/engine/fallback-logic';
 import { ENERGY_MODIFIER_TABLE } from '@/lib/engine/reference/energy-modifier-table';
 import { SYMPTOM_OVERRIDE_TABLE } from '@/lib/engine/reference/symptom-override-table';
-import type { DailyCheckIn, Exercise, ScaledExerciseList, UserCalibration } from '@/lib/engine/types';
+import type {
+  DailyCheckIn,
+  Exercise,
+  FallbackTrigger,
+  PolicyApplicationRecord,
+  ScaledExerciseList,
+  UserCalibration,
+} from '@/lib/engine/types';
+import { recordPolicyApplications } from '@/lib/engine/policy-orchestration';
+import type { TrainingState } from '@/lib/engine/training-state';
 import { scaleVolume } from '@/lib/engine/volume-scaling';
 import { assembleWorkout } from '@/lib/engine/workout-assembly';
 import { localDateStr } from '@/lib/local-date';
@@ -97,8 +106,17 @@ export type PlanPreviewResult = {
    */
   trace: {
     fallbackFired: boolean;
+    /** Why, when fallbackFired is true — null otherwise. Lets the UI
+     * distinguish "today's schedule says rest" from "the engine's safety
+     * net kicked in" instead of showing both identically. */
+    fallbackTrigger: FallbackTrigger | null;
     gate1Exclusions: { exerciseId: string; excludedBy: string }[];
     deliveredExercises: { exerciseId: string; adapted_sets: number | null }[];
+    /** M9's governance bookkeeping — which of P1-P5 fired and how, so an
+     * interim policy (P1/P2/P3) can never get silently treated as
+     * "resolved" without a real spec change. Not shown in the UI; purely
+     * an audit trail for whoever's deciding when those policies graduate. */
+    policyApplications: PolicyApplicationRecord[];
   };
 };
 
@@ -106,7 +124,12 @@ export function computePlanPreview(
   input: PlanPreviewInput,
   energy: EnergyLevel,
   calibration: UserCalibration,
-  acuteSymptomTags: string[] = []
+  acuteSymptomTags: string[] = [],
+  /** M13's own optional `trainingState` param (FE-13) — absent means a
+   * history-blind run, byte-identical to every call site that doesn't pass
+   * one. Only ever used for the one shipped rolling-window sentence below;
+   * fetching it is the caller's job since this function stays synchronous. */
+  trainingState?: TrainingState
 ): PlanPreviewResult {
   const ctx = profileToOnboardingContext(input);
   const baselinePlan = generateBaselinePlan(ctx, LOCAL_USER_ID);
@@ -140,10 +163,12 @@ export function computePlanPreview(
   let assembledExercises: ScaledExerciseList | [Exercise, Exercise];
   let isRestDay = false;
   let overallSetsPct = 100;
+  let fallbackTrigger: FallbackTrigger | null = null;
 
   if (fallback) {
     assembledExercises = fallback.exercises;
     isRestDay = true;
+    fallbackTrigger = fallback.trigger;
   } else {
     // Step 4 — volume scaling. energyModifier.setsMultiplier is 0 at
     // Energy Score 1, but that path is already fully claimed by Fallback
@@ -164,6 +189,7 @@ export function computePlanPreview(
       const secondFallback = checkFallbackTrigger(filterResult.filtered.length, energy, true)!;
       assembledExercises = secondFallback.exercises;
       isRestDay = true;
+      fallbackTrigger = secondFallback.trigger;
     } else {
       assembledExercises = volumeResult.exercises;
       overallSetsPct = volumeResult.overallSetsPct;
@@ -174,7 +200,7 @@ export function computePlanPreview(
   const { workout } = assembleWorkout(assembledExercises, isRestDay);
 
   // Step 6 — explanation.
-  const { explanation } = buildExplanation(
+  const { explanation: baseExplanation } = buildExplanation(
     energy,
     activeTags,
     calibration,
@@ -182,6 +208,15 @@ export function computePlanPreview(
     workout.totalDuration,
     overallSetsPct
   );
+
+  // M13's one shipped rolling-window sentence (FE-12, verbatim) — the ONLY
+  // approved history-trend wording, fired only when yesterday was also a
+  // low-energy day and today is too. No other trend copy exists yet
+  // (Capacity Trend is trace-only, never templated into prose).
+  const explanation =
+    trainingState && energy <= 2 && trainingState.rollingWindow.value.yesterdayLowEnergy
+      ? `${baseExplanation} Yesterday you logged low energy too.`
+      : baseExplanation;
 
   // ScaledExercise doesn't carry body_area — zip against filterResult.filtered
   // by index rather than a second by-id lookup, since scaleVolume's map()
@@ -219,6 +254,20 @@ export function computePlanPreview(
       : { exerciseId: ex.id, adapted_sets: null }
   );
 
+  const policyApplications = recordPolicyApplications({
+    // Per M13's own real logic: P4's domain is symptom × session (keep-or-
+    // remove on the dimensions symptoms act on — body area, intensity,
+    // impact). Restriction/contraindication/equipment/inactive exclusions
+    // are other Gate 1 rungs and must NOT mark P4 as having executed —
+    // an earlier version of this wiring got this wrong (counted any
+    // exclusion at all), caught while aligning with M13's canonical order.
+    p4Applied: filterResult.gate1Exclusions.some(
+      (e) => e.excludedBy === 'body-area' || e.excludedBy === 'intensity' || e.excludedBy === 'impact'
+    ),
+    p5StackingTransition: fallbackTrigger === 'p5-stacking-transition',
+    m8Ran: !isRestDay,
+  });
+
   return {
     exerciseCount: exercises.length,
     durationMin: workout.totalDuration,
@@ -227,8 +276,10 @@ export function computePlanPreview(
     exercises,
     trace: {
       fallbackFired: isRestDay,
+      fallbackTrigger,
       gate1Exclusions: filterResult.gate1Exclusions,
       deliveredExercises,
+      policyApplications,
     },
   };
 }

@@ -52,6 +52,8 @@ export default function OnboardingEnvironmentScreen() {
           style={styles.backButton}
           onPress={() => goBack('/onboarding/step-3', { name: name ?? '', goal: goal ?? '' })}
           hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <BackArrowGraphic color={colors.text} />
         </Pressable>
@@ -65,7 +67,7 @@ export default function OnboardingEnvironmentScreen() {
           </View>
         </View>
 
-        <Text style={styles.title}>Where do you usually train?</Text>
+        <Text style={styles.title} maxFontSizeMultiplier={1.3}>Where do you usually train?</Text>
 
         <View style={styles.cardStack}>
           <SingleSelectCards options={TRAINING_ENVIRONMENTS} onSelect={handleSelectEnvironment} />

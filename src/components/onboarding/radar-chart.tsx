@@ -115,7 +115,9 @@ export function RadarChart({ data, size = 220, maxValue = 100 }: RadarChartProps
             pointerEvents="none"
             style={[styles.axisLabelWrap, { left: x - 34, top: y - 8, width: 68 }]}
           >
-            <Text style={[styles.axisLabel, { color: colors.textTertiary }]}>{d.label}</Text>
+            <Text style={[styles.axisLabel, { color: colors.textTertiary }]} maxFontSizeMultiplier={1.15}>
+              {d.label}
+            </Text>
           </ReanimatedAnimated.View>
         );
       })}

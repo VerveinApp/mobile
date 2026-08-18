@@ -154,6 +154,8 @@ export default function OnboardingScheduleScreen() {
           style={styles.backButton}
           onPress={() => goBack('/onboarding/step-5', baseParams)}
           hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <BackArrowGraphic color={colors.text} />
         </Pressable>
@@ -167,10 +169,10 @@ export default function OnboardingScheduleScreen() {
           </View>
         </View>
 
-        <Text style={styles.title}>How much time, how often?</Text>
-        <Text style={styles.subtitle}>Set your typical session length and training days.</Text>
+        <Text style={styles.title} maxFontSizeMultiplier={1.3}>How much time, how often?</Text>
+        <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>Set your typical session length and training days.</Text>
 
-        <Text style={styles.fieldLabel}>Session length</Text>
+        <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>Session length</Text>
         <View style={styles.durationRow}>
           {DURATIONS.map((option, index) => {
             const { hover, press } = durationInteractions[index];
@@ -208,7 +210,10 @@ export default function OnboardingScheduleScreen() {
                       { opacity: press.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.18] }) },
                     ]}
                   />
-                  <Text style={[styles.durationPillText, isSelected && styles.pillTextSelected]}>
+                  <Text
+                    style={[styles.durationPillText, isSelected && styles.pillTextSelected]}
+                    maxFontSizeMultiplier={1.2}
+                  >
                     {option.label}
                   </Text>
                 </Animated.View>
@@ -217,7 +222,7 @@ export default function OnboardingScheduleScreen() {
           })}
         </View>
 
-        <Text style={[styles.fieldLabel, styles.daysLabel]}>Training days</Text>
+        <Text style={[styles.fieldLabel, styles.daysLabel]} maxFontSizeMultiplier={1.3}>Training days</Text>
         <View style={styles.daysRow}>
           {DAYS.map((day, index) => {
             const { hover, press } = dayInteractions[index];
@@ -247,7 +252,12 @@ export default function OnboardingScheduleScreen() {
                       { opacity: hover.anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.1] }) },
                     ]}
                   />
-                  <Text style={[styles.dayCircleText, isSelected && styles.pillTextSelected]}>{day.label}</Text>
+                  <Text
+                    style={[styles.dayCircleText, isSelected && styles.pillTextSelected]}
+                    maxFontSizeMultiplier={1.2}
+                  >
+                    {day.label}
+                  </Text>
                 </Animated.View>
               </Pressable>
             );
@@ -286,7 +296,7 @@ export default function OnboardingScheduleScreen() {
                 { opacity: continuePress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
               ]}
             />
-            <Text style={styles.primaryText}>Continue</Text>
+            <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>Continue</Text>
             <View style={styles.buttonArrow}>
               <ArrowUpIconGraphic size={24} />
             </View>

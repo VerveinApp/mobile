@@ -75,12 +75,11 @@ export default function CreateAccountScreen() {
 
   const isEmailEmpty = email.trim().length === 0;
 
-  // Reached from whichever payoff screen the consent branch sent the user
-  // to (see step-7's handleBuildPlan) — go back to that same one, not a
-  // hardcoded screen.
+  // Both branches converge on First Look now (see step-7's handleBuildPlan
+  // — the consent-only potential-score payoff was cut), so this is always
+  // the same screen regardless of healthConsent.
   const handleBack = () => {
-    const previous = onboardingParams.healthConsent === 'true' ? '/onboarding/potential' : '/onboarding/first-look';
-    goBack(previous, onboardingParams);
+    goBack('/onboarding/first-look', onboardingParams);
   };
 
   const handleContinue = () => {
@@ -163,28 +162,34 @@ export default function CreateAccountScreen() {
           </View>
         ) : null}
 
-        <Pressable style={styles.backButton} onPress={handleBack} hitSlop={12}>
+        <Pressable
+          style={styles.backButton}
+          onPress={handleBack}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <BackArrowGraphic color={colors.text} />
         </Pressable>
 
         <View style={styles.brandBlock} pointerEvents="none">
           <View style={styles.brandAccent}>
-            <LogoMarkAccentGraphic color={colors.text} />
+            <LogoMarkAccentGraphic width={35.8156} height={45.1325} color={colors.text} />
           </View>
           <View style={styles.brandMark}>
-            <LogoMarkGraphic color={colors.text} />
+            <LogoMarkGraphic width={27.2695} height={38.3516} color={colors.text} />
           </View>
           <View style={styles.brandWordmark}>
-            <WordmarkTextGraphic color={colors.text} />
+            <WordmarkTextGraphic height={27.25} color={colors.text} />
           </View>
         </View>
 
-        <Text style={styles.title}>
+        <Text style={styles.title} maxFontSizeMultiplier={1.3}>
           {'Fitness built around\n'}
           <Text style={styles.titleAccent}>your journey.</Text>
         </Text>
 
-        <Text style={styles.subtitle}>
+        <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>
           {'Your training adapts to you,\n'}
           not the other way around.
         </Text>
@@ -196,8 +201,8 @@ export default function CreateAccountScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.formHeading}>Enter your email</Text>
-          <Text style={styles.fieldLabel}>Email address</Text>
+          <Text style={styles.formHeading} maxFontSizeMultiplier={1.3}>Enter your email</Text>
+          <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>Email address</Text>
 
           <View style={styles.inputWrap}>
             <View style={[StyleSheet.absoluteFill, styles.behindContent]} pointerEvents="none">
@@ -231,7 +236,7 @@ export default function CreateAccountScreen() {
           </View>
 
           {emailError ? (
-            <ReanimatedAnimated.Text entering={FadeIn.duration(150)} style={styles.errorText}>
+            <ReanimatedAnimated.Text entering={FadeIn.duration(150)} style={styles.errorText} maxFontSizeMultiplier={1.3}>
               {emailError}
             </ReanimatedAnimated.Text>
           ) : null}
@@ -279,7 +284,7 @@ export default function CreateAccountScreen() {
                   { opacity: continuePress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
                 ]}
               />
-              <Text style={styles.primaryText}>Continue</Text>
+              <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>Continue</Text>
               <View style={styles.buttonArrow}>
                 <ArrowUpIconGraphic size={24} />
               </View>
@@ -288,7 +293,7 @@ export default function CreateAccountScreen() {
 
           <View style={styles.dividerRow}>
             <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or</Text>
+            <Text style={styles.dividerText} maxFontSizeMultiplier={1.2}>or</Text>
             <View style={styles.dividerLine} />
           </View>
 
@@ -326,7 +331,7 @@ export default function CreateAccountScreen() {
                 ]}
               />
               <AppleIconGraphic width={15.17} height={18} color={colors.text} />
-              <Text style={[styles.socialText, styles.appleText]}>Continue with Apple</Text>
+              <Text style={[styles.socialText, styles.appleText]} maxFontSizeMultiplier={1.2}>Continue with Apple</Text>
             </Animated.View>
           </Pressable>
 
@@ -364,13 +369,13 @@ export default function CreateAccountScreen() {
                 ]}
               />
               <GoogleIconGraphic size={16} />
-              <Text style={[styles.socialText, styles.googleText]}>Continue with Google</Text>
+              <Text style={[styles.socialText, styles.googleText]} maxFontSizeMultiplier={1.2}>Continue with Google</Text>
             </Animated.View>
           </Pressable>
         </View>
 
-        <Text style={styles.termsText}>
-          {'By continuing, you agree to Vervein’s\n'}
+        <Text style={styles.termsText} maxFontSizeMultiplier={1.4}>
+          {'By continuing, you agree to VerveIn’s\n'}
           <Text
             style={styles.termsLink}
             // Placeholder route — the legal screen doesn't exist yet.
@@ -419,27 +424,31 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       width: 27,
       height: 27,
     },
+    // 25% larger than the original 116×41 lockup, recentered around the
+    // same visual midpoint (top shifted up by half the added height) so it
+    // grows evenly instead of just extending down toward the title below —
+    // same treatment as welcome.tsx's matching lockup.
     brandBlock: {
       position: 'absolute',
       left: 31,
-      top: 93,
-      width: 116,
-      height: 41,
+      top: 87.88,
+      width: 145,
+      height: 51.25,
     },
     brandAccent: {
       position: 'absolute',
       left: 0,
-      top: 4.53,
+      top: 5.66,
     },
     brandMark: {
       position: 'absolute',
-      left: 23.34,
+      left: 29.18,
       top: 0,
     },
     brandWordmark: {
       position: 'absolute',
-      left: 32.82,
-      top: 19,
+      left: 41.03,
+      top: 23.75,
     },
     title: {
       position: 'absolute',

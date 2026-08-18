@@ -57,6 +57,8 @@ export default function OnboardingGoalScreen() {
           style={styles.backButton}
           onPress={() => goBack('/onboarding', { name: name ?? '' })}
           hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <BackArrowGraphic color={colors.text} />
         </Pressable>
@@ -70,7 +72,7 @@ export default function OnboardingGoalScreen() {
           </View>
         </View>
 
-        <Text style={styles.title}>
+        <Text style={styles.title} maxFontSizeMultiplier={1.3}>
           {'Well '}
           <Text style={styles.titleAccent}>{displayName}</Text>
           {", what's your primary goal?"}

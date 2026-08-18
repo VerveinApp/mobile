@@ -72,6 +72,8 @@ export default function OnboardingNameScreen() {
           style={styles.backButton}
           onPress={() => goBack('/onboarding/welcome', {})}
           hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <BackArrowGraphic color={colors.text} />
         </Pressable>
@@ -85,12 +87,12 @@ export default function OnboardingNameScreen() {
           </View>
         </View>
 
-        <Text style={styles.title}>
+        <Text style={styles.title} maxFontSizeMultiplier={1.3}>
           {'Let’s get to know\n'}
           <Text style={styles.titleAccent}>you better</Text>
         </Text>
 
-        <Text style={styles.subtitle}>
+        <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>
           This helps us personalize ur experience & recommendations.
         </Text>
 
@@ -118,7 +120,7 @@ export default function OnboardingNameScreen() {
         </View>
 
         {nameError ? (
-          <ReanimatedAnimated.Text entering={FadeIn.duration(150)} style={styles.errorText}>
+          <ReanimatedAnimated.Text entering={FadeIn.duration(150)} style={styles.errorText} maxFontSizeMultiplier={1.3}>
             {nameError}
           </ReanimatedAnimated.Text>
         ) : null}
@@ -155,7 +157,7 @@ export default function OnboardingNameScreen() {
                 { opacity: continuePress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
               ]}
             />
-            <Text style={styles.primaryText}>Continue</Text>
+            <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>Continue</Text>
             <View style={styles.buttonArrow}>
               <ArrowUpIconGraphic size={24} />
             </View>
@@ -164,7 +166,7 @@ export default function OnboardingNameScreen() {
 
         <View style={styles.privacyRow} pointerEvents="none">
           <PadlockIconGraphic size={11.31} />
-          <Text style={styles.privacyText}>Your information is private and secure.</Text>
+          <Text style={styles.privacyText} maxFontSizeMultiplier={1.4}>Your information is private and secure.</Text>
         </View>
       </ReanimatedAnimated.View>
       </View>

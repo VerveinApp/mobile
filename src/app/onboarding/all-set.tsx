@@ -57,10 +57,10 @@ export default function OnboardingAllSetScreen() {
           <SuccessCheckmark size={CHECK_SIZE} />
         </View>
 
-        <ReanimatedAnimated.Text entering={FadeIn.duration(350).delay(1000)} style={styles.title}>
+        <ReanimatedAnimated.Text entering={FadeIn.duration(350).delay(1000)} style={styles.title} maxFontSizeMultiplier={1.3}>
           You&apos;re all set!
         </ReanimatedAnimated.Text>
-        <ReanimatedAnimated.Text entering={FadeIn.duration(350).delay(1180)} style={styles.subtitle}>
+        <ReanimatedAnimated.Text entering={FadeIn.duration(350).delay(1180)} style={styles.subtitle} maxFontSizeMultiplier={1.4}>
           Your plan is ready. Time to get moving.
         </ReanimatedAnimated.Text>
 
@@ -89,7 +89,7 @@ export default function OnboardingAllSetScreen() {
                 { opacity: ctaPress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
               ]}
             />
-            <Text style={styles.primaryText}>Let&apos;s go</Text>
+            <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>Let&apos;s go</Text>
             <View style={styles.buttonArrow}>
               <ArrowUpIconGraphic size={24} />
             </View>

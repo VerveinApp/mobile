@@ -23,11 +23,13 @@ import ReanimatedAnimated, {
   withTiming,
 } from 'react-native-reanimated';
 import { SymbolView } from 'expo-symbols';
+import { openBrowserAsync } from 'expo-web-browser';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { getCalibration, submitSessionFeedback } from '@/lib/calibration';
 import { getLastCheckIn, recordCheckIn, type CheckInRecord } from '@/lib/check-in-history';
 import { recordDecisionTrace } from '@/lib/decision-trace-log';
+import { TAG_LINES } from '@/lib/engine/explanation-string';
 import { DEFAULT_CALIBRATION } from '@/lib/engine/personal-calibration';
 import type { FeedbackResponse, UserCalibration } from '@/lib/engine/types';
 import { formatTimerClock, getExerciseTimerSeconds } from '@/lib/exercise-timer';
@@ -35,7 +37,10 @@ import { hapticImpactLight, hapticSelect, hapticSuccess, hapticWarning } from '@
 import { getPostSessionNote } from '@/lib/momentum';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview, type PlanExercise } from '@/lib/plan-preview';
+import { getTrainingState } from '@/lib/training-state';
+import type { TrainingState } from '@/lib/engine/training-state';
 import { useFadeInEntering } from '@/lib/screen-transitions';
+import { exerciseLibrary } from '@/lib/engine/exercise-library';
 import {
   getSessionFeedback,
   getSessionNote,
@@ -91,6 +96,49 @@ function formatExerciseStat(exercise: { sets: number | null; reps: number | stri
   return '—';
 }
 
+// Friendly framing for M6/Gate 1's exclusion categories — 'inactive' is
+// deliberately omitted: it's a library-data-hygiene fact (an exercise
+// flagged inactive in the source library), not anything about the user's
+// own plan, so surfacing it here would be real but not honest-in-context —
+// it'd read as personalized reasoning when it isn't.
+const EXCLUSION_REASON_LABELS: Partial<Record<string, string>> = {
+  contraindication: 'excluded for a health condition you flagged',
+  intensity: "too intense for today's energy",
+  impact: "higher-impact than today's plan calls for",
+  equipment: "needs equipment you don't have set",
+  'body-area': "outside today's focus areas",
+  restriction: 'excluded by a movement restriction you set',
+};
+
+// A fallback session isn't just "your usual plan, trimmed" — it's a
+// structurally different, engine-picked safety pair. Distinct copy so it
+// never reads the same as an ordinary low-exercise-count day, and so a
+// schedule-driven rest day (see isRestDay above, decided before energy is
+// even picked) never gets confused with this engine-triggered one either.
+const FALLBACK_TRIGGER_TEXT: Record<string, string> = {
+  'energy-1': "Very low energy today — here's a light, safe reset instead of your usual plan.",
+  'empty-filter': "Today's conditions ruled out your usual exercises — here's a safe fallback instead.",
+  'p5-stacking-transition': "A transition case in how today's plan stacks up — here's a safe fallback for now.",
+};
+
+/** Groups today's real gate-1 exclusions by reason, resolving real exercise
+ * names via the library — never a fabricated or generic count. */
+function summarizeExclusions(
+  gate1Exclusions: { exerciseId: string; excludedBy: string }[]
+): { reason: string; names: string[] }[] {
+  const byReason = new Map<string, string[]>();
+  for (const { exerciseId, excludedBy } of gate1Exclusions) {
+    const label = EXCLUSION_REASON_LABELS[excludedBy];
+    if (!label) continue;
+    const exercise = exerciseLibrary.getById(exerciseId);
+    if (!exercise) continue;
+    const names = byReason.get(label) ?? [];
+    names.push(exercise.name);
+    byReason.set(label, names);
+  }
+  return Array.from(byReason.entries()).map(([reason, names]) => ({ reason, names }));
+}
+
 /**
  * The workout session flow — launched from the Summary dashboard's "Start
  * Workout" (see (tabs)/index.tsx), not a landing screen itself. Three
@@ -123,6 +171,7 @@ export default function EnergyCheckInScreen() {
   // session, prefilled from storage below if reopening an already-done day.
   const [noteText, setNoteText] = useState('');
   const [calibration, setCalibration] = useState<UserCalibration | null>(null);
+  const [trainingState, setTrainingState] = useState<TrainingState | null>(null);
   // The one post-session question (M14-lite) — null until the user taps one
   // of the three buttons, then locked to whatever they picked (real feedback
   // isn't editable after the fact any more than the session itself is).
@@ -144,6 +193,7 @@ export default function EnergyCheckInScreen() {
   // restarts at exercise 0. A real, deliberate simplification, not an
   // oversight.
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
+  const [showReasoning, setShowReasoning] = useState(false);
 
   const toggleSymptomTag = (tag: string) => {
     hapticSelect();
@@ -155,17 +205,26 @@ export default function EnergyCheckInScreen() {
     });
   };
 
+  // Two-step disclosure, per the real engine's M4 contract: the symptom-tag
+  // picker is only ever shown at energy 1-2, and a tag arriving alongside
+  // energy >= 3 is treated as a malformed payload the engine would reject.
+  // Clearing here (event-driven, on the actual energy change) rather than
+  // just hiding the picker means that malformed state can never actually be
+  // constructed in the first place — prevention instead of validation after
+  // the fact.
+  const handleEnergyChange = (value: EnergyScore) => {
+    setEnergy(value);
+    if (value > 2 && symptomTags.size > 0) setSymptomTags(new Set());
+  };
+
   useEffect(() => {
     (async () => {
-      const [loadedProfile, loadedLastCheckIn, loadedTodaySession, loadedCalibration] = await Promise.all([
-        getProfile(),
-        getLastCheckIn(),
-        getTodaySession(),
-        getCalibration(),
-      ]);
+      const [loadedProfile, loadedLastCheckIn, loadedTodaySession, loadedCalibration, loadedTrainingState] =
+        await Promise.all([getProfile(), getLastCheckIn(), getTodaySession(), getCalibration(), getTrainingState()]);
       setProfile(loadedProfile);
       setLastCheckIn(loadedLastCheckIn);
       setCalibration(loadedCalibration);
+      setTrainingState(loadedTrainingState);
       if (loadedTodaySession) {
         setEnergy(loadedTodaySession.energy);
         setSessionState(loadedTodaySession.completed ? 'done' : 'resolved');
@@ -254,10 +313,11 @@ export default function EnergyCheckInScreen() {
             profile ?? {},
             energy,
             calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
-            Array.from(symptomTags)
+            Array.from(symptomTags),
+            trainingState ?? undefined
           )
         : null,
-    [profile, energy, calibration, symptomTags]
+    [profile, energy, calibration, symptomTags, trainingState]
   );
   // The baseline ("Good") session — comparing against it is what makes the
   // adaptation legible on the resolved view, not just implied by a sentence.
@@ -276,12 +336,28 @@ export default function EnergyCheckInScreen() {
   const exerciseDelta = preview ? baseline.exerciseCount - preview.exerciseCount : 0;
   const deltaText =
     preview && energy !== null
-      ? exerciseDelta > 0
-        ? `${exerciseDelta} exercise${exerciseDelta === 1 ? '' : 's'} trimmed — ${ENERGY_LABELS[energy].toLowerCase()} energy today.`
-        : exerciseDelta < 0
-          ? `${-exerciseDelta} extra exercise${-exerciseDelta === 1 ? '' : 's'} — pushing further today.`
-          : 'Standard session today.'
+      ? preview.trace.fallbackFired && preview.trace.fallbackTrigger
+        ? FALLBACK_TRIGGER_TEXT[preview.trace.fallbackTrigger]
+        : exerciseDelta > 0
+          ? `${exerciseDelta} exercise${exerciseDelta === 1 ? '' : 's'} trimmed — ${ENERGY_LABELS[energy].toLowerCase()} energy today.`
+          : exerciseDelta < 0
+            ? `${-exerciseDelta} extra exercise${-exerciseDelta === 1 ? '' : 's'} — pushing further today.`
+            : 'Standard session today.'
       : null;
+  const exclusionSummary = useMemo(
+    () => (preview ? summarizeExclusions(preview.trace.gate1Exclusions) : []),
+    [preview]
+  );
+  // The full explanation (preview.explanation) already includes these same
+  // TAG_LINES sentences, but only the pre-commit checkin screen renders that
+  // full string — the resolved view's subtitle is the shorter deltaText.
+  // Surfacing the real per-tag lines here too means "why does today look
+  // like this" stays reviewable in one consistent place (this panel)
+  // instead of only appearing transiently before the session starts.
+  const symptomLines = useMemo(
+    () => Array.from(symptomTags).map((tag) => TAG_LINES[tag]).filter((line): line is string => Boolean(line)),
+    [symptomTags]
+  );
   const comparisonText =
     energy !== null && lastCheckIn
       ? energy === lastCheckIn.energy
@@ -400,7 +476,7 @@ export default function EnergyCheckInScreen() {
                 size={260}
                 canvasScale={scale}
                 value={energy}
-                onChange={setEnergy}
+                onChange={handleEnergyChange}
                 previousValue={lastCheckIn?.energy ?? null}
               />
             </View>
@@ -418,7 +494,7 @@ export default function EnergyCheckInScreen() {
               </ReanimatedAnimated.View>
             ) : null}
 
-            {energy !== null ? (
+            {energy !== null && energy <= 2 ? (
               <View style={styles.symptomSection}>
                 <Text style={styles.noteLabel} maxFontSizeMultiplier={1.3}>
                   ANYTHING GOING ON TODAY? (OPTIONAL)
@@ -568,6 +644,42 @@ export default function EnergyCheckInScreen() {
                 {preview.equipmentNote}
               </Text>
             </View>
+
+            {exclusionSummary.length > 0 || symptomLines.length > 0 ? (
+              <View style={styles.reasoningCard}>
+                <Pressable
+                  style={styles.reasoningToggleRow}
+                  onPress={() => {
+                    hapticSelect();
+                    setShowReasoning((v) => !v);
+                  }}
+                  hitSlop={4}
+                >
+                  <Text style={styles.reasoningToggleText} maxFontSizeMultiplier={1.3}>
+                    {showReasoning ? 'Hide full reasoning' : 'See full reasoning'}
+                  </Text>
+                  <SymbolView
+                    name={showReasoning ? 'chevron.up' : 'chevron.down'}
+                    size={11}
+                    tintColor={colors.textSecondary}
+                  />
+                </Pressable>
+                {showReasoning ? (
+                  <ReanimatedAnimated.View entering={FadeIn.duration(160)} style={styles.reasoningBody}>
+                    {symptomLines.map((line) => (
+                      <Text key={line} style={styles.reasoningLine} maxFontSizeMultiplier={1.3}>
+                        {line}
+                      </Text>
+                    ))}
+                    {exclusionSummary.map(({ reason, names }) => (
+                      <Text key={reason} style={styles.reasoningLine} maxFontSizeMultiplier={1.3}>
+                        <Text style={styles.reasoningCount}>{names.length}</Text> {reason}: {names.join(', ')}
+                      </Text>
+                    ))}
+                  </ReanimatedAnimated.View>
+                ) : null}
+              </View>
+            ) : null}
 
             <Pressable
               style={styles.checkinPrimaryButtonHit}
@@ -722,11 +834,29 @@ function ExerciseTimer({
     setActive((a) => !a);
   };
 
+  // No image/video/cue data exists anywhere in the exercise library (1,449
+  // entries, taxonomy fields only — see engine/types.ts's Exercise type) and
+  // there's no owned media to show instead, so an uncurated search hand-off
+  // is the honest option: it never claims to have a demo we don't actually
+  // have. Opens in-app (openBrowserAsync) rather than kicking the user out
+  // of Vervein entirely.
+  const handleWatchForm = () => {
+    hapticImpactLight();
+    const query = encodeURIComponent(`${exercise.name} form`);
+    openBrowserAsync(`https://www.youtube.com/results?search_query=${query}`);
+  };
+
   return (
     <View style={styles.timerSection}>
       <Text style={styles.timerExerciseName} maxFontSizeMultiplier={1.2} numberOfLines={1}>
         {exercise.name}
       </Text>
+      <Pressable style={styles.timerWatchFormButton} onPress={handleWatchForm} hitSlop={8}>
+        <SymbolView name="play.rectangle" size={12} tintColor={colors.textSecondary} />
+        <Text style={styles.timerWatchFormText} maxFontSizeMultiplier={1.2}>
+          Watch form
+        </Text>
+      </Pressable>
       <Text style={styles.timerClock} maxFontSizeMultiplier={1.1}>
         {formatTimerClock(secondsLeft)}
       </Text>
@@ -955,6 +1085,17 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       fontSize: 12.5,
       fontFamily: 'Geist-SemiBold',
     },
+    timerWatchFormButton: {
+      marginTop: 6,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+    },
+    timerWatchFormText: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      fontFamily: 'Geist-Medium',
+    },
     timerClock: {
       marginTop: 6,
       color: colors.text,
@@ -1051,6 +1192,42 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       color: colors.textTertiary,
       fontSize: 9.5,
       fontFamily: 'Geist-Regular',
+    },
+    reasoningCard: {
+      marginTop: 10,
+      width: 325,
+      borderRadius: 14,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.surfaceBorder,
+      backgroundColor: colors.surface,
+      overflow: 'hidden',
+    },
+    reasoningToggleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+    },
+    reasoningToggleText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontFamily: 'Geist-SemiBold',
+    },
+    reasoningBody: {
+      paddingHorizontal: 16,
+      paddingBottom: 14,
+      gap: 8,
+    },
+    reasoningLine: {
+      color: colors.textTertiary,
+      fontSize: 11.5,
+      lineHeight: 16,
+      fontFamily: 'Geist-Regular',
+    },
+    reasoningCount: {
+      color: colors.textSecondary,
+      fontFamily: 'Geist-SemiBold',
     },
     exerciseRow: {
       flexDirection: 'row',

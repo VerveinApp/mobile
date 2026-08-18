@@ -76,10 +76,12 @@ export default function ProgressHistoryScreen() {
           onHoverOut={backHover.onHoverOut}
           hitSlop={10}
           style={styles.backButton}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <SymbolView name="chevron.left" size={16} tintColor={colors.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>Progress & History</Text>
+        <Text style={styles.headerTitle} maxFontSizeMultiplier={1.3}>Progress & History</Text>
         <View style={styles.backButton} />
       </View>
 
@@ -87,21 +89,23 @@ export default function ProgressHistoryScreen() {
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.summaryRow}>
             <View style={styles.summaryCard}>
-              <Text style={styles.summaryValue}>{thisWeekCount}</Text>
-              <Text style={styles.summaryLabel}>This Week</Text>
+              <Text style={styles.summaryValue} maxFontSizeMultiplier={1.15}>{thisWeekCount}</Text>
+              <Text style={styles.summaryLabel} maxFontSizeMultiplier={1.2}>This Week</Text>
             </View>
             <View style={styles.summaryCard}>
-              <Text style={styles.summaryValue}>{completedCount}</Text>
-              <Text style={styles.summaryLabel}>Logged Sessions</Text>
+              <Text style={styles.summaryValue} maxFontSizeMultiplier={1.15}>{completedCount}</Text>
+              <Text style={styles.summaryLabel} maxFontSizeMultiplier={1.2}>Logged Sessions</Text>
             </View>
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.sectionKicker}>HISTORY</Text>
+            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>HISTORY</Text>
             {entries.length === 0 ? (
               <View style={styles.emptyCard}>
                 <SymbolView name="clock.arrow.circlepath" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />
-                <Text style={styles.emptyText}>No sessions logged yet — complete a check-in to start your history.</Text>
+                <Text style={styles.emptyText} maxFontSizeMultiplier={1.3}>
+                  No sessions logged yet — complete a check-in to start your history.
+                </Text>
               </View>
             ) : (
               <View style={styles.card}>
@@ -154,7 +158,12 @@ function HistoryRow({
   return (
     <Swipeable
       renderRightActions={() => (
-        <Pressable style={styles.deleteAction} onPress={onDelete}>
+        <Pressable
+          style={styles.deleteAction}
+          onPress={onDelete}
+          accessibilityRole="button"
+          accessibilityLabel="Delete session"
+        >
           <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
         </Pressable>
       )}
@@ -165,26 +174,29 @@ function HistoryRow({
         style={[styles.entryRow, !isLast && styles.entryRowDivider, { backgroundColor: colors.surface }]}
       >
         <View style={styles.entryRowTop}>
-          <Text style={styles.entryDate}>{formatEntryDate(entry.date)}</Text>
+          <Text style={styles.entryDate} maxFontSizeMultiplier={1.2}>{formatEntryDate(entry.date)}</Text>
           <View style={styles.entryStatus}>
             <SymbolView
               name={entry.completed ? 'checkmark.circle.fill' : 'circle.dashed'}
               size={14}
               tintColor={entry.completed ? '#5FBE84' : colors.iconFaint}
             />
-            <Text style={[styles.entryStatusText, entry.completed && styles.entryStatusTextDone]}>
+            <Text
+              style={[styles.entryStatusText, entry.completed && styles.entryStatusTextDone]}
+              maxFontSizeMultiplier={1.2}
+            >
               {entry.completed ? 'Completed' : 'Missed'}
             </Text>
           </View>
         </View>
         {entry.notes ? (
-          <Text style={styles.entryNote} numberOfLines={2}>
+          <Text style={styles.entryNote} numberOfLines={2} maxFontSizeMultiplier={1.3}>
             {entry.notes}
           </Text>
         ) : null}
         {hasLog ? (
           <View style={styles.logToggleRow}>
-            <Text style={styles.logToggleText}>
+            <Text style={styles.logToggleText} maxFontSizeMultiplier={1.3}>
               {expanded ? 'Hide' : 'Show'} workout ({doneCount}/{exercises.length})
             </Text>
             <SymbolView
@@ -206,6 +218,7 @@ function HistoryRow({
                 <Text
                   style={[styles.logExerciseName, !exercise.completed && styles.logExerciseNameSkipped]}
                   numberOfLines={1}
+                  maxFontSizeMultiplier={1.2}
                 >
                   {exercise.name}
                 </Text>

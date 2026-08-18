@@ -117,10 +117,10 @@ export default function TrainScreen() {
         contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 40 }]}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.screenTitle}>Train</Text>
+        <Text style={styles.screenTitle} maxFontSizeMultiplier={1.3}>Train</Text>
 
         <View style={styles.section}>
-          <Text style={styles.sectionKicker}>TODAY</Text>
+          <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TODAY</Text>
           <TodaysTrainingCard
             isRestDay={isRestDay}
             todaySession={todaySession}
@@ -133,7 +133,7 @@ export default function TrainScreen() {
 
         {orderedScheduledDays.length > 0 ? (
           <View style={styles.section}>
-            <Text style={styles.sectionKicker}>THIS WEEK&apos;S PLAN</Text>
+            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>THIS WEEK&apos;S PLAN</Text>
             <View style={styles.card}>
               {orderedScheduledDays.map((day, index) => {
                 const isToday = day === today;
@@ -143,13 +143,13 @@ export default function TrainScreen() {
                     style={[styles.planRow, index < orderedScheduledDays.length - 1 && styles.rowDivider]}
                   >
                     <View>
-                      <Text style={[styles.planRowDay, isToday && styles.planRowDayToday]}>
+                      <Text style={[styles.planRowDay, isToday && styles.planRowDayToday]} maxFontSizeMultiplier={1.2}>
                         {WEEKDAY_LABELS[day]}
                         {isToday ? ' · Today' : ''}
                       </Text>
-                      <Text style={styles.planRowLabel}>{sessionLabel}</Text>
+                      <Text style={styles.planRowLabel} maxFontSizeMultiplier={1.3}>{sessionLabel}</Text>
                     </View>
-                    <Text style={styles.planRowMeta}>
+                    <Text style={styles.planRowMeta} maxFontSizeMultiplier={1.3}>
                       Est. {preview.exerciseCount} · {preview.durationMin} min
                     </Text>
                   </View>
@@ -159,10 +159,12 @@ export default function TrainScreen() {
           </View>
         ) : (
           <View style={styles.section}>
-            <Text style={styles.sectionKicker}>THIS WEEK&apos;S PLAN</Text>
+            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>THIS WEEK&apos;S PLAN</Text>
             <View style={styles.emptyCard}>
               <SymbolView name="calendar.badge.plus" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />
-              <Text style={styles.emptyText}>No training days set yet — add some in Adjust My Plan to see your week here.</Text>
+              <Text style={styles.emptyText} maxFontSizeMultiplier={1.3}>
+                No training days set yet — add some in Adjust My Plan to see your week here.
+              </Text>
             </View>
           </View>
         )}

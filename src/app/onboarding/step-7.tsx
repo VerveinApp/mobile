@@ -76,20 +76,18 @@ export default function OnboardingCommitmentScreen() {
     // commitmentLevel (1–8) rides forward alongside every prior answer.
     // Onboarding's question-answering is done, but the flow continues
     // through the payoff screen and account creation, so the draft stays
-    // alive (now pointing at whichever payoff screen comes next) rather
-    // than being cleared here.
+    // alive (now pointing at First Look) rather than being cleared here.
     const params = { ...baseParams, commitmentLevel: String(selectedIndex + 1) };
-    // The richer "estimated potential" payoff needs real biometrics to be
-    // honest — only shown to users who actually consented to share them.
-    // Everyone else sees the adaptive First Look demo instead, which needs
-    // no health data at all.
-    if (healthConsent === 'true') {
-      saveOnboardingDraft({ step: 10, params });
-      router.push({ pathname: '/onboarding/potential', params } as never);
-    } else {
-      saveOnboardingDraft({ step: 8, params });
-      router.push({ pathname: '/onboarding/first-look', params } as never);
-    }
+    // Both branches converge on First Look now — the consent-only "estimated
+    // potential" payoff (radar + % + trajectory bars, onboarding/potential.tsx)
+    // was cut: a fluctuating-capacity user being told "you're at 54% of your
+    // potential" on a bad day is the same performance-guilt frame this
+    // product exists to reject, no matter how honest the underlying
+    // computation is. First Look demonstrates the same real adaptation
+    // (today's actual engine output at two energy levels) without scoring
+    // anyone against an ideal.
+    saveOnboardingDraft({ step: 8, params });
+    router.push({ pathname: '/onboarding/first-look', params } as never);
   };
 
   return (
@@ -103,6 +101,8 @@ export default function OnboardingCommitmentScreen() {
           style={styles.backButton}
           onPress={() => goBack('/onboarding/step-6', baseParams)}
           hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <BackArrowGraphic color={colors.text} />
         </Pressable>
@@ -116,8 +116,8 @@ export default function OnboardingCommitmentScreen() {
           </View>
         </View>
 
-        <Text style={styles.title}>How much can you commit?</Text>
-        <Text style={styles.subtitle}>Your plan should fit your life, not take it over.</Text>
+        <Text style={styles.title} maxFontSizeMultiplier={1.3}>How much can you commit?</Text>
+        <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>Your plan should fit your life, not take it over.</Text>
 
         <View style={styles.dialWrap}>
           <CommitmentDial
@@ -132,14 +132,14 @@ export default function OnboardingCommitmentScreen() {
         <View style={styles.readout}>
           {selected ? (
             <ReanimatedAnimated.View key={selectedIndex} entering={FadeIn.duration(120)}>
-              <Text style={styles.readoutLevel}>
+              <Text style={styles.readoutLevel} maxFontSizeMultiplier={1.1}>
                 {selectedIndex! + 1} <Text style={styles.readoutLevelMuted}>/ 8</Text>
               </Text>
-              <Text style={styles.readoutName}>{selected.name}</Text>
-              {selected.quote ? <Text style={styles.readoutQuote}>{selected.quote}</Text> : null}
+              <Text style={styles.readoutName} maxFontSizeMultiplier={1.3}>{selected.name}</Text>
+              {selected.quote ? <Text style={styles.readoutQuote} maxFontSizeMultiplier={1.4}>{selected.quote}</Text> : null}
             </ReanimatedAnimated.View>
           ) : (
-            <Text style={styles.readoutPrompt}>Turn the dial to set your commitment.</Text>
+            <Text style={styles.readoutPrompt} maxFontSizeMultiplier={1.3}>Turn the dial to set your commitment.</Text>
           )}
         </View>
 
@@ -175,7 +175,7 @@ export default function OnboardingCommitmentScreen() {
                 { opacity: continuePress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
               ]}
             />
-            <Text style={styles.primaryText}>Build my plan →</Text>
+            <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>Build my plan →</Text>
           </Animated.View>
         </Pressable>
       </ReanimatedAnimated.View>

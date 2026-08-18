@@ -32,7 +32,7 @@ export function AppLockGate() {
       return;
     }
     const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: 'Unlock Vervein',
+      promptMessage: 'Unlock VerveIn',
       cancelLabel: 'Cancel',
     });
     if (result.success) {
@@ -75,10 +75,10 @@ export function AppLockGate() {
       <View style={styles.iconWrap}>
         <SymbolView name="faceid" size={48} tintColor="#5FBE84" />
       </View>
-      <Text style={styles.title}>Vervein is locked</Text>
-      <Text style={styles.subtitle}>Unlock with Face ID to continue.</Text>
+      <Text style={styles.title} maxFontSizeMultiplier={1.3}>VerveIn is locked</Text>
+      <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>Unlock with Face ID to continue.</Text>
       <Pressable style={styles.unlockButton} onPress={attemptUnlock}>
-        <Text style={styles.unlockButtonText}>Try Again</Text>
+        <Text style={styles.unlockButtonText} maxFontSizeMultiplier={1.15}>Try Again</Text>
       </Pressable>
     </View>
   );

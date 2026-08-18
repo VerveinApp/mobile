@@ -91,6 +91,7 @@ export default function SettingsScreen() {
   const termsHover = useHoverFade();
   const privacyHover = useHoverFade();
   const biometricsHover = useHoverFade();
+  const weightHistoryHover = useHoverFade();
   const adjustPlanHover = useHoverFade();
   const conditionsHover = useHoverFade();
   const movementRestrictionsHover = useHoverFade();
@@ -200,10 +201,12 @@ export default function SettingsScreen() {
           onHoverOut={backHover.onHoverOut}
           hitSlop={10}
           style={styles.backButton}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <SymbolView name="chevron.left" size={16} tintColor={colors.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>Settings</Text>
+        <Text style={styles.headerTitle} maxFontSizeMultiplier={1.3}>Settings</Text>
         <View style={styles.backButton} />
       </View>
 
@@ -217,6 +220,14 @@ export default function SettingsScreen() {
               label="Body & Biometrics"
               onPress={() => biometricsSheetRef.current?.present()}
               hover={biometricsHover}
+            />
+            <NavRow
+              styles={styles}
+              colors={colors}
+              icon="scalemass"
+              label="Weight History"
+              onPress={() => router.push('/settings/weight-history' as never)}
+              hover={weightHistoryHover}
             />
             <NavRow
               styles={styles}
@@ -269,7 +280,7 @@ export default function SettingsScreen() {
               hover={progressHover}
             />
             <View style={[styles.unitRow, styles.rowDivider]}>
-              <Text style={styles.rowLabel}>Units</Text>
+              <Text style={styles.rowLabel} maxFontSizeMultiplier={1.3}>Units</Text>
               <View style={styles.unitPills}>
                 {UNIT_OPTIONS.map((option) => {
                   const isSelected = unit === option.id;
@@ -285,7 +296,10 @@ export default function SettingsScreen() {
                       style={styles.unitPillHit}
                     >
                       <View style={[styles.unitPillVisual, isSelected && styles.unitPillVisualSelected]}>
-                        <Text style={[styles.unitPillText, isSelected && styles.unitPillTextSelected]}>
+                        <Text
+                          style={[styles.unitPillText, isSelected && styles.unitPillTextSelected]}
+                          maxFontSizeMultiplier={1.2}
+                        >
                           {option.label}
                         </Text>
                       </View>
@@ -301,7 +315,7 @@ export default function SettingsScreen() {
         <Section styles={styles} title="APP">
           <View style={styles.card}>
             <View style={[styles.unitRow, styles.rowDivider]}>
-              <Text style={styles.rowLabel}>Appearance</Text>
+              <Text style={styles.rowLabel} maxFontSizeMultiplier={1.3}>Appearance</Text>
               <View style={styles.appearancePills}>
                 {APPEARANCE_OPTIONS.map((option) => {
                   const isSelected = preference === option.id;
@@ -317,7 +331,10 @@ export default function SettingsScreen() {
                       style={styles.unitPillHit}
                     >
                       <View style={[styles.unitPillVisual, isSelected && styles.unitPillVisualSelected]}>
-                        <Text style={[styles.unitPillText, isSelected && styles.unitPillTextSelected]}>
+                        <Text
+                          style={[styles.unitPillText, isSelected && styles.unitPillTextSelected]}
+                          maxFontSizeMultiplier={1.2}
+                        >
                           {option.label}
                         </Text>
                       </View>
@@ -329,7 +346,7 @@ export default function SettingsScreen() {
             <View style={styles.switchRow}>
               <View style={styles.switchRowLeft}>
                 <SymbolView name="iphone.radiowaves.left.and.right" size={15} tintColor="#5FBE84" style={styles.rowIcon} />
-                <Text style={styles.rowLabel}>Haptics</Text>
+                <Text style={styles.rowLabel} maxFontSizeMultiplier={1.3}>Haptics</Text>
               </View>
               <Switch
                 value={hapticsOn}
@@ -360,7 +377,7 @@ export default function SettingsScreen() {
             onHoverOut={exportHover.onHoverOut}
           >
             <View style={styles.actionVisual}>
-              <Text style={styles.actionText}>Export My Data</Text>
+              <Text style={styles.actionText} maxFontSizeMultiplier={1.2}>Export My Data</Text>
             </View>
           </Pressable>
           <Pressable
@@ -371,7 +388,7 @@ export default function SettingsScreen() {
             onPressOut={deletePress.onPressOut}
           >
             <View style={styles.destructiveVisual}>
-              <Text style={styles.destructiveText}>Delete My Data</Text>
+              <Text style={styles.destructiveText} maxFontSizeMultiplier={1.2}>Delete My Data</Text>
             </View>
           </Pressable>
           <View style={styles.card}>
@@ -390,7 +407,7 @@ export default function SettingsScreen() {
               onHoverIn={termsHover.onHoverIn}
               onHoverOut={termsHover.onHoverOut}
             >
-              <Text style={styles.aboutRowLabel}>Terms of Service</Text>
+              <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>Terms of Service</Text>
               <SymbolView name="chevron.right" size={12} tintColor={colors.iconFaint} />
             </Pressable>
             <Pressable
@@ -402,14 +419,14 @@ export default function SettingsScreen() {
               onHoverIn={privacyHover.onHoverIn}
               onHoverOut={privacyHover.onHoverOut}
             >
-              <Text style={styles.aboutRowLabel}>Privacy Policy</Text>
+              <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>Privacy Policy</Text>
               <SymbolView name="chevron.right" size={12} tintColor={colors.iconFaint} />
             </Pressable>
             <ComingSoonRow styles={styles} colors={colors} icon="questionmark.circle" label="Help & Feedback" subtitle="No support channel yet" last />
           </View>
         </Section>
 
-        <Text style={styles.footer}>Vervein v{appConfig.expo?.version ?? '1.0.0'}</Text>
+        <Text style={styles.footer} maxFontSizeMultiplier={1.3}>VerveIn v{appConfig.expo?.version ?? '1.0.0'}</Text>
       </ScrollView>
 
       <BiometricsSheet ref={biometricsSheetRef} />
@@ -423,7 +440,7 @@ export default function SettingsScreen() {
 function Section({ styles, title, children }: { styles: ReturnType<typeof createStyles>; title: string; children: React.ReactNode }) {
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionKicker}>{title}</Text>
+      <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>{title}</Text>
       {children}
     </View>
   );
@@ -458,7 +475,7 @@ function NavRow({
     >
       <View style={styles.switchRowLeft}>
         <SymbolView name={icon} size={15} tintColor="#5FBE84" style={styles.rowIcon} />
-        <Text style={styles.rowLabel}>{label}</Text>
+        <Text style={styles.rowLabel} maxFontSizeMultiplier={1.3}>{label}</Text>
       </View>
       <SymbolView name="chevron.right" size={12} tintColor={colors.iconFaint} />
     </Pressable>
@@ -489,8 +506,10 @@ function AppLockRow({
       <View style={styles.switchRowLeft}>
         <SymbolView name="faceid" size={15} tintColor={available ? '#5FBE84' : colors.iconFaint} style={styles.rowIcon} />
         <View>
-          <Text style={styles.rowLabel}>{label}</Text>
-          {!available ? <Text style={styles.comingSoonSubtitle}>Not set up on this device</Text> : null}
+          <Text style={styles.rowLabel} maxFontSizeMultiplier={1.3}>{label}</Text>
+          {!available ? (
+            <Text style={styles.comingSoonSubtitle} maxFontSizeMultiplier={1.3}>Not set up on this device</Text>
+          ) : null}
         </View>
       </View>
       <Switch
@@ -524,12 +543,12 @@ function ComingSoonRow({
       <View style={styles.switchRowLeft}>
         <SymbolView name={icon} size={15} tintColor={colors.iconFaint} style={styles.rowIcon} />
         <View>
-          <Text style={styles.comingSoonLabel}>{label}</Text>
-          <Text style={styles.comingSoonSubtitle}>{subtitle}</Text>
+          <Text style={styles.comingSoonLabel} maxFontSizeMultiplier={1.3}>{label}</Text>
+          <Text style={styles.comingSoonSubtitle} maxFontSizeMultiplier={1.3}>{subtitle}</Text>
         </View>
       </View>
       <View style={styles.comingSoonBadge}>
-        <Text style={styles.comingSoonBadgeText}>Soon</Text>
+        <Text style={styles.comingSoonBadgeText} maxFontSizeMultiplier={1.2}>Soon</Text>
       </View>
     </View>
   );

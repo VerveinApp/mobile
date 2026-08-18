@@ -28,15 +28,17 @@ export function LegalPlaceholderScreen({ title }: { title: string }) {
           onHoverOut={backHover.onHoverOut}
           hitSlop={10}
           style={styles.backButton}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <SymbolView name="chevron.left" size={16} tintColor={colors.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>{title}</Text>
+        <Text style={styles.headerTitle} maxFontSizeMultiplier={1.3}>{title}</Text>
         <View style={styles.backButton} />
       </View>
 
       <View style={styles.body}>
-        <Text style={styles.placeholderText}>
+        <Text style={styles.placeholderText} maxFontSizeMultiplier={1.4}>
           This is a prototype build — {title.toLowerCase()} hasn&apos;t been drafted yet. Real copy needs legal review
           before this app ships.
         </Text>

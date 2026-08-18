@@ -4,17 +4,21 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'r
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { TrajectoryBars } from '@/components/onboarding/trajectory-bars';
 import { RadarChart } from '@/components/onboarding/radar-chart';
 import { hapticSelect } from '@/lib/haptics';
+import { MOVEMENT_PATTERN_LABELS } from '@/lib/movement-pattern-labels';
 import type { BodyArea } from '@/lib/plan-preview';
-import { computePotential, type PotentialResult } from '@/lib/potential-score';
 import { getRecentWeeks, type WeekDay } from '@/lib/session-history';
 import { useAppColors } from '@/lib/theme-context';
 import { getTrainingState } from '@/lib/training-state';
 import type { TrainingState } from '@/lib/engine/training-state';
 import { getProfile } from '@/lib/user-profile';
-import { getBodyAreaBreakdown, type BodyAreaBreakdown } from '@/lib/workout-log';
+import {
+  getBodyAreaBreakdown,
+  getMovementPatternBreakdown,
+  type BodyAreaBreakdown,
+  type MovementPatternBreakdown,
+} from '@/lib/workout-log';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 
 const WEEKDAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
@@ -38,19 +42,20 @@ const TREND_ICON: Record<'improving' | 'stable' | 'declining', SFSymbol> = {
 };
 
 /**
- * The real "trend detail" destination Profile's potential card links to.
- * Two honest sections: the same potential estimate shown compactly on
- * Profile, expanded with a trajectory projection; and actual consistency
- * data from session-history.ts. No fabricated performance deltas — this app
- * doesn't log sets/reps/weight, so it doesn't claim to show strength gains.
+ * Real consistency and training-balance data only — no fabricated
+ * performance deltas, since this app doesn't log sets/reps/weight so it
+ * doesn't claim to show strength gains. The old "Your Potential" section
+ * (a synthetic %-of-potential score + trajectory projection, computed by
+ * the since-deleted potential-score.ts) was cut for the same anti-guilt
+ * reasoning as onboarding/potential.tsx and Home's Fitness/Trends cards.
  */
 export default function ProgressScreen() {
   const insets = useSafeAreaInsets();
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const [potential, setPotential] = useState<PotentialResult | null>(null);
   const [weeks, setWeeks] = useState<WeekDay[][]>([]);
   const [bodyAreaBreakdown, setBodyAreaBreakdown] = useState<BodyAreaBreakdown | null>(null);
+  const [movementPatternBreakdown, setMovementPatternBreakdown] = useState<MovementPatternBreakdown | null>(null);
   const [trainingState, setTrainingState] = useState<TrainingState | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -62,9 +67,9 @@ export default function ProgressScreen() {
       (async () => {
         const profile = await getProfile();
         const trainingDays = profile?.days ? profile.days.split(',') : null;
-        setPotential(computePotential(profile ?? {}));
         setWeeks(await getRecentWeeks(trainingDays, weekCount));
         setBodyAreaBreakdown(await getBodyAreaBreakdown());
+        setMovementPatternBreakdown(await getMovementPatternBreakdown());
         setTrainingState(await getTrainingState());
         setLoaded(true);
       })();
@@ -75,14 +80,14 @@ export default function ProgressScreen() {
     setRefreshing(true);
     const profile = await getProfile();
     const trainingDays = profile?.days ? profile.days.split(',') : null;
-    setPotential(computePotential(profile ?? {}));
     setWeeks(await getRecentWeeks(trainingDays, weekCount));
     setBodyAreaBreakdown(await getBodyAreaBreakdown());
+    setMovementPatternBreakdown(await getMovementPatternBreakdown());
     setTrainingState(await getTrainingState());
     setRefreshing(false);
   }, [weekCount]);
 
-  if (!loaded || !potential) {
+  if (!loaded) {
     return (
       <View style={styles.root}>
         <ScrollView
@@ -90,13 +95,6 @@ export default function ProgressScreen() {
           showsVerticalScrollIndicator={false}
         >
           <SkeletonBlock width={130} height={24} borderRadius={6} />
-
-          <View style={styles.section}>
-            <SkeletonBlock width={110} height={11} borderRadius={4} />
-            <SkeletonCard height={280} lines={3} />
-            <SkeletonCard height={150} lines={3} />
-            <SkeletonCard height={130} lines={2} />
-          </View>
 
           <View style={styles.section}>
             <SkeletonBlock width={90} height={11} borderRadius={4} />
@@ -147,6 +145,20 @@ export default function ProgressScreen() {
       }))
     : [];
 
+  // Plain list, not a second radar — 12 real axes would be cluttered, and
+  // grouping them into fewer buckets would mean inventing boundaries the
+  // vault/engine never defined (see the pentagon-radar discussion this
+  // matches). Only patterns something was actually logged against appear —
+  // a pattern with zero real data isn't a zero score, it's just absent.
+  // Multi-pattern exercises count toward each of their real patterns (see
+  // getMovementPatternBreakdown's own doc comment), so this can sum to more
+  // than the raw exercise count — that's correct, not a bug.
+  const movementPatternRows = movementPatternBreakdown
+    ? (Object.entries(movementPatternBreakdown) as [keyof typeof movementPatternBreakdown, { completed: number; total: number }][])
+        .filter(([, counts]) => counts.total > 0)
+        .sort((a, b) => b[1].total - a[1].total)
+    : [];
+
   return (
     <View style={styles.root}>
       <ScrollView
@@ -156,60 +168,11 @@ export default function ProgressScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.textSecondary} />
         }
       >
-        <Text style={styles.screenTitle}>Progress</Text>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionKicker}>YOUR POTENTIAL</Text>
-          <View style={styles.card}>
-            <View style={styles.radarWrap}>
-              <RadarChart
-                size={220}
-                data={potential.pillars.map((p) => ({ label: p.label, value: p.value }))}
-              />
-            </View>
-            <Text style={styles.potentialValue}>{potential.overall}%</Text>
-            <Text style={styles.potentialLabel}>Overall Potential</Text>
-            {potential.leadPillars.length > 0 ? (
-              <Text style={styles.insightText}>
-                With your inputs, you have high potential for{' '}
-                <Text style={styles.insightAccent}>
-                  {potential.leadPillars[0]?.toLowerCase()} and {potential.leadPillars[1]?.toLowerCase()}
-                </Text>
-                .
-              </Text>
-            ) : null}
-          </View>
-
-          <View style={styles.card}>
-            {potential.pillars.map((pillar, index) => (
-              <View
-                key={pillar.key}
-                style={[styles.pillarRow, index < potential.pillars.length - 1 && styles.rowDivider]}
-              >
-                <Text style={styles.pillarLabel}>{pillar.label}</Text>
-                <View style={styles.pillarRight}>
-                  <Text style={styles.pillarTier}>{pillar.tier}</Text>
-                  <Text style={styles.pillarValue}>{pillar.value}%</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-
-          <View style={styles.card}>
-            <Text style={styles.trajectoryHint}>A hedged projection, not a guarantee — where consistent training could take this estimate.</Text>
-            <View style={styles.trajectoryWrap}>
-              <TrajectoryBars points={potential.trajectory} maxHeight={110} barWidth={72} />
-            </View>
-            <Text style={styles.trajectoryNote}>
-              Stay consistent and you could reach <Text style={styles.trajectoryNoteAccent}>{potential.peak}%</Text> within a
-              year.
-            </Text>
-          </View>
-        </View>
+        <Text style={styles.screenTitle} maxFontSizeMultiplier={1.3}>Progress</Text>
 
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionKicker}>CONSISTENCY</Text>
+            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>CONSISTENCY</Text>
             <View style={styles.rangeToggle}>
               {(['week', 'month'] as const).map((option) => (
                 <Pressable
@@ -221,7 +184,10 @@ export default function ProgressScreen() {
                     setGridRange(option);
                   }}
                 >
-                  <Text style={[styles.rangeOptionText, gridRange === option && styles.rangeOptionTextActive]}>
+                  <Text
+                    style={[styles.rangeOptionText, gridRange === option && styles.rangeOptionTextActive]}
+                    maxFontSizeMultiplier={1.2}
+                  >
                     {option === 'week' ? 'Week' : 'Month'}
                   </Text>
                 </Pressable>
@@ -230,19 +196,23 @@ export default function ProgressScreen() {
           </View>
           <View style={styles.summaryRow}>
             <View style={styles.summaryCard}>
-              <Text style={styles.summaryValue}>{completedPast.length}</Text>
-              <Text style={styles.summaryLabel}>Logged Sessions</Text>
+              <Text style={styles.summaryValue} maxFontSizeMultiplier={1.15}>{completedPast.length}</Text>
+              <Text style={styles.summaryLabel} maxFontSizeMultiplier={1.2}>Logged Sessions</Text>
             </View>
             <View style={styles.summaryCard}>
-              <Text style={styles.summaryValue}>{completionRate !== null ? `${completionRate}%` : '—'}</Text>
-              <Text style={styles.summaryLabel}>{weekCount === 1 ? 'This Week' : `${weekCount}-Week Completion`}</Text>
+              <Text style={styles.summaryValue} maxFontSizeMultiplier={1.15}>
+                {completionRate !== null ? `${completionRate}%` : '—'}
+              </Text>
+              <Text style={styles.summaryLabel} maxFontSizeMultiplier={1.2}>
+                {weekCount === 1 ? 'This Week' : `${weekCount}-Week Completion`}
+              </Text>
             </View>
           </View>
 
           <View style={styles.card}>
             <View style={styles.gridHeaderRow}>
               {WEEKDAY_LETTERS.map((letter, index) => (
-                <Text key={index} style={styles.gridHeaderText}>
+                <Text key={index} style={styles.gridHeaderText} maxFontSizeMultiplier={1.15}>
                   {letter}
                 </Text>
               ))}
@@ -276,7 +246,7 @@ export default function ProgressScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionKicker}>TRAINING BALANCE</Text>
+          <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TRAINING BALANCE</Text>
           {bodyAreaBreakdown && BODY_AREA_ORDER.some((area) => bodyAreaBreakdown[area].total > 0) ? (
             <View style={styles.card}>
               {hasMovementData ? (
@@ -284,7 +254,9 @@ export default function ProgressScreen() {
                   <View style={styles.movementRadarWrap}>
                     <RadarChart size={172} data={movementShapeData} />
                   </View>
-                  <Text style={styles.movementShapeCaption}>Your movement this month — no target, just the pattern.</Text>
+                  <Text style={styles.movementShapeCaption} maxFontSizeMultiplier={1.3}>
+                    Your movement pattern so far — no target, just the shape.
+                  </Text>
                 </>
               ) : null}
               {BODY_AREA_ORDER.map((area, index) => {
@@ -294,8 +266,8 @@ export default function ProgressScreen() {
                     key={area}
                     style={[styles.balanceRow, index < BODY_AREA_ORDER.length - 1 && styles.rowDivider]}
                   >
-                    <Text style={styles.balanceLabel}>{BODY_AREA_LABELS[area]}</Text>
-                    <Text style={styles.balanceCount}>
+                    <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{BODY_AREA_LABELS[area]}</Text>
+                    <Text style={styles.balanceCount} maxFontSizeMultiplier={1.2}>
                       {completed}/{total}
                     </Text>
                   </View>
@@ -305,15 +277,37 @@ export default function ProgressScreen() {
           ) : (
             <View style={styles.emptyCard}>
               <SymbolView name="figure.strengthtraining.traditional" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />
-              <Text style={styles.emptyText}>
+              <Text style={styles.emptyText} maxFontSizeMultiplier={1.3}>
                 Finish a session and check off exercises to see your training balance here.
               </Text>
             </View>
           )}
         </View>
 
+        {movementPatternRows.length > 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>MOVEMENT PATTERNS</Text>
+            <View style={styles.card}>
+              <Text style={styles.movementShapeCaption} maxFontSizeMultiplier={1.3}>
+                A more granular cut of the same real sessions — what kinds of movement, not just which body areas.
+              </Text>
+              {movementPatternRows.map(([pattern, counts], index) => (
+                <View
+                  key={pattern}
+                  style={[styles.balanceRow, index < movementPatternRows.length - 1 && styles.rowDivider]}
+                >
+                  <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{MOVEMENT_PATTERN_LABELS[pattern]}</Text>
+                  <Text style={styles.balanceCount} maxFontSizeMultiplier={1.2}>
+                    {counts.completed}/{counts.total}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
         <View style={styles.section}>
-          <Text style={styles.sectionKicker}>TRAINING LOAD</Text>
+          <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TRAINING LOAD</Text>
           {showTrend || showDebt ? (
             <View style={styles.card}>
               {showTrend && trainingState ? (
@@ -323,7 +317,7 @@ export default function ProgressScreen() {
                     size={15}
                     tintColor={trainingState.capacityTrend.value === 'improving' ? '#5FBE84' : colors.textSecondary}
                   />
-                  <Text style={styles.trendText}>
+                  <Text style={styles.trendText} maxFontSizeMultiplier={1.3}>
                     Energy trend: <Text style={styles.trendValue}>{TREND_LABEL[trainingState.capacityTrend.value]}</Text>
                   </Text>
                 </View>
@@ -331,7 +325,7 @@ export default function ProgressScreen() {
               {showDebt ? (
                 bankedAreas.length > 0 ? (
                   <>
-                    <Text style={styles.debtHint}>
+                    <Text style={styles.debtHint} maxFontSizeMultiplier={1.3}>
                       Banked volume — sets your plan called for that a lower-energy day trimmed, ready to make up on a
                       stronger one.
                     </Text>
@@ -340,22 +334,24 @@ export default function ProgressScreen() {
                         key={area}
                         style={[styles.debtRow, index < bankedAreas.length - 1 && styles.rowDivider]}
                       >
-                        <Text style={styles.balanceLabel}>{BODY_AREA_LABELS[area]}</Text>
-                        <Text style={styles.debtValue}>
+                        <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{BODY_AREA_LABELS[area]}</Text>
+                        <Text style={styles.debtValue} maxFontSizeMultiplier={1.2}>
                           {trainingState?.stimulusDebt.value[area].debtSets} sets banked
                         </Text>
                       </View>
                     ))}
                   </>
                 ) : (
-                  <Text style={styles.debtHint}>No banked volume right now — recent sessions delivered what your plan called for.</Text>
+                  <Text style={styles.debtHint} maxFontSizeMultiplier={1.3}>
+                    No banked volume right now — recent sessions delivered what your plan called for.
+                  </Text>
                 )
               ) : null}
             </View>
           ) : (
             <View style={styles.emptyCard}>
               <SymbolView name="chart.line.uptrend.xyaxis" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />
-              <Text style={styles.emptyText}>
+              <Text style={styles.emptyText} maxFontSizeMultiplier={1.3}>
                 Finish a few more sessions to see your energy trend and banked volume here.
               </Text>
             </View>
@@ -378,7 +374,7 @@ function LegendDot({
   return (
     <View style={styles.legendItem}>
       <View style={[styles.legendDot, style]} />
-      <Text style={styles.legendText}>{label}</Text>
+      <Text style={styles.legendText} maxFontSizeMultiplier={1.2}>{label}</Text>
     </View>
   );
 }
@@ -441,45 +437,6 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       borderColor: colors.surfaceBorder,
       backgroundColor: colors.surface,
       padding: 16,
-    },
-    radarWrap: {
-      alignItems: 'center',
-      marginBottom: 4,
-    },
-    potentialValue: {
-      textAlign: 'center',
-      color: colors.text,
-      fontSize: 26,
-      letterSpacing: -0.4,
-      fontFamily: 'Geist-Black',
-    },
-    potentialLabel: {
-      textAlign: 'center',
-      marginTop: 2,
-      color: colors.textTertiary,
-      fontSize: 10.5,
-      letterSpacing: 0.4,
-      textTransform: 'uppercase',
-      fontFamily: 'Geist-Medium',
-    },
-    insightText: {
-      textAlign: 'center',
-      marginTop: 10,
-      paddingHorizontal: 20,
-      color: colors.textSecondary,
-      fontSize: 11.5,
-      lineHeight: 17,
-      fontFamily: 'Geist-Regular',
-    },
-    insightAccent: {
-      color: '#438C63',
-      fontFamily: 'Geist-SemiBold',
-    },
-    pillarRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingVertical: 12,
     },
     rowDivider: {
       borderBottomWidth: StyleSheet.hairlineWidth,
@@ -566,50 +523,6 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       fontFamily: 'Geist-Medium',
       lineHeight: 18,
       textAlign: 'center',
-    },
-    pillarLabel: {
-      color: colors.text,
-      fontSize: 13,
-      fontFamily: 'Geist-Medium',
-    },
-    pillarRight: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    pillarTier: {
-      color: colors.textTertiary,
-      fontSize: 11,
-      fontFamily: 'Geist-Medium',
-    },
-    pillarValue: {
-      color: '#5FBE84',
-      fontSize: 13,
-      fontFamily: 'Geist-SemiBold',
-      width: 40,
-      textAlign: 'right',
-    },
-    trajectoryHint: {
-      color: colors.textTertiary,
-      fontSize: 11.5,
-      lineHeight: 16,
-      fontFamily: 'Geist-Medium',
-      marginBottom: 8,
-    },
-    trajectoryWrap: {
-      paddingTop: 4,
-    },
-    trajectoryNote: {
-      marginTop: 4,
-      color: colors.textSecondary,
-      fontSize: 12.5,
-      lineHeight: 18,
-      textAlign: 'center',
-      fontFamily: 'Geist-Medium',
-    },
-    trajectoryNoteAccent: {
-      color: '#5FBE84',
-      fontFamily: 'Geist-Bold',
     },
     summaryRow: {
       flexDirection: 'row',

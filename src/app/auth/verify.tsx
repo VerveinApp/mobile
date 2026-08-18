@@ -187,6 +187,8 @@ export default function VerifyEmailScreen() {
           style={styles.backButton}
           onPress={() => goBack('/onboarding/create-account', params)}
           hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <BackArrowGraphic color={colors.text} />
         </Pressable>
@@ -198,12 +200,12 @@ export default function VerifyEmailScreen() {
           <View style={styles.brandMark}>
             <LogoMarkGraphic color={colors.text} />
           </View>
-          <Text style={styles.brandText}>ervein</Text>
+          <Text style={styles.brandText} maxFontSizeMultiplier={1.1}>ervein</Text>
         </View>
 
-        <Text style={styles.title}>Almost there</Text>
+        <Text style={styles.title} maxFontSizeMultiplier={1.3}>Almost there</Text>
 
-        <Text style={styles.subtitle}>
+        <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>
           Enter the 4-digit code sent to{' '}
           <Text style={styles.subtitleEmail}>{displayEmail}</Text>
         </Text>
@@ -238,7 +240,7 @@ export default function VerifyEmailScreen() {
         </View>
 
         {codeError ? (
-          <ReanimatedAnimated.Text entering={FadeIn.duration(150)} style={styles.codeErrorText}>
+          <ReanimatedAnimated.Text entering={FadeIn.duration(150)} style={styles.codeErrorText} maxFontSizeMultiplier={1.3}>
             {codeError}
           </ReanimatedAnimated.Text>
         ) : null}
@@ -248,7 +250,7 @@ export default function VerifyEmailScreen() {
           onPress={handleContinue}
           disabled={isCodeIncomplete}
         >
-          <Text style={styles.primaryText}>Continue</Text>
+          <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>Continue</Text>
           <View style={styles.buttonArrow}>
             <ArrowUpIconGraphic size={24} />
           </View>
@@ -285,8 +287,13 @@ export default function VerifyEmailScreen() {
               <View style={styles.resendIcon}>
                 <ReloadIconGraphic color={cooldown > 0 ? '#4a4a4a' : '#29563A'} />
               </View>
-              <Text style={[styles.resendText, cooldown > 0 && styles.resendTextDisabled]}>Resend your email</Text>
-              <Text style={styles.countdownText}>{formatCountdown(cooldown)}</Text>
+              <Text
+                style={[styles.resendText, cooldown > 0 && styles.resendTextDisabled]}
+                maxFontSizeMultiplier={1.2}
+              >
+                Resend your email
+              </Text>
+              <Text style={styles.countdownText} maxFontSizeMultiplier={1.15}>{formatCountdown(cooldown)}</Text>
             </Animated.View>
           </Pressable>
 
@@ -319,7 +326,7 @@ export default function VerifyEmailScreen() {
               <View style={styles.resendIcon}>
                 <PencilIconGraphic />
               </View>
-              <Text style={styles.resendText}>Change your email address</Text>
+              <Text style={styles.resendText} maxFontSizeMultiplier={1.2}>Change your email address</Text>
               <View style={styles.chevronIcon}>
                 <ChevronForwardGraphic color={chevronColor} />
               </View>

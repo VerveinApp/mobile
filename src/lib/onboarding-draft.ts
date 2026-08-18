@@ -19,13 +19,17 @@ export const ONBOARDING_STEP_ROUTES: Record<number, string> = {
   7: '/onboarding/step-7',
   8: '/onboarding/first-look',
   9: '/onboarding/create-account',
-  // 10 is the health-consent branch's payoff screen — an alternate to 8,
-  // not a sequential next step (see step-7's handleBuildPlan branch).
-  10: '/onboarding/potential',
+  // 10 (onboarding/potential.tsx, the consent-branch "estimated potential"
+  // payoff — % score + trajectory bars) was cut: scoring a fluctuating-
+  // capacity user against an ideal is exactly the performance-guilt frame
+  // this product exists to reject. Both branches converge on 8 now. A stale
+  // draft saved with step 10 before this change resolves to no route,
+  // which loadOnboardingDraft() already treats as "no draft" — the user
+  // just restarts onboarding cleanly, never a crash.
 };
 
 export type OnboardingDraft = {
-  /** The step the user should resume at (2–10 — see ONBOARDING_STEP_ROUTES). */
+  /** The step the user should resume at (2–9 — see ONBOARDING_STEP_ROUTES). */
   step: number;
   params: Record<string, string>;
 };

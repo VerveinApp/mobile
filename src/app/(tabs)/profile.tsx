@@ -5,8 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
-import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
-import { computePotential } from '@/lib/potential-score';
+import { useHoverFade } from '@/lib/button-interactions';
 import {
   DURATION_LABELS,
   ENVIRONMENT_LABELS,
@@ -17,7 +16,6 @@ import {
 import { COMMITMENT_LEVELS } from '@/lib/commitment-levels';
 import { useAppColors } from '@/lib/theme-context';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
-import { RadarChart } from '@/components/onboarding/radar-chart';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 
 export default function ProfileScreen() {
@@ -41,8 +39,6 @@ export default function ProfileScreen() {
   );
 
   const settingsHover = useHoverFade();
-  const potentialHover = useHoverFade();
-  const potentialPress = useLiquidPress();
 
   if (!loaded) {
     return (
@@ -71,7 +67,6 @@ export default function ProfileScreen() {
     );
   }
 
-  const potential = computePotential(profile ?? {});
   const commitmentIndex = profile?.commitmentLevel ? Number(profile.commitmentLevel) - 1 : null;
   const commitmentName = commitmentIndex !== null ? (COMMITMENT_LEVELS[commitmentIndex]?.name ?? 'Not set') : 'Not set';
   const firstName = profile?.name?.trim().split(' ')[0];
@@ -90,20 +85,22 @@ export default function ProfileScreen() {
             onHoverOut={settingsHover.onHoverOut}
             hitSlop={10}
             style={styles.settingsButton}
+            accessibilityRole="button"
+            accessibilityLabel="Open settings"
           >
             <SymbolView name="gearshape.fill" size={17} tintColor={colors.iconMuted} />
           </Pressable>
 
           <View style={styles.avatarGlow} pointerEvents="none" />
           <View style={styles.avatarVisual}>
-            <Text style={styles.avatarText}>{initial}</Text>
+            <Text style={styles.avatarText} maxFontSizeMultiplier={1.15}>{initial}</Text>
           </View>
-          <Text style={styles.name}>{profile?.name?.trim() || 'Your Profile'}</Text>
-          {profile?.email ? <Text style={styles.email}>{profile.email}</Text> : null}
+          <Text style={styles.name} maxFontSizeMultiplier={1.3}>{profile?.name?.trim() || 'Your Profile'}</Text>
+          {profile?.email ? <Text style={styles.email} maxFontSizeMultiplier={1.3}>{profile.email}</Text> : null}
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionKicker}>YOUR PLAN</Text>
+          <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>YOUR PLAN</Text>
           <View style={styles.card}>
             <View pointerEvents="none" style={styles.cardSheen} />
             <PlanRow styles={styles} icon="target" label="Goal" value={GOAL_LABELS[profile?.goal ?? ''] ?? 'Not set'} />
@@ -113,27 +110,6 @@ export default function ProfileScreen() {
             <PlanRow styles={styles} icon="calendar" label="Training Days" value={formatDays(profile?.days)} />
             <PlanRow styles={styles} icon="flame.fill" label="Commitment" value={commitmentName} last />
           </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionKicker}>YOUR POTENTIAL</Text>
-          <Pressable
-            onPress={() => router.push('/progress' as never)}
-            onHoverIn={potentialHover.onHoverIn}
-            onHoverOut={potentialHover.onHoverOut}
-            onPressIn={potentialPress.onPressIn}
-            onPressOut={potentialPress.onPressOut}
-          >
-            <View style={styles.potentialCard}>
-              <View pointerEvents="none" style={styles.cardSheen} />
-              <View style={styles.radarWrap}>
-                <RadarChart size={172} data={potential.pillars.map((p) => ({ label: p.label, value: p.value }))} />
-              </View>
-              <Text style={styles.potentialValue}>{potential.overall}%</Text>
-              <Text style={styles.potentialLabel}>Overall Potential</Text>
-              <Text style={styles.cardLinkText}>See breakdown →</Text>
-            </View>
-          </Pressable>
         </View>
       </ScrollView>
     </View>
@@ -157,9 +133,9 @@ function PlanRow({
     <View style={[styles.planRow, !last && styles.planRowDivider]}>
       <View style={styles.planRowLeft}>
         <SymbolView name={icon} size={15} tintColor="#5FBE84" style={styles.planRowIcon} />
-        <Text style={styles.planRowLabel}>{label}</Text>
+        <Text style={styles.planRowLabel} maxFontSizeMultiplier={1.3}>{label}</Text>
       </View>
-      <Text style={styles.planRowValue}>{value}</Text>
+      <Text style={styles.planRowValue} maxFontSizeMultiplier={1.2}>{value}</Text>
     </View>
   );
 }
@@ -282,38 +258,6 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     planRowValue: {
       color: colors.text,
       fontSize: 13,
-      fontFamily: 'Geist-SemiBold',
-    },
-    potentialCard: {
-      paddingVertical: 20,
-      borderRadius: 16,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
-      backgroundColor: colors.surface,
-      alignItems: 'center',
-      overflow: 'hidden',
-    },
-    radarWrap: {
-      marginBottom: 4,
-    },
-    potentialValue: {
-      color: colors.text,
-      fontSize: 26,
-      letterSpacing: -0.4,
-      fontFamily: 'Geist-Black',
-    },
-    potentialLabel: {
-      marginTop: 2,
-      color: colors.textTertiary,
-      fontSize: 10.5,
-      letterSpacing: 0.4,
-      textTransform: 'uppercase',
-      fontFamily: 'Geist-Medium',
-    },
-    cardLinkText: {
-      marginTop: 10,
-      color: '#5FBE84',
-      fontSize: 12.5,
       fontFamily: 'Geist-SemiBold',
     },
   });

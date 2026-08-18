@@ -156,12 +156,12 @@ function SelectableCard<T extends string>({
             <View style={styles.cardIcon}>
               <Icon size={option.iconSize} color={iconColor} />
             </View>
-            <Text style={styles.cardLabel}>{option.label}</Text>
+            <Text style={styles.cardLabel} maxFontSizeMultiplier={1.2}>{option.label}</Text>
           </>
         ) : (
           <View style={styles.optionTextCol}>
-            <Text style={styles.optionTitle}>{option.label}</Text>
-            {option.subtitle ? <Text style={styles.optionSubtitle}>{option.subtitle}</Text> : null}
+            <Text style={styles.optionTitle} maxFontSizeMultiplier={1.2}>{option.label}</Text>
+            {option.subtitle ? <Text style={styles.optionSubtitle} maxFontSizeMultiplier={1.3}>{option.subtitle}</Text> : null}
           </View>
         )}
         {isSelected ? (

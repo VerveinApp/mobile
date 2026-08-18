@@ -40,11 +40,11 @@ export function TodaysTrainingCard({
     return (
       <View style={styles.card}>
         <View pointerEvents="none" style={styles.cardSheen} />
-        <Text style={styles.cardKicker}>TODAY</Text>
-        <Text style={styles.cardTitle}>Rest Day</Text>
-        <Text style={styles.cardMeta}>Recovery is part of the plan.</Text>
+        <Text style={styles.cardKicker} maxFontSizeMultiplier={1.2}>TODAY</Text>
+        <Text style={styles.cardTitle} maxFontSizeMultiplier={1.2}>Rest Day</Text>
+        <Text style={styles.cardMeta} maxFontSizeMultiplier={1.3}>Recovery is part of the plan.</Text>
         <Pressable onPress={handlePress} onHoverIn={hover.onHoverIn} onHoverOut={hover.onHoverOut}>
-          <Text style={styles.cardLinkText}>Check in anyway</Text>
+          <Text style={styles.cardLinkText} maxFontSizeMultiplier={1.2}>Check in anyway</Text>
         </Pressable>
       </View>
     );
@@ -62,14 +62,18 @@ export function TodaysTrainingCard({
     >
       <Animated.View style={[styles.card, { transform: [{ scale: press.scale }] }]}>
         <View pointerEvents="none" style={styles.cardSheen} />
-        <Text style={styles.cardKicker}>TODAY</Text>
-        <Text style={styles.cardTitle}>{sessionLabel}</Text>
-        <Text style={styles.cardMeta}>
+        <Text style={styles.cardKicker} maxFontSizeMultiplier={1.2}>TODAY</Text>
+        <Text style={styles.cardTitle} maxFontSizeMultiplier={1.2}>{sessionLabel}</Text>
+        <Text style={styles.cardMeta} maxFontSizeMultiplier={1.3}>
           {resolved ? '' : 'Est. '}
           {exerciseCount} exercises · {durationMin} min
         </Text>
-        {resolved && explanation ? <Text style={styles.cardReason}>{explanation}</Text> : null}
-        <Text style={styles.cardLinkText}>{resolved ? 'Continue session' : 'Check in & start'} →</Text>
+        {resolved && explanation ? (
+          <Text style={styles.cardReason} maxFontSizeMultiplier={1.4}>{explanation}</Text>
+        ) : null}
+        <Text style={styles.cardLinkText} maxFontSizeMultiplier={1.2}>
+          {resolved ? 'Continue session' : 'Check in & start'} →
+        </Text>
       </Animated.View>
     </Pressable>
   );

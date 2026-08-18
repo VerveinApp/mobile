@@ -43,6 +43,14 @@
         {
           "faceIDPermission": "Vervein uses Face ID to unlock the app."
         }
+      ],
+      [
+        "@kingstinct/react-native-healthkit",
+        {
+          "NSHealthShareUsageDescription": "VerveIn reads your recent activity, sleep, and resting heart rate to give more honest readiness context alongside how you say you feel — nothing is written back to Health.",
+          "NSHealthUpdateUsageDescription": false,
+          "background": false
+        }
       ]
     ],
     "experiments": {

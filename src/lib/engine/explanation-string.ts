@@ -22,7 +22,10 @@ const BASE_TEMPLATES: Record<1 | 2 | 3 | 4 | 5, (ctx: { totalDuration: number; p
   5: () => 'Today\'s plan is ready, full baseline — no automatic increase. Want an optional finisher set added to each exercise?',
 };
 
-const TAG_LINES: Record<string, string> = {
+/** Exported so callers can show which real symptom-tag override fired
+ * outside the joined explanation sentence too (e.g. check-in.tsx's
+ * post-commit reasoning panel) — same source of truth, not a duplicate. */
+export const TAG_LINES: Record<string, string> = {
   period: 'Swapped high-impact moves for low-impact — period days deserve gentler loading.',
   brain_fog: 'Brain fog noted → session shortened and kept to simpler movements.',
   sore_legs: 'Legs flagged as sore → substituted lower-body work with upper body and core.',

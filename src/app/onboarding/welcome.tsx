@@ -45,31 +45,33 @@ export default function OnboardingWelcomeScreen() {
       <View style={[styles.canvas, { transform: [{ scale }] }]}>
       <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
 
-        <View style={styles.brandBlock} pointerEvents="none">
-          <View style={styles.brandAccent}>
-            <LogoMarkAccentGraphic color={colors.text} />
-          </View>
-          <View style={styles.brandMark}>
-            <LogoMarkGraphic color={colors.text} />
+        <View style={styles.brandRow} pointerEvents="none">
+          <View style={styles.iconWrap}>
+            <View style={styles.brandAccent}>
+              <LogoMarkAccentGraphic width={35.8156} height={45.1325} color={colors.text} />
+            </View>
+            <View style={styles.brandMark}>
+              <LogoMarkGraphic width={27.2695} height={38.3516} color={colors.text} />
+            </View>
           </View>
           <View style={styles.brandWordmark}>
-            <WordmarkTextGraphic color={colors.text} />
+            <WordmarkTextGraphic height={27.25} color={colors.text} />
           </View>
         </View>
 
-        <Text style={styles.kicker}>Adaptive Fitness Engine</Text>
+        <Text style={styles.kicker} maxFontSizeMultiplier={1.2}>Adaptive Fitness Engine</Text>
 
-        <Text style={styles.title}>
+        <Text style={styles.title} maxFontSizeMultiplier={1.3}>
           {'Fitness built around\n'}
           <Text style={styles.titleAccent}>your journey.</Text>
         </Text>
 
-        <Text style={styles.subtitle}>
+        <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>
           {'Your training adapts to you,\n'}
           not the other way around.
         </Text>
 
-        <Text style={styles.teaser}>See your plan adapt to how you feel — before you sign up.</Text>
+        <Text style={styles.teaser} maxFontSizeMultiplier={1.4}>See your plan adapt to how you feel — before you sign up.</Text>
 
         <Pressable
           style={styles.primaryButtonHit}
@@ -98,7 +100,7 @@ export default function OnboardingWelcomeScreen() {
                 { opacity: ctaPress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
               ]}
             />
-            <Text style={styles.primaryText}>Get started</Text>
+            <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>Get started</Text>
             <View style={styles.buttonArrow}>
               <ArrowUpIconGraphic size={24} />
             </View>
@@ -128,27 +130,41 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       width: CANVAS_WIDTH,
       height: CANVAS_HEIGHT,
     },
-    brandBlock: {
+    // 25% larger than the original 116×41 lockup, recentered around the
+    // same visual midpoint. A real flex row (not a fixed-width absolute
+    // box) so centering is based on the wordmark's actual rendered width —
+    // it's live Text now, not a fixed-width SVG, so a hand-calculated box
+    // width would silently drift from true-center as font metrics render.
+    // alignItems: 'flex-end' bottom-aligns the icon and wordmark exactly
+    // like the old hand-tuned top offsets did, but driven by real layout.
+    brandRow: {
       position: 'absolute',
-      left: (CANVAS_WIDTH - 116) / 2,
-      top: 260,
-      width: 116,
-      height: 41,
+      left: 0,
+      right: 0,
+      top: 254.88,
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'flex-end',
+    },
+    iconWrap: {
+      width: 56.45,
+      height: 50.79,
     },
     brandAccent: {
       position: 'absolute',
       left: 0,
-      top: 4.53,
+      top: 5.66,
     },
     brandMark: {
       position: 'absolute',
-      left: 23.34,
+      left: 29.18,
       top: 0,
     },
+    // Negative margin pulls the wordmark back under the icon's tail (56.45
+    // - 41.03 from the original lockup's overlap) so the letterforms
+    // interlock with the "V" the same way the old absolute positions did.
     brandWordmark: {
-      position: 'absolute',
-      left: 32.82,
-      top: 19,
+      marginLeft: -15.42,
     },
     kicker: {
       position: 'absolute',

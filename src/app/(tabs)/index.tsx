@@ -8,11 +8,18 @@ import { getCalibration } from '@/lib/calibration';
 import { getDeloadNudge } from '@/lib/deload';
 import { DEFAULT_CALIBRATION } from '@/lib/engine/personal-calibration';
 import type { DeloadNudge, UserCalibration } from '@/lib/engine/types';
+import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
+import {
+  dismissHealthKitBanner,
+  hasConnectedHealthKit,
+  isHealthKitAvailable,
+  isHealthKitBannerDismissed,
+  requestHealthKitAccess,
+} from '@/lib/health-kit';
 import { getWeeklyRecap } from '@/lib/momentum';
 import { hasCompletedOnboarding, loadOnboardingDraft, ONBOARDING_STEP_ROUTES } from '@/lib/onboarding-draft';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
-import { computePotential, type PotentialResult } from '@/lib/potential-score';
 import { getWeekActivity, type WeekDay } from '@/lib/session-history';
 import { useAppColors } from '@/lib/theme-context';
 import { getTodaySession, type TodaySession } from '@/lib/today-session';
@@ -68,6 +75,7 @@ export default function SummaryScreen() {
   const [calibration, setCalibration] = useState<UserCalibration | null>(null);
   const [deloadNudge, setDeloadNudge] = useState<DeloadNudge | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [showHealthKitBanner, setShowHealthKitBanner] = useState(false);
 
   // Memoized — this now runs the real engine's filtering over the full
   // exercise library (see plan-preview.ts), not a cheap lookup, so it
@@ -118,6 +126,17 @@ export default function SummaryScreen() {
       if (cancelled) return;
       setWeekActivity(activity);
       setStatus('ready');
+
+      // Own effect below would also work, but this keeps the check
+      // alongside the same "only after onboarding is confirmed complete"
+      // gate as everything else this screen loads.
+      const [available, connected, dismissed] = await Promise.all([
+        isHealthKitAvailable(),
+        hasConnectedHealthKit(),
+        isHealthKitBannerDismissed(),
+      ]);
+      if (cancelled) return;
+      setShowHealthKitBanner(available && !connected && !dismissed);
     })();
     return () => {
       cancelled = true;
@@ -166,6 +185,21 @@ export default function SummaryScreen() {
     setRefreshing(false);
   }, []);
 
+  const handleConnectHealthKit = useCallback(async () => {
+    hapticImpactLight();
+    // Fires the real system permission dialog — banner only disappears on
+    // completion (granted or not) so a mid-decision tap can't leave the
+    // banner stuck in a stale "still asking" state.
+    await requestHealthKitAccess();
+    setShowHealthKitBanner(false);
+  }, []);
+
+  const handleDismissHealthKitBanner = useCallback(async () => {
+    hapticSelect();
+    setShowHealthKitBanner(false);
+    await dismissHealthKitBanner();
+  }, []);
+
   if (status !== 'ready' || !weekActivity) {
     return (
       <View style={styles.root}>
@@ -211,7 +245,6 @@ export default function SummaryScreen() {
     );
   }
 
-  const potential = computePotential(profile ?? {});
   const today = WEEKDAY_NAMES[new Date().getDay()];
   const trainingDays = profile?.days ? profile.days.split(',') : null;
   const isRestDay = trainingDays !== null && !trainingDays.includes(today);
@@ -233,7 +266,30 @@ export default function SummaryScreen() {
         {deloadNudge?.triggered && deloadNudge.message ? (
           <View style={styles.deloadBanner}>
             <SymbolView name="moon.zzz.fill" size={15} tintColor={colors.textSecondary} />
-            <Text style={styles.deloadBannerText}>{deloadNudge.message}</Text>
+            <Text style={styles.deloadBannerText} maxFontSizeMultiplier={1.4}>{deloadNudge.message}</Text>
+          </View>
+        ) : null}
+
+        {showHealthKitBanner ? (
+          <View style={styles.healthKitBanner}>
+            <View style={styles.healthKitBannerRow}>
+              <SymbolView name="heart.fill" size={15} tintColor="#5FBE84" />
+              <Text style={styles.healthKitBannerText} maxFontSizeMultiplier={1.4}>
+                See your plan alongside real activity, sleep, and heart rate from Apple Health.
+              </Text>
+            </View>
+            <View style={styles.healthKitBannerActions}>
+              <Pressable style={styles.healthKitBannerDismiss} onPress={handleDismissHealthKitBanner} hitSlop={8}>
+                <Text style={styles.healthKitBannerDismissText} maxFontSizeMultiplier={1.2}>
+                  Not now
+                </Text>
+              </Pressable>
+              <Pressable style={styles.healthKitBannerConnect} onPress={handleConnectHealthKit} hitSlop={8}>
+                <Text style={styles.healthKitBannerConnectText} maxFontSizeMultiplier={1.2}>
+                  Connect
+                </Text>
+              </Pressable>
+            </View>
           </View>
         ) : null}
 
@@ -248,9 +304,13 @@ export default function SummaryScreen() {
 
         <WeeklyActivity styles={styles} weekActivity={weekActivity} />
 
-        <YourFitness styles={styles} profile={profile} todaySession={todaySession} weekActivity={weekActivity} potential={potential} />
-
-        <YourTrends styles={styles} potential={potential} />
+        <YourFitness
+          styles={styles}
+          profile={profile}
+          todaySession={todaySession}
+          weekActivity={weekActivity}
+          calibration={calibration}
+        />
       </ScrollView>
     </View>
   );
@@ -272,14 +332,14 @@ function Header({
   return (
     <View style={styles.header}>
       <View>
-        <Text style={styles.greeting}>
+        <Text style={styles.greeting} maxFontSizeMultiplier={1.3}>
           {getGreeting()}
           {firstName ? `, ${firstName}` : ''}
         </Text>
-        <Text style={styles.dateText}>{formatToday()}</Text>
+        <Text style={styles.dateText} maxFontSizeMultiplier={1.3}>{formatToday()}</Text>
         {weeklyRecap ? (
           <View style={styles.momentumRow}>
-            <Text style={styles.momentumText}>{weeklyRecap}</Text>
+            <Text style={styles.momentumText} maxFontSizeMultiplier={1.3}>{weeklyRecap}</Text>
           </View>
         ) : null}
       </View>
@@ -292,7 +352,7 @@ function Header({
         onPressOut={press.onPressOut}
       >
         <View style={styles.avatarVisual}>
-          <Text style={styles.avatarText}>{initial}</Text>
+          <Text style={styles.avatarText} maxFontSizeMultiplier={1.15}>{initial}</Text>
         </View>
       </Pressable>
     </View>
@@ -308,11 +368,11 @@ function WeeklyActivity({
 }) {
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionKicker}>THIS WEEK</Text>
+      <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>THIS WEEK</Text>
       <View style={styles.weekRow}>
         {weekActivity.days.map((day, index) => (
           <View key={day.weekday} style={styles.weekDayCol}>
-            <Text style={styles.weekDayLetter}>{WEEKDAY_LETTERS[index]}</Text>
+            <Text style={styles.weekDayLetter} maxFontSizeMultiplier={1.2}>{WEEKDAY_LETTERS[index]}</Text>
             <View
               style={[
                 styles.weekDot,
@@ -325,7 +385,7 @@ function WeeklyActivity({
           </View>
         ))}
       </View>
-      <Text style={styles.weekSummary}>
+      <Text style={styles.weekSummary} maxFontSizeMultiplier={1.3}>
         {weekActivity.completedCount} / {weekActivity.scheduledCount} workouts completed
       </Text>
     </View>
@@ -337,20 +397,14 @@ function YourFitness({
   profile,
   todaySession,
   weekActivity,
-  potential,
+  calibration,
 }: {
   styles: ReturnType<typeof createStyles>;
   profile: UserProfile | null;
   todaySession: TodaySession | null;
   weekActivity: { completedCount: number; scheduledCount: number };
-  potential: PotentialResult;
+  calibration: UserCalibration | null;
 }) {
-  const strength = potential.pillars.find((p) => p.key === 'strength');
-  const strengthNote =
-    strength && strength.value > potential.overall
-      ? 'One of your stronger areas right now.'
-      : 'Room to build here.';
-
   const commitment = Number(profile?.commitmentLevel) || 4;
   const loadLabel = commitment <= 3 ? 'Light' : commitment <= 6 ? 'Moderate' : 'High';
   const energy = todaySession?.energy;
@@ -362,6 +416,21 @@ function YourFitness({
         : energy === 3
           ? 'A steady session fits well today.'
           : 'Consider taking it easier today.';
+
+  // M15's calibration multiplier is the one real learned state this app
+  // has — invisible until now. Only surfaced once "established" (same
+  // TIER_ESTABLISHED_MIN=10 threshold M20's Tiered pattern uses elsewhere)
+  // and only when the deviation is a real signal, not early noise — 0.08 is
+  // personal-calibration.ts's own STEP size, so anything smaller is less
+  // than a single full adjustment's worth of movement.
+  const calibrationNote =
+    calibration && calibration.sampleCount >= 10
+      ? calibration.multiplier >= 1.08
+        ? "Your plan's been running heavier than baseline — recent sessions came back easy."
+        : calibration.multiplier <= 0.92
+          ? "Your plan's been running lighter than baseline right now."
+          : null
+      : null;
 
   // Observational, not a nudge — no "back on track" framing for a quiet
   // week, since the exact user this app is for is someone who should feel
@@ -380,69 +449,30 @@ function YourFitness({
 
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionKicker}>YOUR FITNESS</Text>
+      <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>YOUR FITNESS</Text>
 
       <View style={styles.fitnessCard}>
         <View style={styles.fitnessCardHeader}>
-          <Text style={styles.fitnessCardLabel}>Strength</Text>
-          <Text style={styles.fitnessCardValue}>
-            {strength?.value ?? 60}% <Text style={styles.fitnessCardTier}>· {strength?.tier ?? 'Moderate'}</Text>
+          <Text style={styles.fitnessCardLabel} maxFontSizeMultiplier={1.3}>Training Load</Text>
+          <Text style={styles.fitnessCardValue} maxFontSizeMultiplier={1.2}>{loadLabel}</Text>
+        </View>
+        <Text style={styles.fitnessCardNote} maxFontSizeMultiplier={1.4}>{readinessNote}</Text>
+        {calibrationNote ? (
+          <Text style={styles.fitnessCardCalibrationNote} maxFontSizeMultiplier={1.4}>
+            {calibrationNote}
           </Text>
-        </View>
-        <Text style={styles.fitnessCardNote}>{strengthNote}</Text>
+        ) : null}
       </View>
 
       <View style={styles.fitnessCard}>
         <View style={styles.fitnessCardHeader}>
-          <Text style={styles.fitnessCardLabel}>Training Load</Text>
-          <Text style={styles.fitnessCardValue}>{loadLabel}</Text>
-        </View>
-        <Text style={styles.fitnessCardNote}>{readinessNote}</Text>
-      </View>
-
-      <View style={styles.fitnessCard}>
-        <View style={styles.fitnessCardHeader}>
-          <Text style={styles.fitnessCardLabel}>Consistency</Text>
-          <Text style={styles.fitnessCardValue}>
+          <Text style={styles.fitnessCardLabel} maxFontSizeMultiplier={1.3}>Consistency</Text>
+          <Text style={styles.fitnessCardValue} maxFontSizeMultiplier={1.2}>
             {weekActivity.completedCount}/{weekActivity.scheduledCount}
             <Text style={styles.fitnessCardTier}> this week</Text>
           </Text>
         </View>
-        <Text style={styles.fitnessCardNote}>{consistencyNote}</Text>
-      </View>
-    </View>
-  );
-}
-
-function YourTrends({ styles, potential }: { styles: ReturnType<typeof createStyles>; potential: PotentialResult }) {
-  const hover = useHoverFade();
-
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionKicker}>YOUR TRENDS</Text>
-      <View style={styles.trendsCard}>
-        <View pointerEvents="none" style={styles.cardSheen} />
-        {potential.pillars.map((pillar, index) => {
-          const direction = pillar.value > potential.overall + 3 ? 'up' : pillar.value < potential.overall - 3 ? 'down' : 'flat';
-          const arrow = direction === 'up' ? '↗' : direction === 'down' ? '↘' : '→';
-          return (
-            <View key={pillar.key}>
-              {index > 0 ? <View style={styles.trendDivider} /> : null}
-              <Pressable
-                style={styles.trendRow}
-                onPress={() => router.push('/progress' as never)}
-                onHoverIn={hover.onHoverIn}
-                onHoverOut={hover.onHoverOut}
-              >
-                <Text style={styles.trendLabel}>{pillar.label}</Text>
-                <View style={styles.trendRight}>
-                  <Text style={styles.trendValue}>{pillar.value}%</Text>
-                  <Text style={[styles.trendArrow, direction === 'up' && styles.trendArrowUp]}>{arrow}</Text>
-                </View>
-              </Pressable>
-            </View>
-          );
-        })}
+        <Text style={styles.fitnessCardNote} maxFontSizeMultiplier={1.4}>{consistencyNote}</Text>
       </View>
     </View>
   );
@@ -498,6 +528,50 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       lineHeight: 16,
       fontFamily: 'Geist-Medium',
     },
+    healthKitBanner: {
+      gap: 10,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 14,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.surfaceBorder,
+      backgroundColor: colors.surface,
+    },
+    healthKitBannerRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+    },
+    healthKitBannerText: {
+      flex: 1,
+      color: colors.textSecondary,
+      fontSize: 12,
+      lineHeight: 16,
+      fontFamily: 'Geist-Medium',
+    },
+    healthKitBannerActions: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: 16,
+    },
+    healthKitBannerDismiss: {
+      paddingVertical: 4,
+      paddingHorizontal: 4,
+    },
+    healthKitBannerDismissText: {
+      color: colors.textTertiary,
+      fontSize: 12,
+      fontFamily: 'Geist-SemiBold',
+    },
+    healthKitBannerConnect: {
+      paddingVertical: 4,
+      paddingHorizontal: 4,
+    },
+    healthKitBannerConnectText: {
+      color: '#5FBE84',
+      fontSize: 12,
+      fontFamily: 'Geist-SemiBold',
+    },
     // Neutral, not a celebratory accent — this is an observation ("3
     // sessions this week"), never a score, so it reads the same as any
     // other plain fact on the screen rather than drawing extra attention.
@@ -524,18 +598,6 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       color: '#5FBE84',
       fontSize: 15,
       fontFamily: 'Geist-Bold',
-    },
-    // Softer, roomier radius than the 10px card language used everywhere
-    // else — this screen is deliberately "soft and spacious," not another
-    // hard-outlined rectangle. Still used by YourFitness's stacked cards below
-    // even though TodaysTrainingCard itself now lives in its own component.
-    cardSheen: {
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      top: 0,
-      height: '55%',
-      backgroundColor: colors.surfaceSheen,
     },
     section: {
       gap: 12,
@@ -620,46 +682,12 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       lineHeight: 17,
       fontFamily: 'Geist-Regular',
     },
-    trendsCard: {
-      borderRadius: 16,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
-      backgroundColor: colors.surface,
-      paddingHorizontal: 16,
-      overflow: 'hidden',
-    },
-    trendDivider: {
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: colors.surfaceDivider,
-    },
-    trendRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingVertical: 13,
-    },
-    trendLabel: {
-      color: colors.text,
-      fontSize: 13,
-      fontFamily: 'Geist-Medium',
-    },
-    trendRight: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    trendValue: {
-      color: colors.textSecondary,
-      fontSize: 13,
-      fontFamily: 'Geist-SemiBold',
-    },
-    trendArrow: {
+    fitnessCardCalibrationNote: {
+      marginTop: 4,
       color: colors.textTertiary,
-      fontSize: 14,
-      fontFamily: 'Geist-Bold',
-    },
-    trendArrowUp: {
-      color: '#5FBE84',
+      fontSize: 11,
+      lineHeight: 15,
+      fontFamily: 'Geist-Regular',
     },
   });
 }

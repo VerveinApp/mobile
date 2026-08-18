@@ -10,7 +10,6 @@ import { DEFAULT_CALIBRATION } from '@/lib/engine/personal-calibration';
 import { hapticImpactLight } from '@/lib/haptics';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
-import { computePotential } from '@/lib/potential-score';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppTheme } from '@/lib/theme-context';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
@@ -19,7 +18,6 @@ import {
   LogoMarkAccentGraphic,
   LogoMarkGraphic,
 } from '@/components/auth/create-account-graphics';
-import { TrajectoryBars } from '@/components/onboarding/trajectory-bars';
 
 const CANVAS_WIDTH = 375;
 const CANVAS_HEIGHT = 812;
@@ -30,12 +28,13 @@ const CANVAS_HEIGHT = 812;
 const isGlassAvailable = isLiquidGlassAvailable();
 
 /**
- * The last stop before the app proper — reached after all-set.tsx,
- * regardless of which onboarding branch (health-consent/potential or
- * first-look) the user took, since both converge at create-account before
- * this point. Runs on the same placeholder potential-score.ts engine as the
- * mid-onboarding Potential screen (see that file's own doc comment) — swap
- * both together when the real engine is ready, not just this screen.
+ * The last stop before the app proper — reached after all-set.tsx. Recaps
+ * the real choices that went into the plan (commitment, training days,
+ * today's session shape via the real engine's own preview) rather than
+ * projecting a synthetic growth curve — the trajectory-bars + "% within a
+ * year" version of this screen (backed by the since-deleted
+ * potential-score.ts) was cut for the same reasoning as
+ * onboarding/potential.tsx and Progress's old "Your Potential" section.
  */
 export default function OnboardingTrajectoryScreen() {
   const { width: windowWidth } = useWindowDimensions();
@@ -54,7 +53,6 @@ export default function OnboardingTrajectoryScreen() {
   const ctaHover = useHoverFade();
   const ctaPress = useLiquidPress();
 
-  const result = computePotential(profile ?? {});
   // A brand-new account has no session history yet, so the neutral default
   // (1.0×, never adjusted) is the honest calibration state here — not a
   // storage read away from a real one.
@@ -83,12 +81,8 @@ export default function OnboardingTrajectoryScreen() {
           </View>
         </View>
 
-        <Text style={styles.title}>Your growth trajectory</Text>
-        <Text style={styles.subtitle}>Here&apos;s what staying consistent looks like.</Text>
-
-        <View style={styles.barsWrap}>
-          <TrajectoryBars points={result.trajectory} />
-        </View>
+        <Text style={styles.title} maxFontSizeMultiplier={1.3}>Here&apos;s your plan</Text>
+        <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>Built around what you told us — nothing generic.</Text>
 
         <ReanimatedAnimated.View
           entering={reducedMotion ? undefined : FadeIn.duration(350).delay(950)}
@@ -96,18 +90,20 @@ export default function OnboardingTrajectoryScreen() {
         >
           <View pointerEvents="none" style={styles.highlightsSheen} />
           <View style={styles.highlightRow}>
-            <Text style={styles.highlightLabel}>Commitment</Text>
-            <Text style={styles.highlightValue}>{commitmentName ?? 'Not set'}</Text>
+            <Text style={styles.highlightLabel} maxFontSizeMultiplier={1.3}>Commitment</Text>
+            <Text style={styles.highlightValue} maxFontSizeMultiplier={1.2}>{commitmentName ?? 'Not set'}</Text>
           </View>
           <View style={styles.highlightDivider} />
           <View style={styles.highlightRow}>
-            <Text style={styles.highlightLabel}>Training days</Text>
-            <Text style={styles.highlightValue}>{daysCount > 0 ? `${daysCount}x / week` : 'Not set'}</Text>
+            <Text style={styles.highlightLabel} maxFontSizeMultiplier={1.3}>Training days</Text>
+            <Text style={styles.highlightValue} maxFontSizeMultiplier={1.2}>
+              {daysCount > 0 ? `${daysCount}x / week` : 'Not set'}
+            </Text>
           </View>
           <View style={styles.highlightDivider} />
           <View style={styles.highlightRow}>
-            <Text style={styles.highlightLabel}>Typical session</Text>
-            <Text style={styles.highlightValue}>
+            <Text style={styles.highlightLabel} maxFontSizeMultiplier={1.3}>Typical session</Text>
+            <Text style={styles.highlightValue} maxFontSizeMultiplier={1.2}>
               {preview.exerciseCount} exercises · {preview.durationMin} min
             </Text>
           </View>
@@ -116,9 +112,10 @@ export default function OnboardingTrajectoryScreen() {
         <ReanimatedAnimated.Text
           entering={reducedMotion ? undefined : FadeIn.duration(350).delay(1150)}
           style={styles.closingLine}
+          maxFontSizeMultiplier={1.4}
         >
-          Stay consistent and you could reach{' '}
-          <Text style={styles.closingLineAccent}>{result.peak}%</Text> within a year.
+          Your plan adjusts every time you check in —{' '}
+          <Text style={styles.closingLineAccent}>how you feel today shapes what you do today</Text>.
         </ReanimatedAnimated.Text>
 
         <Pressable
@@ -160,7 +157,7 @@ export default function OnboardingTrajectoryScreen() {
                 { opacity: ctaPress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
               ]}
             />
-            <Text style={styles.primaryText}>Enter Vervein</Text>
+            <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>Enter VerveIn</Text>
             <View style={styles.buttonArrow}>
               <ArrowUpIconGraphic size={24} />
             </View>
@@ -230,16 +227,10 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       textAlign: 'center',
       fontFamily: 'Geist-Regular',
     },
-    barsWrap: {
-      position: 'absolute',
-      left: (CANVAS_WIDTH - 280) / 2,
-      top: 236,
-      width: 280,
-    },
     highlightsCard: {
       position: 'absolute',
       left: 25,
-      top: 440,
+      top: 300,
       width: 325,
       paddingHorizontal: 18,
       paddingVertical: 4,
@@ -281,7 +272,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       position: 'absolute',
       left: 0,
       right: 0,
-      top: 566,
+      top: 480,
       paddingHorizontal: 52,
       color: colors.textSecondary,
       fontSize: 12.5,

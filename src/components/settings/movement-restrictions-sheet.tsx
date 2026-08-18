@@ -102,21 +102,23 @@ export const MovementRestrictionsSheet = forwardRef<BottomSheetModal>((_props, f
       handleIndicatorStyle={{ backgroundColor: colors.surfaceBorder }}
     >
       <View style={styles.headerRow}>
-        <Text style={styles.headerTitle}>Movement</Text>
+        <Text style={styles.headerTitle} maxFontSizeMultiplier={1.3}>Movement</Text>
         <Pressable
           onPress={() => sheetRef.current?.dismiss()}
           onHoverIn={closeHover.onHoverIn}
           onHoverOut={closeHover.onHoverOut}
           hitSlop={10}
           style={styles.closeButton}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
         >
           <SymbolView name="xmark" size={13} tintColor={colors.iconMuted} />
         </Pressable>
       </View>
 
       <BottomSheetScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <Text style={styles.headline}>Anything your body just doesn&apos;t do right now?</Text>
-        <Text style={styles.hint}>No explanation needed — we&apos;ll build around it.</Text>
+        <Text style={styles.headline} maxFontSizeMultiplier={1.3}>Anything your body just doesn&apos;t do right now?</Text>
+        <Text style={styles.hint} maxFontSizeMultiplier={1.4}>No explanation needed — we&apos;ll build around it.</Text>
 
         <View style={styles.list}>
           {MOVEMENT_RESTRICTIONS.map((restriction, index) => {
@@ -128,7 +130,7 @@ export const MovementRestrictionsSheet = forwardRef<BottomSheetModal>((_props, f
                 style={[styles.row, isLast && styles.rowLast]}
                 onPress={() => toggleRestriction(restriction)}
               >
-                <Text style={styles.rowLabel}>{MOVEMENT_RESTRICTION_LABELS[restriction]}</Text>
+                <Text style={styles.rowLabel} maxFontSizeMultiplier={1.3}>{MOVEMENT_RESTRICTION_LABELS[restriction]}</Text>
                 <View style={[styles.checkbox, isSelected && styles.checkboxChecked]}>
                   {isSelected ? <SymbolView name="checkmark" size={11} tintColor="#ffffff" weight="bold" /> : null}
                 </View>
@@ -138,7 +140,7 @@ export const MovementRestrictionsSheet = forwardRef<BottomSheetModal>((_props, f
         </View>
 
         <Pressable style={styles.noneRow} onPress={selectNone}>
-          <Text style={styles.rowLabel}>None of these</Text>
+          <Text style={styles.rowLabel} maxFontSizeMultiplier={1.3}>None of these</Text>
           <View style={[styles.checkbox, noneSelected && styles.checkboxChecked]}>
             {noneSelected ? <SymbolView name="checkmark" size={11} tintColor="#ffffff" weight="bold" /> : null}
           </View>
@@ -152,7 +154,7 @@ export const MovementRestrictionsSheet = forwardRef<BottomSheetModal>((_props, f
           onPressOut={savePress.onPressOut}
         >
           <View style={styles.saveButton}>
-            <Text style={styles.saveButtonText}>Save</Text>
+            <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>Save</Text>
           </View>
         </Pressable>
       </BottomSheetScrollView>

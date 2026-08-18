@@ -50,6 +50,8 @@ export default function OnboardingExperienceScreen() {
           style={styles.backButton}
           onPress={() => goBack('/onboarding/step-2', { name: name ?? '' })}
           hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <BackArrowGraphic color={colors.text} />
         </Pressable>
@@ -63,7 +65,7 @@ export default function OnboardingExperienceScreen() {
           </View>
         </View>
 
-        <Text style={styles.title}>Where are you at with training?</Text>
+        <Text style={styles.title} maxFontSizeMultiplier={1.3}>Where are you at with training?</Text>
 
         <View style={styles.cardStack}>
           <SingleSelectCards options={EXPERIENCE_LEVELS} onSelect={handleSelectExperience} />

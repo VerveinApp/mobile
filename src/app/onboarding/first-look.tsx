@@ -79,6 +79,8 @@ export default function OnboardingFirstLookScreen() {
           style={styles.backButton}
           onPress={() => goBack('/onboarding/step-7', params)}
           hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <BackArrowGraphic color={colors.text} />
         </Pressable>
@@ -92,22 +94,22 @@ export default function OnboardingFirstLookScreen() {
           </View>
         </View>
 
-        <Text style={styles.title}>Here&apos;s the part that&apos;s different</Text>
-        <Text style={styles.subtitle}>Same plan, two different days:</Text>
+        <Text style={styles.title} maxFontSizeMultiplier={1.3}>Here&apos;s the part that&apos;s different</Text>
+        <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>Same plan, two different days:</Text>
 
         <ReanimatedAnimated.View
           entering={reducedMotion ? undefined : FadeInDown.duration(400).delay(150).springify().damping(16)}
           style={styles.card}
         >
           <View pointerEvents="none" style={styles.cardSheen} />
-          <Text style={styles.cardLabel}>Low energy day</Text>
+          <Text style={styles.cardLabel} maxFontSizeMultiplier={1.2}>Low energy day</Text>
           <View style={styles.cardStatBlock}>
-            <Text style={styles.cardStat}>
+            <Text style={styles.cardStat} maxFontSizeMultiplier={1.2}>
               {lowEnergy.exerciseCount} <Text style={styles.cardStatUnit}>exercises</Text> · {lowEnergy.durationMin}{' '}
               <Text style={styles.cardStatUnit}>min</Text>
             </Text>
           </View>
-          <Text style={styles.cardExplanation}>{lowEnergy.explanation}</Text>
+          <Text style={styles.cardExplanation} maxFontSizeMultiplier={1.4}>{lowEnergy.explanation}</Text>
         </ReanimatedAnimated.View>
 
         <ReanimatedAnimated.View
@@ -115,19 +117,20 @@ export default function OnboardingFirstLookScreen() {
           style={[styles.card, styles.cardSecond]}
         >
           <View pointerEvents="none" style={styles.cardSheen} />
-          <Text style={[styles.cardLabel, styles.cardLabelAccent]}>Feeling good day</Text>
+          <Text style={[styles.cardLabel, styles.cardLabelAccent]} maxFontSizeMultiplier={1.2}>Feeling good day</Text>
           <View style={[styles.cardStatBlock, styles.cardStatBlockAccent]}>
-            <Text style={styles.cardStat}>
+            <Text style={styles.cardStat} maxFontSizeMultiplier={1.2}>
               {goodEnergy.exerciseCount} <Text style={styles.cardStatUnit}>exercises</Text> · {goodEnergy.durationMin}{' '}
               <Text style={styles.cardStatUnit}>min</Text>
             </Text>
           </View>
-          <Text style={styles.cardExplanation}>{goodEnergy.explanation}</Text>
+          <Text style={styles.cardExplanation} maxFontSizeMultiplier={1.4}>{goodEnergy.explanation}</Text>
         </ReanimatedAnimated.View>
 
         <ReanimatedAnimated.Text
           entering={reducedMotion ? undefined : FadeIn.duration(350).delay(680)}
           style={styles.closingLine}
+          maxFontSizeMultiplier={1.4}
         >
           This happens automatically, every day. You won&apos;t have to guess.
         </ReanimatedAnimated.Text>
@@ -157,7 +160,7 @@ export default function OnboardingFirstLookScreen() {
                 { opacity: ctaPress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
               ]}
             />
-            <Text style={styles.primaryText}>Create your account</Text>
+            <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>Create your account</Text>
             <View style={styles.buttonArrow}>
               <ArrowUpIconGraphic size={24} />
             </View>

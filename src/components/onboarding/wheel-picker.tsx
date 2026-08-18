@@ -87,7 +87,12 @@ export function WheelPicker({ items, selectedIndex, onChange, width = 90 }: Whee
           const scale = scrollY.interpolate({ inputRange, outputRange: [0.8, 1, 0.8], extrapolate: 'clamp' });
           return (
             <View key={label + index} style={styles.item}>
-              <Animated.Text style={[styles.itemText, { opacity, transform: [{ scale }] }]}>{label}</Animated.Text>
+              <Animated.Text
+                style={[styles.itemText, { opacity, transform: [{ scale }] }]}
+                maxFontSizeMultiplier={1.15}
+              >
+                {label}
+              </Animated.Text>
             </View>
           );
         })}

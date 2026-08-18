@@ -31,11 +31,11 @@ const DAY_OPTIONS: { id: string; label: string }[] = [
 ];
 
 /**
- * The flagship Settings feature: every input Vervein's mockup engine
- * (plan-preview.ts, potential-score.ts) actually reads, editable in one
- * place. Saving here changes what Profile/Summary/Progress compute on
- * their next focus — there's no separate "regenerate plan" step because
- * those screens already derive everything live from the saved profile.
+ * The flagship Settings feature: every input Vervein's real engine
+ * (plan-preview.ts) actually reads, editable in one place. Saving here
+ * changes what Profile/Summary/Progress compute on their next focus —
+ * there's no separate "regenerate plan" step because those screens already
+ * derive everything live from the saved profile.
  *
  * Presented as a bottom sheet (not a pushed route) from Settings — a real
  * `BottomSheetModal` stays mounted across opens, so data is (re)loaded on
@@ -116,13 +116,15 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
       handleIndicatorStyle={{ backgroundColor: colors.surfaceBorder }}
     >
       <View style={styles.headerRow}>
-        <Text style={styles.headerTitle}>Adjust My Plan</Text>
+        <Text style={styles.headerTitle} maxFontSizeMultiplier={1.3}>Adjust My Plan</Text>
         <Pressable
           onPress={() => sheetRef.current?.dismiss()}
           onHoverIn={closeHover.onHoverIn}
           onHoverOut={closeHover.onHoverOut}
           hitSlop={10}
           style={styles.closeButton}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
         >
           <SymbolView name="xmark" size={13} tintColor={colors.iconMuted} />
         </Pressable>
@@ -176,7 +178,7 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
         />
 
         <View style={styles.section}>
-          <Text style={styles.fieldLabel}>Training Days</Text>
+          <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>Training Days</Text>
           <View style={styles.dayRow}>
             {DAY_OPTIONS.map((day, index) => {
               const isSelected = days.includes(day.id);
@@ -187,7 +189,12 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
                   onPress={() => toggleDay(day.id)}
                   hitSlop={4}
                 >
-                  <Text style={[styles.dayCircleText, isSelected && styles.dayCircleTextSelected]}>{day.label}</Text>
+                  <Text
+                    style={[styles.dayCircleText, isSelected && styles.dayCircleTextSelected]}
+                    maxFontSizeMultiplier={1.15}
+                  >
+                    {day.label}
+                  </Text>
                 </Pressable>
               );
             })}
@@ -195,7 +202,7 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.fieldLabel}>Commitment</Text>
+          <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>Commitment</Text>
           <View style={styles.dialWrap}>
             <CommitmentDial
               size={200}
@@ -205,7 +212,7 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
             />
           </View>
           {commitmentLevel ? (
-            <Text style={styles.commitmentReadout}>
+            <Text style={styles.commitmentReadout} maxFontSizeMultiplier={1.2}>
               {(commitmentIndex as number) + 1} / 8 · {commitmentLevel.name}
             </Text>
           ) : null}
@@ -220,7 +227,7 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
           disabled={!isValid}
         >
           <View style={[styles.saveButton, !isValid && styles.saveButtonDisabled]}>
-            <Text style={styles.saveButtonText}>Save Changes</Text>
+            <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>Save Changes</Text>
           </View>
         </Pressable>
       </BottomSheetScrollView>
@@ -248,7 +255,7 @@ function PillGrid({
 }) {
   return (
     <View style={styles.section}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>{label}</Text>
       <View style={[styles.pillGrid, columns === 4 && styles.pillGridFourAcross]}>
         {options.map((id) => {
           const isSelected = value === id;
@@ -259,7 +266,12 @@ function PillGrid({
               onPress={() => onSelect(id)}
             >
               <View style={[styles.gridPillVisual, isSelected && styles.gridPillVisualSelected]}>
-                <Text style={[styles.gridPillText, isSelected && styles.gridPillTextSelected]}>{labels[id]}</Text>
+                <Text
+                  style={[styles.gridPillText, isSelected && styles.gridPillTextSelected]}
+                  maxFontSizeMultiplier={1.2}
+                >
+                  {labels[id]}
+                </Text>
               </View>
             </Pressable>
           );

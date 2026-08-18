@@ -1,4 +1,5 @@
 import React from 'react';
+import { Text as RNText } from 'react-native';
 import Svg, {
   Circle,
   Defs,
@@ -146,34 +147,48 @@ export function LogoMarkGraphic({
   );
 }
 
+// Geist Medium's cap-height (the visible ink height of a capital letter,
+// as opposed to the font's full line-height box) as a fraction of its
+// font-size — derived from the brand lockup's own Figma numbers: the small
+// lockup specs a 169.047px font-size, and this ratio reproduces this
+// component's previous cap-height-cropped default (21.8) almost exactly,
+// confirming Geist Medium's real metrics rather than a guess.
+const WORDMARK_CAP_HEIGHT_RATIO = 0.73;
+
 /**
- * "ervein" wordmark lettering — the exact custom lettering from the Figma
- * brand lockup (paired with LogoMarkGraphic/LogoMarkAccentGraphic, which
- * together read as the "V"), not the system/Geist font. Cropped tightly to
- * the letterforms' own bounding box from the source export.
- *
- * Default size is derived from the lockup's real geometry, not guessed:
- * in the source file the wordmark's height is 139.612/260.333 ≈ 53.6% of
- * the icon mark's height (icon combined bbox here is ~40.636 tall), and it
- * sits bottom-aligned with the icon rather than vertically centered — see
- * the `brandWordmark` position (top ≈ 19, not centered) wherever this is used.
+ * "erveIn" wordmark — real text (paired with LogoMarkGraphic/
+ * LogoMarkAccentGraphic, which together read as the "V"), per the brand
+ * lockup's Figma spec: font-family Geist, weight 500 (Medium). Previously
+ * shipped as flattened SVG path data (Figma vectorizes text on export by
+ * default), which silently downgraded the lockup's capital "I" to
+ * lowercase — Bezier curves can't be "capitalized" the way real text can,
+ * unlike a font glyph. `height` targets the letterforms' own cap-height,
+ * not the font's full line-height box, matching how this was previously
+ * measured — see WORDMARK_CAP_HEIGHT_RATIO above. Bottom-aligned with the
+ * icon mark rather than vertically centered — see the `brandWordmark`
+ * position (top ≈ 19, not centered) wherever this is used.
  */
 export function WordmarkTextGraphic({
-  width = 83.2,
   height = 21.8,
   color = 'white',
 }: {
-  width?: number;
   height?: number;
   color?: string;
 }) {
+  const fontSize = height / WORDMARK_CAP_HEIGHT_RATIO;
   return (
-    <Svg width={width} height={height} viewBox="334.581 619.231 532.488 139.612">
-      <Path
-        d="M382.975 758.843C372.989 758.843 364.347 756.666 357.05 752.314C349.88 747.961 344.311 741.752 340.342 733.686C336.502 725.62 334.581 716.211 334.581 705.456C334.581 694.702 336.502 685.356 340.342 677.419C344.311 669.353 349.88 663.144 357.05 658.791C364.219 654.31 372.669 652.07 382.399 652.07C391.616 652.07 399.746 654.246 406.787 658.599C413.829 662.824 419.27 668.969 423.111 677.035C427.079 685.1 429.064 694.83 429.064 706.225V711.41H355.705C356.217 721.396 358.842 728.885 363.579 733.878C368.444 738.871 374.973 741.367 383.167 741.367C389.184 741.367 394.177 739.959 398.146 737.143C402.115 734.326 404.867 730.549 406.403 725.812L427.528 727.157C424.839 736.631 419.526 744.312 411.588 750.201C403.779 755.962 394.241 758.843 382.975 758.843ZM355.705 696.047H407.556C406.915 686.957 404.291 680.235 399.682 675.883C395.201 671.53 389.44 669.353 382.399 669.353C375.101 669.353 369.084 671.658 364.347 676.267C359.738 680.748 356.858 687.341 355.705 696.047ZM449.69 756.538V654.374H468.318L469.086 681.452L467.357 680.876C468.766 671.658 471.582 664.936 475.807 660.712C480.16 656.487 485.985 654.374 493.282 654.374H503.076V672.618H493.282C488.161 672.618 483.873 673.45 480.416 675.114C476.959 676.779 474.335 679.339 472.542 682.796C470.878 686.253 470.046 690.734 470.046 696.239V756.538H449.69ZM547.656 756.538L510.401 654.374H532.101L559.947 735.798L587.792 654.374H609.684L572.237 756.538H547.656ZM664.843 758.843C654.857 758.843 646.215 756.666 638.918 752.314C631.748 747.961 626.179 741.752 622.21 733.686C618.37 725.62 616.449 716.211 616.449 705.456C616.449 694.702 618.37 685.356 622.21 677.419C626.179 669.353 631.748 663.144 638.918 658.791C646.087 654.31 654.537 652.07 664.267 652.07C673.484 652.07 681.614 654.246 688.655 658.599C695.697 662.824 701.138 668.969 704.979 677.035C708.947 685.1 710.932 694.83 710.932 706.225V711.41H637.573C638.085 721.396 640.71 728.885 645.447 733.878C650.312 738.871 656.841 741.367 665.035 741.367C671.052 741.367 676.045 739.959 680.014 737.143C683.982 734.326 686.735 730.549 688.271 725.812L709.395 727.157C706.707 736.631 701.394 744.312 693.456 750.201C685.647 755.962 676.109 758.843 664.843 758.843ZM637.573 696.047H689.424C688.783 686.957 686.159 680.235 681.55 675.883C677.069 671.53 671.308 669.353 664.267 669.353C656.969 669.353 650.952 671.658 646.215 676.267C641.606 680.748 638.726 687.341 637.573 696.047ZM731.558 756.538V654.374H751.914V756.538H731.558ZM731.174 639.587V619.231H752.298V639.587H731.174ZM782.38 756.538V654.374H801.008L801.776 681.644L799.28 680.299C800.432 673.642 802.608 668.265 805.809 664.168C809.01 660.071 812.914 657.063 817.523 655.143C822.132 653.094 827.125 652.07 832.502 652.07C840.184 652.07 846.521 653.798 851.514 657.255C856.635 660.584 860.476 665.192 863.036 671.082C865.725 676.843 867.069 683.436 867.069 690.862V756.538H846.713V697.007C846.713 690.99 846.073 685.933 844.793 681.836C843.512 677.739 841.4 674.602 838.455 672.426C835.511 670.249 831.67 669.161 826.933 669.161C819.764 669.161 813.939 671.53 809.458 676.267C804.977 681.004 802.736 687.917 802.736 697.007V756.538H782.38Z"
-        fill={color}
-      />
-    </Svg>
+    <RNText
+      style={{
+        fontFamily: 'Geist-Medium',
+        fontSize,
+        lineHeight: fontSize,
+        color,
+        includeFontPadding: false,
+      }}
+      numberOfLines={1}
+    >
+      erveIn
+    </RNText>
   );
 }
 

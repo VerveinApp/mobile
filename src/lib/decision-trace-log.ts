@@ -1,11 +1,20 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { MinimalDecisionTrace } from '@/lib/engine/training-state';
+import type { PolicyApplicationRecord } from '@/lib/engine/types';
 
 const KEY = 'vervein.decisionTraceLog.v1';
 const MAX_ENTRIES = 30; // matches session-history.ts's rolling window; comfortably above LEDGER_WINDOW_N (14)
 
-type StoredTrace = MinimalDecisionTrace & { date: string };
+type StoredTrace = MinimalDecisionTrace & {
+  date: string;
+  /** M9's governance bookkeeping, persisted so P1/P2/P3's interim status
+   * has a real per-session audit trail — not read by M20's training-state
+   * fold (that only needs gate1Exclusions/output), but this is the one
+   * place a session's full trace is durably recorded, matching the vault's
+   * own "surfacing, not hiding" reasoning for why M9 exists at all. */
+  policyApplications: PolicyApplicationRecord[];
+};
 
 /**
  * The minimal per-session engine record M20 (training-state.ts) folds over
@@ -29,6 +38,7 @@ export async function recordDecisionTrace(
     fallbackFired: boolean;
     gate1Exclusions: { exerciseId: string; excludedBy: string }[];
     deliveredExercises: { exerciseId: string; adapted_sets: number | null }[];
+    policyApplications: PolicyApplicationRecord[];
   }
 ) {
   try {
@@ -38,6 +48,7 @@ export async function recordDecisionTrace(
       date,
       fallbackFired: trace.fallbackFired,
       gate1Exclusions: trace.gate1Exclusions,
+      policyApplications: trace.policyApplications,
       output: {
         exercises: trace.deliveredExercises.map((e) => ({
           exerciseId: e.exerciseId,

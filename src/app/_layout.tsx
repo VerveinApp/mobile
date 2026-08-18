@@ -73,13 +73,13 @@ function RootNavigator() {
           <Stack.Screen name="onboarding/step-6" />
           <Stack.Screen name="onboarding/step-7" />
           <Stack.Screen name="onboarding/first-look" />
-          <Stack.Screen name="onboarding/potential" />
           <Stack.Screen name="onboarding/create-account" />
           <Stack.Screen name="onboarding/all-set" />
           <Stack.Screen name="onboarding/trajectory" />
           <Stack.Screen name="home/check-in" />
           <Stack.Screen name="settings/index" />
           <Stack.Screen name="settings/progress-history" />
+          <Stack.Screen name="settings/weight-history" />
           <Stack.Screen name="legal/terms" />
           <Stack.Screen name="legal/privacy" />
         </Stack>

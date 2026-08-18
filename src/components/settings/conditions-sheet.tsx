@@ -74,20 +74,22 @@ export const ConditionsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
       handleIndicatorStyle={{ backgroundColor: colors.surfaceBorder }}
     >
       <View style={styles.headerRow}>
-        <Text style={styles.headerTitle}>Health Conditions</Text>
+        <Text style={styles.headerTitle} maxFontSizeMultiplier={1.3}>Health Conditions</Text>
         <Pressable
           onPress={() => sheetRef.current?.dismiss()}
           onHoverIn={closeHover.onHoverIn}
           onHoverOut={closeHover.onHoverOut}
           hitSlop={10}
           style={styles.closeButton}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
         >
           <SymbolView name="xmark" size={13} tintColor={colors.iconMuted} />
         </Pressable>
       </View>
 
       <BottomSheetScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <Text style={styles.hint}>
+        <Text style={styles.hint} maxFontSizeMultiplier={1.4}>
           Optional, and not used to change your plan yet — this app doesn&apos;t have a validated way to safely adjust
           exercise selection for these conditions, so nothing here changes what you&apos;re shown. It&apos;s saved for
           your own record and to be ready if that changes.
@@ -102,7 +104,7 @@ export const ConditionsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
                 style={[styles.row, index < CONDITIONS.length - 1 && styles.rowDivider]}
                 onPress={() => toggleCondition(condition)}
               >
-                <Text style={styles.rowLabel}>{CONDITION_LABELS[condition]}</Text>
+                <Text style={styles.rowLabel} maxFontSizeMultiplier={1.3}>{CONDITION_LABELS[condition]}</Text>
                 <View style={[styles.checkbox, isSelected && styles.checkboxChecked]}>
                   {isSelected ? <SymbolView name="checkmark" size={11} tintColor="#ffffff" weight="bold" /> : null}
                 </View>
@@ -119,7 +121,7 @@ export const ConditionsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
           onPressOut={savePress.onPressOut}
         >
           <View style={styles.saveButton}>
-            <Text style={styles.saveButtonText}>Save</Text>
+            <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>Save</Text>
           </View>
         </Pressable>
       </BottomSheetScrollView>

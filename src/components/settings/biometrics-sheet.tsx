@@ -156,13 +156,15 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
       handleIndicatorStyle={{ backgroundColor: colors.surfaceBorder }}
     >
       <View style={styles.headerRow}>
-        <Text style={styles.headerTitle}>Body & Biometrics</Text>
+        <Text style={styles.headerTitle} maxFontSizeMultiplier={1.3}>Body & Biometrics</Text>
         <Pressable
           onPress={() => sheetRef.current?.dismiss()}
           onHoverIn={closeHover.onHoverIn}
           onHoverOut={closeHover.onHoverOut}
           hitSlop={10}
           style={styles.closeButton}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
         >
           <SymbolView name="xmark" size={13} tintColor={colors.iconMuted} />
         </Pressable>
@@ -170,13 +172,13 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
 
       <BottomSheetScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {!hadConsent ? (
-          <Text style={styles.hint}>
+          <Text style={styles.hint} maxFontSizeMultiplier={1.4}>
             You skipped sharing this during onboarding. Add it anytime — used only to tailor your training load.
           </Text>
         ) : null}
 
         <View style={styles.section}>
-          <Text style={styles.fieldLabel}>Sex at birth</Text>
+          <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>Sex at birth</Text>
           <View style={styles.pillRow}>
             {SEX_OPTIONS.map((option) => {
               const isSelected = sex === option.id;
@@ -195,7 +197,12 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
                   onPressOut={interaction.press.onPressOut}
                 >
                   <View style={[styles.sexPillVisual, isSelected && styles.sexPillVisualSelected]}>
-                    <Text style={[styles.sexPillText, isSelected && styles.sexPillTextSelected]}>{option.label}</Text>
+                    <Text
+                      style={[styles.sexPillText, isSelected && styles.sexPillTextSelected]}
+                      maxFontSizeMultiplier={1.2}
+                    >
+                      {option.label}
+                    </Text>
                   </View>
                 </Pressable>
               );
@@ -204,7 +211,7 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.fieldLabel}>Units</Text>
+          <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>Units</Text>
           <View style={styles.unitPillRow}>
             {UNIT_OPTIONS.map((option) => {
               const isSelected = unit === option.id;
@@ -220,7 +227,12 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
                   onPressOut={interaction.press.onPressOut}
                 >
                   <View style={[styles.unitPillVisual, isSelected && styles.unitPillVisualSelected]}>
-                    <Text style={[styles.unitPillText, isSelected && styles.unitPillTextSelected]}>{option.label}</Text>
+                    <Text
+                      style={[styles.unitPillText, isSelected && styles.unitPillTextSelected]}
+                      maxFontSizeMultiplier={1.2}
+                    >
+                      {option.label}
+                    </Text>
                   </View>
                 </Pressable>
               );
@@ -229,7 +241,7 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.fieldLabel}>Height</Text>
+          <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>Height</Text>
           <View style={styles.wheelCard}>
             {unit === 'imperial' ? (
               <View style={styles.wheelRow}>
@@ -260,7 +272,7 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.fieldLabel}>Weight</Text>
+          <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>Weight</Text>
           <View style={styles.wheelCard}>
             <View style={styles.wheelRow}>
               {unit === 'imperial' ? (
@@ -290,7 +302,7 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
           onPressOut={savePress.onPressOut}
         >
           <View style={styles.saveButton}>
-            <Text style={styles.saveButtonText}>Save</Text>
+            <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>Save</Text>
           </View>
         </Pressable>
       </BottomSheetScrollView>

@@ -55,6 +55,14 @@ class ExerciseLibraryModule {
     return this.exercises.find((e) => e.id === id) ?? null;
   }
 
+  /** workout-log.ts records exercises by name, not id (see its own doc
+   * comment) — this is that lookup path. Names are the library's real
+   * human-facing identifier, same assumption check-in.tsx's exclusion
+   * summary already relies on. */
+  getByName(name: string): Exercise | null {
+    return this.exercises.find((e) => e.name === name) ?? null;
+  }
+
   query(filterCriteria: Partial<Exercise>): Exercise[] {
     // Array-valued fields (movement_patterns, contraindications) match by
     // subset: every requested element must be present. Scalars match by

@@ -209,6 +209,8 @@ export default function OnboardingConsentBiometricsScreen() {
           style={styles.backButton}
           onPress={() => goBack('/onboarding/step-4', baseParams)}
           hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <BackArrowGraphic color={colors.text} />
         </Pressable>
@@ -222,8 +224,8 @@ export default function OnboardingConsentBiometricsScreen() {
           </View>
         </View>
 
-        <Text style={styles.title}>A few quick numbers</Text>
-        <Text style={styles.subtitle}>Optional — used only to tailor your training load.</Text>
+        <Text style={styles.title} maxFontSizeMultiplier={1.3}>A few quick numbers</Text>
+        <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>Optional — used only to tailor your training load.</Text>
 
         <Pressable
           style={styles.consentRow}
@@ -245,12 +247,12 @@ export default function OnboardingConsentBiometricsScreen() {
             <View style={[styles.checkbox, consented && styles.checkboxChecked]}>
               {consented ? <View style={styles.checkboxDot} /> : null}
             </View>
-            <Text style={styles.consentText}>{CONSENT_COPY}</Text>
+            <Text style={styles.consentText} maxFontSizeMultiplier={1.3}>{CONSENT_COPY}</Text>
           </Animated.View>
         </Pressable>
 
         <View style={[styles.fieldsBlock, { opacity: consented ? 1 : 0.35 }]} pointerEvents={consented ? 'auto' : 'none'}>
-          <Text style={styles.fieldLabel}>Sex at birth</Text>
+          <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>Sex at birth</Text>
           <View style={styles.sexRow}>
             {SEX_OPTIONS.map((option) => {
               const { hover, press } = sexInteractions[option.id];
@@ -291,7 +293,7 @@ export default function OnboardingConsentBiometricsScreen() {
                     {isSelected ? (
                       <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.cardWashSelected]} />
                     ) : null}
-                    <Text style={styles.sexPillText}>{option.label}</Text>
+                    <Text style={styles.sexPillText} maxFontSizeMultiplier={1.2}>{option.label}</Text>
                   </Animated.View>
                 </Pressable>
               );
@@ -327,7 +329,10 @@ export default function OnboardingConsentBiometricsScreen() {
                         { opacity: hover.anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.08] }) },
                       ]}
                     />
-                    <Text style={[styles.unitPillText, isSelected && styles.unitPillTextSelected]}>
+                    <Text
+                      style={[styles.unitPillText, isSelected && styles.unitPillTextSelected]}
+                      maxFontSizeMultiplier={1.2}
+                    >
                       {option.label}
                     </Text>
                   </Animated.View>
@@ -336,8 +341,8 @@ export default function OnboardingConsentBiometricsScreen() {
             })}
           </View>
 
-          <Text style={[styles.fieldLabel, styles.heightLabel]}>Height</Text>
-          <Text style={[styles.fieldLabel, styles.weightLabel]}>Weight</Text>
+          <Text style={[styles.fieldLabel, styles.heightLabel]} maxFontSizeMultiplier={1.3}>Height</Text>
+          <Text style={[styles.fieldLabel, styles.weightLabel]} maxFontSizeMultiplier={1.3}>Weight</Text>
 
           {unit === 'imperial' ? (
             <>
@@ -423,7 +428,7 @@ export default function OnboardingConsentBiometricsScreen() {
                 { opacity: continuePress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
               ]}
             />
-            <Text style={styles.primaryText}>Continue</Text>
+            <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>Continue</Text>
             <View style={styles.buttonArrow}>
               <ArrowUpIconGraphic size={24} />
             </View>
@@ -447,7 +452,7 @@ export default function OnboardingConsentBiometricsScreen() {
                 { opacity: skipHover.anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.08] }) },
               ]}
             />
-            <Text style={styles.skipText}>Skip this section</Text>
+            <Text style={styles.skipText} maxFontSizeMultiplier={1.15}>Skip this section</Text>
           </Animated.View>
         </Pressable>
       </ReanimatedAnimated.View>
