@@ -6,7 +6,7 @@ import type { PolicyApplicationRecord } from '@/lib/engine/types';
 const KEY = 'vervein.decisionTraceLog.v1';
 const MAX_ENTRIES = 30; // matches session-history.ts's rolling window; comfortably above LEDGER_WINDOW_N (14)
 
-type StoredTrace = MinimalDecisionTrace & {
+export type StoredTrace = MinimalDecisionTrace & {
   date: string;
   /** M9's governance bookkeeping, persisted so P1/P2/P3's interim status
    * has a real per-session audit trail — not read by M20's training-state
@@ -56,7 +56,11 @@ export async function recordDecisionTrace(
         })),
       },
     };
-    const next = [...withoutToday, stored].slice(-MAX_ENTRIES);
+    // Sorted by date before trimming, not insertion order — every write
+    // today uses localDateStr() so the two currently always agree, but that
+    // was an implicit assumption, not a guarantee (a future backfill/sync
+    // write could violate it silently).
+    const next = [...withoutToday, stored].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-MAX_ENTRIES);
     await AsyncStorage.setItem(KEY, JSON.stringify(next));
   } catch {
     // Worst case Stimulus Ledger/Debt read a little sparse — never a crash, and the session itself is still recorded via workout-log.ts.
@@ -67,4 +71,31 @@ export async function recordDecisionTrace(
 export async function getDecisionTraceLog(): Promise<StoredTrace[]> {
   const entries = await readAll();
   return [...entries].sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+
+/** Overwrites the whole log wholesale — data-backup.ts's restore path only.
+ * Re-applies the same MAX_ENTRIES trim recordDecisionTrace always does.
+ * Losing this on an uninstall silently resets Progress's Energy Trend and
+ * Banked Volume cards back to "insufficient data" even though sessions
+ * themselves (workout-log.ts) restored fine — this is the one store that
+ * actually powers those two cards, so it's worth restoring on its own
+ * merits, not just for completeness. */
+export async function restoreDecisionTraceLog(entries: StoredTrace[]): Promise<void> {
+  try {
+    const trimmed = [...entries].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-MAX_ENTRIES);
+    await AsyncStorage.setItem(KEY, JSON.stringify(trimmed));
+  } catch {
+    // Worst case this one field doesn't restore — the rest of the backup still applies independently.
+  }
+}
+
+/** Wipes the whole log — Settings' "Delete My Data"/"Delete Account" flows
+ * only. Same disclosed gap as workout-log.ts's clearWorkoutLog: this store
+ * postdates handleDeleteData's original clear-list. */
+export async function clearDecisionTraceLog() {
+  try {
+    await AsyncStorage.removeItem(KEY);
+  } catch {
+    // Best-effort — same as never having recorded a trace.
+  }
 }

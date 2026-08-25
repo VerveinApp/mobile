@@ -1,15 +1,19 @@
 {
   "expo": {
-    "name": "Vervein",
-    "slug": "Vervein",
+    "name": "VerveIn",
+    "slug": "vervein",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "vervein",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.anonymous.Vervein"
+      "icon": {
+        "light": "./assets/icon-source/icon-light.png",
+        "dark": "./assets/icon-source/icon-dark.png"
+      },
+      "bundleIdentifier": "app.vervein",
+      "buildNumber": "2"
     },
     "android": {
       "adaptiveIcon": {
@@ -36,19 +40,20 @@
       ],
       "expo-font",
       "expo-image",
+      "expo-notifications",
       "expo-status-bar",
       "expo-web-browser",
       [
         "expo-local-authentication",
         {
-          "faceIDPermission": "Vervein uses Face ID to unlock the app."
+          "faceIDPermission": "VerveIn uses Face ID to unlock the app."
         }
       ],
       [
         "@kingstinct/react-native-healthkit",
         {
           "NSHealthShareUsageDescription": "VerveIn reads your recent activity, sleep, and resting heart rate to give more honest readiness context alongside how you say you feel — nothing is written back to Health.",
-          "NSHealthUpdateUsageDescription": false,
+          "NSHealthUpdateUsageDescription": "VerveIn never writes any data to Health — this permission is requested by a library VerveIn uses, but write access is not used.",
           "background": false
         }
       ]

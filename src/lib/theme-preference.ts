@@ -4,14 +4,15 @@ const KEY = 'vervein.themePreference.v1';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 
-/** Defaults dark — the app is still dark-mode-built end to end; light mode
- * is opt-in per screen as it gets converted, not yet the finished standard. */
+/** Defaults to following the device's OS appearance — every real screen now
+ * reads its colors from the theme system (see constants/theme.ts), so there's
+ * no longer a dark-only baseline to protect a new install against. */
 export async function getThemePreference(): Promise<ThemePreference> {
   try {
     const raw = await AsyncStorage.getItem(KEY);
-    return raw === 'system' || raw === 'light' || raw === 'dark' ? raw : 'dark';
+    return raw === 'system' || raw === 'light' || raw === 'dark' ? raw : 'system';
   } catch {
-    return 'dark';
+    return 'system';
   }
 }
 

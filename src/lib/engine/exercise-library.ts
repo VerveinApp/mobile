@@ -22,6 +22,35 @@ export const INTENSITY_RANK: Record<Intensity, number> = { low: 0, medium: 1, hi
 export const IMPACT_RANK: Record<Impact, number> = { low: 0, medium: 1, high: 2 };
 export const EQUIPMENT_RANK: Record<Equipment, number> = { none: 0, minimal: 1, full_gym: 2 };
 
+/** Deterministic numeric library order (ex_101 < ex_102 < … < ex_1500) —
+ * the vault's own selection-order rule (Baseline Plan.md: "selection is
+ * deterministic: numeric library order"). Shared by baseline-plan.ts and
+ * exercise-filtering.ts so both use one definition. */
+export function byNumericId(a: Exercise, b: Exercise): number {
+  return parseInt(a.id.replace('ex_', ''), 10) - parseInt(b.id.replace('ex_', ''), 10);
+}
+
+/**
+ * Not a vault module — a disclosed Vervein addition (see baseline-plan.ts
+ * and exercise-filtering.ts headers for the full rationale). A soft
+ * preference ordering, never a filter: `moderate` exercises are never
+ * removed, only sorted behind `simple` ones when `biasSimpleFirst` is true,
+ * so a `moderate` exercise can still fill a slot when it's the only legal
+ * option left — Decision Invariant #1 ("the user always gets a workout")
+ * never bends for this. Numeric ID stays the tiebreak either way, so
+ * selection remains fully deterministic, just reordered.
+ */
+export function bySelectionOrder(biasSimpleFirst: boolean) {
+  return (a: Exercise, b: Exercise): number => {
+    if (biasSimpleFirst) {
+      const penaltyA = a.complexity === 'moderate' ? 1 : 0;
+      const penaltyB = b.complexity === 'moderate' ? 1 : 0;
+      if (penaltyA !== penaltyB) return penaltyA - penaltyB;
+    }
+    return byNumericId(a, b);
+  };
+}
+
 class ExerciseLibraryModule {
   private exercises: Exercise[];
 

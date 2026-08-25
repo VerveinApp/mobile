@@ -41,3 +41,17 @@ export async function clearCheckInHistory() {
     // Best-effort — same as never having checked in.
   }
 }
+
+/** Overwrites the single stored record wholesale — data-backup.ts's restore
+ * path only. A stale date restored from an old backup is still honest
+ * (correctly reflects when the user last really checked in before a gap),
+ * so this deliberately doesn't re-stamp today's date the way recordCheckIn
+ * always does. */
+export async function restoreLastCheckIn(record: CheckInRecord | null): Promise<void> {
+  try {
+    if (record === null) await AsyncStorage.removeItem(HISTORY_KEY);
+    else await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(record));
+  } catch {
+    // Worst case this one field doesn't restore — the rest of the backup still applies independently.
+  }
+}

@@ -12,8 +12,8 @@ export const EXERCISES_PER_FOCUS_AREA = 2;
 // --- Training State Compiler parameters (FE-13 graduation, 2026-07-22) ---
 // Interim values, founder-adjustable pending tuning against real data —
 // flagged as policy in the graduation Decision Log entry, never architecture.
-// Not yet consumed by anything ported into this app (Training State Compiler
-// itself hasn't been ported) — kept for fidelity with the source file.
+// Consumed by engine/training-state.ts (M20), wired in via lib/training-state.ts
+// and surfaced on Progress's "Training Load" section.
 
 /** Evidence tiers: observations needed before a derived value is "provisional" / "established". Extends the calibration dampener's existing n=5 precedent. */
 export const TIER_PROVISIONAL_MIN = 3;

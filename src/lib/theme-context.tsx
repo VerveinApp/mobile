@@ -24,7 +24,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
  */
 export function AppThemeProvider({ children }: { children: ReactNode }) {
   const deviceScheme = useColorScheme();
-  const [preference, setPreferenceState] = useState<ThemePreference>('dark');
+  const [preference, setPreferenceState] = useState<ThemePreference>('system');
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -47,11 +47,11 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
     [preference, resolvedScheme]
   );
 
-  // Loading the stored preference is fast (one AsyncStorage read) and the
-  // default ('dark') matches every screen's current hardcoded look, so
-  // there's no blank/flash frame to guard against here — children render
-  // immediately with the default and re-render once if it turns out to be
-  // something else.
+  // Loading the stored preference is fast (one AsyncStorage read), and the
+  // 'system' default already resolves against the real device scheme on the
+  // very first render, so there's no blank/flash frame to guard against here
+  // — children render immediately and re-render only if the stored
+  // preference turns out to differ from 'system'.
   void loaded;
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

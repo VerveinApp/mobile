@@ -1,6 +1,7 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import ReanimatedAnimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 
@@ -8,10 +9,14 @@ import { TodaysTrainingCard } from '@/components/home/todays-training-card';
 import { getCalibration } from '@/lib/calibration';
 import { DEFAULT_CALIBRATION } from '@/lib/engine/personal-calibration';
 import type { UserCalibration } from '@/lib/engine/types';
+import type { TrainingState } from '@/lib/engine/training-state';
+import { getHealthReadinessModifier } from '@/lib/health-kit';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
+import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { getTodaySession, type TodaySession } from '@/lib/today-session';
+import { getTrainingState } from '@/lib/training-state';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 
@@ -45,22 +50,33 @@ export default function TrainScreen() {
   const insets = useSafeAreaInsets();
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  // Same shared fade used across onboarding, check-in, Home, and Progress —
+  // the loading-skeleton-to-real-content swap below previously hard-cut
+  // with no transition, the one motion-language gap against the rest of the app.
+  const entering = useFadeInEntering();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [todaySession, setTodaySession] = useState<TodaySession | null>(null);
   const [calibration, setCalibration] = useState<UserCalibration | null>(null);
+  const [trainingState, setTrainingState] = useState<TrainingState | null>(null);
+  const [healthReadinessModifier, setHealthReadinessModifier] = useState(1);
   const [loaded, setLoaded] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       (async () => {
-        const [loadedProfile, loadedSession, loadedCalibration] = await Promise.all([
-          getProfile(),
-          getTodaySession(),
-          getCalibration(),
-        ]);
+        const [loadedProfile, loadedSession, loadedCalibration, loadedTrainingState, loadedReadinessModifier] =
+          await Promise.all([
+            getProfile(),
+            getTodaySession(),
+            getCalibration(),
+            getTrainingState(),
+            getHealthReadinessModifier(),
+          ]);
         setProfile(loadedProfile);
         setTodaySession(loadedSession);
         setCalibration(loadedCalibration);
+        setTrainingState(loadedTrainingState);
+        setHealthReadinessModifier(loadedReadinessModifier);
         setLoaded(true);
       })();
     }, [])
@@ -70,15 +86,22 @@ export default function TrainScreen() {
   // exercise library (see plan-preview.ts), not a cheap lookup, so it
   // shouldn't recompute on every render, only when its actual inputs change.
   // Declared before the loading-state early return below so the hook order
-  // stays stable across renders (Rules of Hooks).
+  // stays stable across renders (Rules of Hooks). Same real inputs as Home's
+  // and check-in's own preview — this card is the one TodaysTrainingCard
+  // shares with Summary specifically "so the two never drift apart
+  // visually" (see that component's own doc comment); partial inputs here
+  // would silently break that promise.
   const preview = useMemo(
     () =>
       computePlanPreview(
         profile ?? {},
         todaySession?.energy ?? 4,
-        calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION }
+        calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
+        todaySession?.symptomTags ?? [],
+        trainingState ?? undefined,
+        healthReadinessModifier
       ),
-    [profile, todaySession?.energy, calibration]
+    [profile, todaySession?.energy, todaySession?.symptomTags, calibration, trainingState, healthReadinessModifier]
   );
 
   if (!loaded) {
@@ -113,6 +136,7 @@ export default function TrainScreen() {
 
   return (
     <View style={styles.root}>
+      <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 40 }]}
         showsVerticalScrollIndicator={false}
@@ -169,6 +193,7 @@ export default function TrainScreen() {
           </View>
         )}
       </ScrollView>
+      </ReanimatedAnimated.View>
     </View>
   );
 }
@@ -178,6 +203,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     root: {
       flex: 1,
       backgroundColor: colors.background,
+    },
+    fadeLayer: {
+      flex: 1,
     },
     scrollContent: {
       paddingHorizontal: 20,

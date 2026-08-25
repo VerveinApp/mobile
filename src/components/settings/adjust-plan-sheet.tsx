@@ -8,6 +8,7 @@ import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { CommitmentDial } from '@/components/onboarding/commitment-dial';
 import { COMMITMENT_LEVELS } from '@/lib/commitment-levels';
 import { DURATION_LABELS, ENVIRONMENT_LABELS, EXPERIENCE_LABELS, GOAL_LABELS } from '@/lib/profile-labels';
+import { enableSessionReminders, isReminderEnabled } from '@/lib/session-reminders';
 import { useAppColors } from '@/lib/theme-context';
 import { getProfile, updateProfile } from '@/lib/user-profile';
 
@@ -94,6 +95,15 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
       days: days.join(','),
       commitmentLevel: String((commitmentIndex as number) + 1),
     });
+    // Keeps an already-enabled reminder schedule in sync with whatever days
+    // just got saved here — enableSessionReminders cancels and re-schedules
+    // from scratch, so this is safe to call unconditionally whenever
+    // reminders are on, not just when the day selection actually changed.
+    // Only ever a no-op permission re-check (already granted, so no dialog)
+    // for someone who's already opted in — never turns reminders on for
+    // someone who hasn't. See session-reminders.ts and Settings' own
+    // Workout Reminders toggle for the opt-in path this is completing.
+    if (await isReminderEnabled()) await enableSessionReminders(days);
     sheetRef.current?.dismiss();
   };
 

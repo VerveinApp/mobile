@@ -1,10 +1,12 @@
+import type { BottomSheetModal } from '@gorhom/bottom-sheet';
 import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 
+import { LogPastSessionSheet } from '@/components/settings/log-past-session-sheet';
 import { useHoverFade } from '@/lib/button-interactions';
 import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import {
@@ -33,25 +35,43 @@ export default function ProgressHistoryScreen() {
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const backHover = useHoverFade();
+  const addHover = useHoverFade();
+  const logPastSessionSheetRef = useRef<BottomSheetModal>(null);
   const [entries, setEntries] = useState<SessionHistoryEntry[]>([]);
   const [workoutLogs, setWorkoutLogs] = useState<Map<string, WorkoutLogExercise[]>>(new Map());
   const [thisWeekCount, setThisWeekCount] = useState(0);
   const [loaded, setLoaded] = useState(false);
 
+  // Shared by the initial load and the "Log a Past Session" sheet's onSaved
+  // callback — a fresh read from storage rather than optimistically
+  // patching local state, since the sheet may have just replaced an
+  // existing day's entry (see its own alreadyLogged warning), not only
+  // appended a new one.
+  const loadHistory = useCallback(async () => {
+    const [history, logs, profile] = await Promise.all([
+      getSessionHistory(),
+      getAllWorkoutLogs(),
+      getProfile(),
+    ]);
+    const trainingDays = profile?.days ? profile.days.split(',') : null;
+    setEntries(history);
+    setWorkoutLogs(new Map(logs.map((l) => [l.date, l.exercises])));
+    setThisWeekCount((await getWeekActivity(trainingDays)).completedCount);
+    setLoaded(true);
+  }, []);
+
+  // Wrapped in its own inline IIFE, not a bare `loadHistory();` — same
+  // shape this file's original mount effect already used before this
+  // function existed as a named, reusable callback. The lint rule reads a
+  // direct call to an external function reference as "this effect
+  // synchronously triggers setState," but an inline async arrow it can see
+  // into (even one that just awaits that same function) as the deferred,
+  // microtask-timed pattern the rule wants.
   useEffect(() => {
     (async () => {
-      const [history, logs, profile] = await Promise.all([
-        getSessionHistory(),
-        getAllWorkoutLogs(),
-        getProfile(),
-      ]);
-      const trainingDays = profile?.days ? profile.days.split(',') : null;
-      setEntries(history);
-      setWorkoutLogs(new Map(logs.map((l) => [l.date, l.exercises])));
-      setThisWeekCount((await getWeekActivity(trainingDays)).completedCount);
-      setLoaded(true);
+      await loadHistory();
     })();
-  }, []);
+  }, [loadHistory]);
 
   const completedCount = entries.filter((e) => e.completed).length;
 
@@ -82,8 +102,23 @@ export default function ProgressHistoryScreen() {
           <SymbolView name="chevron.left" size={16} tintColor={colors.text} />
         </Pressable>
         <Text style={styles.headerTitle} maxFontSizeMultiplier={1.3}>Progress & History</Text>
-        <View style={styles.backButton} />
+        <Pressable
+          onPress={() => {
+            hapticImpactLight();
+            logPastSessionSheetRef.current?.present();
+          }}
+          onHoverIn={addHover.onHoverIn}
+          onHoverOut={addHover.onHoverOut}
+          hitSlop={10}
+          style={styles.backButton}
+          accessibilityRole="button"
+          accessibilityLabel="Log a past session"
+        >
+          <SymbolView name="plus" size={16} tintColor={colors.text} />
+        </Pressable>
       </View>
+
+      <LogPastSessionSheet ref={logPastSessionSheetRef} onSaved={loadHistory} />
 
       {!loaded ? null : (
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -174,7 +209,12 @@ function HistoryRow({
         style={[styles.entryRow, !isLast && styles.entryRowDivider, { backgroundColor: colors.surface }]}
       >
         <View style={styles.entryRowTop}>
-          <Text style={styles.entryDate} maxFontSizeMultiplier={1.2}>{formatEntryDate(entry.date)}</Text>
+          <View style={styles.entryDateRow}>
+            <Text style={styles.entryDate} maxFontSizeMultiplier={1.2}>{formatEntryDate(entry.date)}</Text>
+            {entry.loggedRetroactively ? (
+              <Text style={styles.retroactiveTag} maxFontSizeMultiplier={1.2}>Logged after the fact</Text>
+            ) : null}
+          </View>
           <View style={styles.entryStatus}>
             <SymbolView
               name={entry.completed ? 'checkmark.circle.fill' : 'circle.dashed'}
@@ -379,10 +419,21 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       justifyContent: 'center',
       backgroundColor: '#E5484D',
     },
+    entryDateRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: 6,
+    },
     entryDate: {
       color: colors.text,
       fontSize: 13,
       fontFamily: 'Geist-Medium',
+    },
+    retroactiveTag: {
+      color: colors.textTertiary,
+      fontSize: 10,
+      fontStyle: 'italic',
+      fontFamily: 'Geist-Regular',
     },
     entryStatus: {
       flexDirection: 'row',

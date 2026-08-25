@@ -186,6 +186,11 @@ export function WordmarkTextGraphic({
         includeFontPadding: false,
       }}
       numberOfLines={1}
+      // Tight cap, not the looser body-text tiers used elsewhere — this is
+      // a brand lockup with a hand-tuned negative-margin overlap against
+      // the icon mark (see brandWordmark's marginLeft: -15.42 wherever this
+      // is used), not prose that can just reflow if it grows.
+      maxFontSizeMultiplier={1.1}
     >
       erveIn
     </RNText>

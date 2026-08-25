@@ -29,6 +29,17 @@
 //    trains that area), used when the area's own pool runs short;
 //  · selection is deterministic: numeric library order within each area.
 //
+// DISCLOSED DIVERGENCE (Vervein addition, not in the vault): for
+// profile.experience === 'just-starting', the "numeric library order" above
+// is reordered by bySelectionOrder() to sort `complexity:'simple'`
+// exercises ahead of `moderate` ones first, falling back to numeric ID as
+// the tiebreak — still fully deterministic, just experience-weighted. This
+// is a Gate 2-style preference, not a Gate 1 safety rule: it changes which
+// legal exercise fills a slot first, never removes an exercise from
+// eligibility, so it can't produce the empty-pool failure a hard filter
+// could. See exercise-filtering.ts for the matching gap-fill-side bias and
+// onboarding-to-engine.ts for the experience → bias mapping.
+//
 // Standing symptom tags apply here (onboarding-collected, active every day);
 // conditions apply here too — contraindications are a hard Gate 1 exclusion
 // from the very first plan (founder-approved amendment, 2026-07-22).
@@ -48,7 +59,7 @@ import type {
 } from './types';
 import { SYMPTOM_OVERRIDE_TABLE } from './reference/symptom-override-table';
 import { EXERCISES_PER_FOCUS_AREA } from './reference/policy-parameters';
-import { exerciseLibrary, INTENSITY_RANK, IMPACT_RANK } from './exercise-library';
+import { exerciseLibrary, INTENSITY_RANK, IMPACT_RANK, byNumericId, bySelectionOrder } from './exercise-library';
 import { filterAndSubstitute } from './exercise-filtering';
 
 export type OnboardingContext = {
@@ -60,6 +71,13 @@ export type OnboardingContext = {
   conditions: string[]; // founder-approved amendment — contraindications apply from the first plan
   standingSymptomTags: string[];
   movementRestrictions: string[];
+  // SOFT EXPERIENCE BIAS (Vervein addition, not in the vault — see the
+  // COMPOSITION comment below and exercise-filtering.ts's matching header
+  // note for the full rationale). true for profile.experience ===
+  // 'just-starting'; sorts `complexity:'simple'` exercises ahead of
+  // `moderate` ones before the per-area walk below. Never removes a
+  // `moderate` exercise from eligibility — see bySelectionOrder.
+  biasSimpleExercises: boolean;
 };
 
 /**
@@ -102,11 +120,6 @@ function onboardingConstraints(ctx: OnboardingContext): EffectiveConstraintSet {
   };
 }
 
-/** Deterministic numeric library order (ex_101 < ex_102 < … < ex_1500). */
-function byNumericId(a: Exercise, b: Exercise): number {
-  return parseInt(a.id.replace('ex_', ''), 10) - parseInt(b.id.replace('ex_', ''), 10);
-}
-
 /**
  * `userId` is not present in the frozen Interface Specification's
  * onboardingContext — the session/user-scoping gap logged for M1 in the
@@ -128,8 +141,8 @@ export function generateBaselinePlan(ctx: OnboardingContext, userId: string): Ba
     equipment: ctx.equipment,
     focusAreas: ctx.focusAreas,
   };
-  const { filtered } = filterAndSubstitute(candidatePlan, constraints);
-  const eligible = [...filtered].sort(byNumericId);
+  const { filtered } = filterAndSubstitute(candidatePlan, constraints, ctx.biasSimpleExercises);
+  const eligible = [...filtered].sort(bySelectionOrder(ctx.biasSimpleExercises));
 
   // --- Composition (Founder Decision): N per focus area. ---
   const areaTargets: BodyArea[] = ctx.focusAreas.includes('full')

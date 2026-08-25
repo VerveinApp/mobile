@@ -58,6 +58,18 @@ const INTENSITY_BY_EXPERIENCE: Record<string, Intensity> = {
   'years-experience': 'high',
 };
 
+// Soft experience bias (Vervein addition, not in the vault — see
+// baseline-plan.ts and exercise-filtering.ts headers for the full
+// rationale): only true-beginners get `complexity:'simple'` exercises
+// sorted ahead of `moderate` ones. A preference ordering, not a filter —
+// see bySelectionOrder in exercise-library.ts.
+const BIAS_SIMPLE_BY_EXPERIENCE: Record<string, boolean> = {
+  'just-starting': true,
+  'trained-before': false,
+  'train-regularly': false,
+  'years-experience': false,
+};
+
 // Same values plan-preview.ts's BASE_DURATION_MIN_BY_BUCKET already uses.
 const SESSION_MIN_BY_DURATION: Record<string, number> = {
   'under-30': 25,
@@ -124,5 +136,6 @@ export function profileToOnboardingContext(profile: UserProfile): OnboardingCont
     conditions: [],
     standingSymptomTags: [],
     movementRestrictions: profile.movementRestrictions ?? [],
+    biasSimpleExercises: BIAS_SIMPLE_BY_EXPERIENCE[profile.experience ?? ''] ?? false,
   };
 }

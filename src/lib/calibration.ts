@@ -28,3 +28,16 @@ export async function submitSessionFeedback(feedback: FeedbackResponse): Promise
   }
   return updated;
 }
+
+/** Overwrites calibration wholesale — the data-backup.ts restore path's one
+ * legitimate reason to bypass computeUpdatedCalibration's normal nudge-only
+ * math and write a previously-exported value directly. Never call this from
+ * anywhere else; every other caller should go through submitSessionFeedback
+ * so the learned multiplier only ever moves via real feedback. */
+export async function restoreCalibration(calibration: UserCalibration): Promise<void> {
+  try {
+    await AsyncStorage.setItem(KEY, JSON.stringify(calibration));
+  } catch {
+    // Worst case this one field doesn't restore — the rest of the backup still applies independently.
+  }
+}

@@ -58,6 +58,7 @@ import type {
   Exercise,
   FallbackTrigger,
   PolicyApplicationRecord,
+  RepStructure,
   ScaledExerciseList,
   UserCalibration,
 } from '@/lib/engine/types';
@@ -81,12 +82,40 @@ export type { BodyArea } from '@/lib/engine/types';
 
 export type PlanExercise = {
   name: string;
-  /** null for exercises the library defines by duration alone (isometric holds, loaded carries) — never a fabricated set count. */
+  /** null only for a true single-instance exercise (a standalone stretch,
+   * a breathing exercise) — never a fabricated set count. NOT mutually
+   * exclusive with durationMin: 1,179 of 1,449 library exercises carry
+   * both a real sets count and a durationMin (see durationMin's own
+   * comment below) — exercise-timer.ts's getExerciseIntervals is the one
+   * place that reconciles the two into a real per-set/rest split. */
   sets: number | null;
   reps: number | string | null;
-  /** null for discrete sets×reps exercises — see M10's own honesty note on totalDuration below. */
+  /** Real for the large majority of the library regardless of whether
+   * `sets` is also set — see M10's own honesty note on totalDuration below.
+   * When both are present this is the total for the WHOLE exercise block
+   * (every set plus rest), never a single hold's length — dividing it by
+   * `sets` is exercise-timer.ts's job, not something to do here. */
   durationMin: number | null;
   bodyArea: Exercise['body_area'];
+  /** The library's real taxonomy field, not derived from sets/reps/durationMin
+   * — an isometric hold (e.g. Plank) can carry a real sets count and a
+   * real durationMin at once and still be conceptually a timed hold, not
+   * countable reps. exercise-timer.ts uses this to decide whether a work
+   * interval's countdown is a real target (never bypassable) or an
+   * estimate someone can legitimately finish ahead of. */
+  repStructure: RepStructure;
+  /** Real library fields, threaded through for exercise-timer.ts's
+   * intensity/compound-derived rest length — a heavy compound wants
+   * longer rest than a light accessory. Both are null for a real, common
+   * share of the library (455 of 1,449 have no is_compound tag), so the
+   * rest-length rule treats a null the same as its more conservative
+   * (shorter-rest) known value rather than assuming the longer one. */
+  intensity: Exercise['intensity'];
+  isCompound: Exercise['is_compound'];
+  /** The library's real id — check-in.tsx's tap-to-expand descriptions key
+   * exercise-form-cues.ts's FORM_CUES/SIMPLE_CUES by this, not by name
+   * (names aren't guaranteed unique the way ids are). */
+  id: Exercise['id'];
 };
 
 export type PlanPreviewResult = {
@@ -96,6 +125,16 @@ export type PlanPreviewResult = {
   /** Real, from the user's actual equipment answer. */
   equipmentNote: string;
   exercises: PlanExercise[];
+  /**
+   * 100 = full baseline volume, already folded into `explanation`'s
+   * prose but not previously exposed structurally — check-in.tsx needs the
+   * real number too, since exerciseCount alone can't tell "genuinely
+   * standard session" apart from "same exercise count, every set scaled
+   * down" (e.g. Energy 2's real 0.6 setsMultiplier doesn't necessarily
+   * drop a whole exercise). See scaleVolume's own doc comment for the
+   * known sets-floor-inflation gap this figure inherits.
+   */
+  overallSetsPct: number;
   /**
    * Minimal decision-trace data — not shown in the UI directly. Feeds
    * engine/training-state.ts's (M20) Stimulus Ledger/Debt fold once a
@@ -129,7 +168,29 @@ export function computePlanPreview(
    * history-blind run, byte-identical to every call site that doesn't pass
    * one. Only ever used for the one shipped rolling-window sentence below;
    * fetching it is the caller's job since this function stays synchronous. */
-  trainingState?: TrainingState
+  trainingState?: TrainingState,
+  /**
+   * The one place real external (non-app) data reaches the engine: a
+   * multiplier in (0.85, 1] from health-kit.ts's getHealthReadinessModifier,
+   * derived from real resting-heart-rate trend. Deliberately app-level, not
+   * folded into calibration.ts/M15's own learned multiplier — that one is
+   * pure "learned from this app's own feedback," this one is a different
+   * real signal with a different source, kept separately attributable
+   * rather than blended into a single opaque number. Defaults to 1 (no
+   * adjustment) so every call site that doesn't pass one is unaffected.
+   */
+  healthReadinessModifier: number = 1,
+  /**
+   * Real check-in-history data, and only when it's literally calendar-
+   * yesterday relative to today — not "whenever the user last checked in"
+   * (that's comparisonText's looser "last time" framing, a separate UI
+   * element). Verifying the date is the caller's job, same division of
+   * labor as trainingState/healthReadinessModifier above: this function
+   * stays synchronous and never touches the clock itself beyond what
+   * localDateStr already does for `checkIn` below. Absent means today's
+   * explanation makes no day-over-day claim at all, never a fabricated one.
+   */
+  yesterdayEnergy?: EnergyLevel
 ): PlanPreviewResult {
   const ctx = profileToOnboardingContext(input);
   const baselinePlan = generateBaselinePlan(ctx, LOCAL_USER_ID);
@@ -150,7 +211,7 @@ export function computePlanPreview(
     ctx.equipment,
     ctx.conditions
   );
-  const filterResult = filterAndSubstitute(baselinePlan, dailyConstraints);
+  const filterResult = filterAndSubstitute(baselinePlan, dailyConstraints, ctx.biasSimpleExercises);
 
   // Standing ∪ acute, deduplicated — the same merge M13 does before both
   // the volume-scaling multiplier lookup and the explanation's tag lines.
@@ -164,6 +225,7 @@ export function computePlanPreview(
   let isRestDay = false;
   let overallSetsPct = 100;
   let fallbackTrigger: FallbackTrigger | null = null;
+  let healthModifierChangedOutput = false;
 
   if (fallback) {
     assembledExercises = fallback.exercises;
@@ -172,14 +234,18 @@ export function computePlanPreview(
   } else {
     // Step 4 — volume scaling. energyModifier.setsMultiplier is 0 at
     // Energy Score 1, but that path is already fully claimed by Fallback
-    // above, so this only ever runs for 2–5.
+    // above, so this only ever runs for 2–5. healthReadinessModifier folds
+    // in here (not into calibration.multiplier itself) — scaleVolume never
+    // clamps internally by design (FD-3), so the combined value is only as
+    // safe as what's passed in; both factors are already independently
+    // bounded before reaching this multiplication.
     const energyModifier = ENERGY_MODIFIER_TABLE[energy];
     const volumeResult = scaleVolume(
       filterResult.filtered,
       energyModifier,
       activeSymptomOverrides,
       ctx.conditionProfile.volumeStance,
-      calibration.multiplier
+      calibration.multiplier * healthReadinessModifier
     );
 
     if (volumeResult.kind === 'stacking-transition-signal') {
@@ -193,6 +259,25 @@ export function computePlanPreview(
     } else {
       assembledExercises = volumeResult.exercises;
       overallSetsPct = volumeResult.overallSetsPct;
+
+      // Never claim a trim that didn't actually survive rounding. scaleVolume's
+      // own Math.max(1, Math.round(...)) sets floor and assembleWorkout's
+      // 5-minute duration rounding can both fully absorb a small (7-15%)
+      // reduction, leaving the delivered plan byte-identical to what
+      // healthReadinessModifier=1 would have produced — re-running without
+      // it and comparing is the only honest way to know that before saying so.
+      if (healthReadinessModifier < 1) {
+        const withoutHealthModifier = scaleVolume(
+          filterResult.filtered,
+          energyModifier,
+          activeSymptomOverrides,
+          ctx.conditionProfile.volumeStance,
+          calibration.multiplier
+        );
+        healthModifierChangedOutput =
+          withoutHealthModifier.kind !== 'stacking-transition-signal' &&
+          JSON.stringify(withoutHealthModifier.exercises) !== JSON.stringify(volumeResult.exercises);
+      }
     }
   }
 
@@ -213,10 +298,38 @@ export function computePlanPreview(
   // approved history-trend wording, fired only when yesterday was also a
   // low-energy day and today is too. No other trend copy exists yet
   // (Capacity Trend is trace-only, never templated into prose).
-  const explanation =
+  const withRollingWindow =
     trainingState && energy <= 2 && trainingState.rollingWindow.value.yesterdayLowEnergy
       ? `${baseExplanation} Yesterday you logged low energy too.`
       : baseExplanation;
+
+  // DISCLOSED DIVERGENCE from the comment above (Vervein addition, not in
+  // the vault — FE-12's rolling-window sentence is documented as "the ONLY
+  // approved history-trend wording" as of that port). Added deliberately:
+  // day-to-day plans that read as unrelated to each other is a named real
+  // trust risk (VoC research — a plan lighter than yesterday with no
+  // stated reason reads as arbitrary, not adaptive). yesterdayEnergy is
+  // only ever passed by the caller when it's verified literally-yesterday
+  // (see this function's own param comment), so this never claims a
+  // day-over-day story that isn't real. Silent whenever energy hasn't
+  // actually changed — connecting two identical days needs no sentence.
+  const withYesterdayThread =
+    yesterdayEnergy !== undefined && yesterdayEnergy !== energy
+      ? `${withRollingWindow} ${
+          energy > yesterdayEnergy
+            ? "You're up from yesterday, so today asks a little more."
+            : 'Lighter than yesterday — your energy dipped, so the plan eased off.'
+        }`
+      : withRollingWindow;
+
+  // Never a silent adjustment, and never an overclaimed one either —
+  // healthModifierChangedOutput is only true when the reduction actually
+  // survived scaleVolume/assembleWorkout's own rounding (see above), so
+  // this never claims a trim that a user comparing exercise-by-exercise
+  // wouldn't actually be able to find.
+  const explanation = healthModifierChangedOutput
+    ? `${withYesterdayThread} Trimmed slightly further — your resting heart rate suggests recovery might not be complete.`
+    : withYesterdayThread;
 
   // ScaledExercise doesn't carry body_area — zip against filterResult.filtered
   // by index rather than a second by-id lookup, since scaleVolume's map()
@@ -230,6 +343,10 @@ export function computePlanPreview(
         reps: ex.adapted_reps,
         durationMin: ex.adapted_duration_min,
         bodyArea: filterResult.filtered[i]?.body_area ?? 'full',
+        repStructure: filterResult.filtered[i]?.rep_structure ?? 'discrete',
+        intensity: filterResult.filtered[i]?.intensity ?? null,
+        isCompound: filterResult.filtered[i]?.is_compound ?? null,
+        id: ex.exerciseId,
       };
     }
     return {
@@ -238,6 +355,10 @@ export function computePlanPreview(
       reps: ex.base_reps,
       durationMin: ex.base_duration_min,
       bodyArea: ex.body_area,
+      repStructure: ex.rep_structure,
+      intensity: ex.intensity,
+      id: ex.id,
+      isCompound: ex.is_compound,
     };
   });
 
@@ -265,7 +386,13 @@ export function computePlanPreview(
       (e) => e.excludedBy === 'body-area' || e.excludedBy === 'intensity' || e.excludedBy === 'impact'
     ),
     p5StackingTransition: fallbackTrigger === 'p5-stacking-transition',
-    m8Ran: !isRestDay,
+    // !isRestDay alone is wrong for the stacking-transition branch: M8
+    // (scaleVolume) genuinely ran there before the second fallback fired,
+    // so it's a rest day (isRestDay=true) where m8Ran should still be true.
+    // Matches M13's real source, which only ever sets m8Ran: false for the
+    // first-fallback branch (scaleVolume never called at all) — true in
+    // both the stacking-transition branch and the normal branch.
+    m8Ran: !isRestDay || fallbackTrigger === 'p5-stacking-transition',
   });
 
   return {
@@ -274,6 +401,7 @@ export function computePlanPreview(
     explanation,
     equipmentNote,
     exercises,
+    overallSetsPct,
     trace: {
       fallbackFired: isRestDay,
       fallbackTrigger,

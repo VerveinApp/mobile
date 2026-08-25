@@ -165,7 +165,18 @@ export function compileTrainingState(history: {
   const debtBasis = ledgerTraces.length;
 
   return {
-    capacityTrend: { value: trend, basis: window.length, tier: tierOf(window.length) },
+    // Deliberately NOT tierOf(window.length) here, unlike every other Tiered
+    // field below — the trend VALUE only becomes real computation once
+    // window.length >= 5 (see above); at exactly 3-4 (TIER_PROVISIONAL_MIN's
+    // own threshold), tierOf would report 'provisional' for what's still
+    // just trend's untouched 'stable' initialization, not an observation.
+    // basis stays the real window length either way — only the tier is
+    // adjusted to match what's actually been computed. This same gap exists
+    // verbatim in the vault's own M20 source; caught surfacing it as real
+    // UI copy on Progress ("Energy trend: ..."), which the vault itself
+    // never did (its own comment: capacityTrend has "no user-facing voice
+    // yet").
+    capacityTrend: { value: trend, basis: window.length, tier: window.length >= 5 ? tierOf(window.length) : 'insufficient' },
     rollingWindow: {
       value: {
         days: window.map((c) => ({ date: c.date, energyScore: c.energyScore, skipped: c.skipped })),

@@ -25,9 +25,31 @@
 //    are excluded and traced as "inactive" (M2f).
 //  · An unresolvable baseline exercise ID throws (M1f) — data corruption is
 //    loud, never a silently smaller session.
+//
+// DISCLOSED DIVERGENCE (Vervein addition, not in the vault): gap-fill
+// candidates are ordered by bySelectionOrder(biasSimpleFirst) instead of
+// raw library order. For beginners (profile.experience === 'just-starting'),
+// this sorts `complexity:'simple'` candidates ahead of `moderate` ones —
+// numeric ID stays the tiebreak. It's a preference over which *legal*
+// candidate fills a slot first, never a new exclusion: a `moderate`
+// exercise remains eligible and can still be chosen if it's the only
+// candidate left, so gapFillShortfall behavior is unchanged. See
+// baseline-plan.ts's matching header note for the full rationale.
+//
+// DISCLOSED DIVERGENCE (Vervein addition, not in the vault): both survivor
+// selection and gap-fill candidates are additionally required to pass
+// isTrainableExercise — see non-trainable-exercises.ts for the real product
+// bug this closes (fitness-test/assessment protocols like "Bench Press 1RM
+// Test" have no vault-schema field distinguishing them from a real
+// exercise, so passesConstraints alone would let one get assigned as an
+// actual day's workout exercise). This is a genuine new exclusion, unlike
+// the ordering divergence above — traced honestly as 'non-trainable' in
+// gate1Exclusions, never folded into an existing (and now inaccurate)
+// reason label.
 
 import type { BaselinePlan, EffectiveConstraintSet, Exercise, FilteredExerciseList } from './types';
-import { exerciseLibrary, INTENSITY_RANK, IMPACT_RANK, EQUIPMENT_RANK } from './exercise-library';
+import { exerciseLibrary, INTENSITY_RANK, IMPACT_RANK, EQUIPMENT_RANK, bySelectionOrder } from './exercise-library';
+import { isTrainableExercise } from '../non-trainable-exercises';
 
 function bodyAreaExcluded(ex: Exercise, c: EffectiveConstraintSet): boolean {
   if (c.excludeBodyAreas.includes(ex.body_area)) return true;
@@ -47,23 +69,45 @@ function passesConstraints(ex: Exercise, c: EffectiveConstraintSet): boolean {
   return intensityOk && impactOk && equipmentOk && !bodyAreaExcluded(ex, c) && patternOk && !contraindicated(ex, c);
 }
 
-/** One named source per exclusion, checked in Gate 1 rung order. */
-function exclusionReason(ex: Exercise, c: EffectiveConstraintSet): FilterResult['gate1Exclusions'][number]['excludedBy'] {
+/** One named source per exclusion, checked in Gate 1 rung order. Only ever
+ * called on an exercise that has already failed passesConstraints (or, for
+ * 'non-trainable', failed the Vervein-added check below it) — never on one
+ * that actually passes, which would fall through to the wrong reason. */
+function exclusionReason(
+  ex: Exercise,
+  c: EffectiveConstraintSet
+): FilterResult['gate1Exclusions'][number]['excludedBy'] {
   if (contraindicated(ex, c)) return 'contraindication';
   if (ex.intensity !== null && INTENSITY_RANK[ex.intensity] > INTENSITY_RANK[c.intensityCeiling]) return 'intensity';
   if (IMPACT_RANK[ex.impact] > IMPACT_RANK[c.impactCeiling]) return 'impact';
   if (EQUIPMENT_RANK[ex.equipment] > EQUIPMENT_RANK[c.equipmentCeiling]) return 'equipment';
   if (bodyAreaExcluded(ex, c)) return 'body-area';
+  if (!isTrainableExercise(ex.id)) return 'non-trainable';
   return 'restriction'; // the only remaining dimension — movement patterns
 }
 
 export type FilterResult = {
   filtered: FilteredExerciseList;
-  gate1Exclusions: { exerciseId: string; excludedBy: 'contraindication' | 'intensity' | 'impact' | 'equipment' | 'body-area' | 'restriction' | 'inactive' }[];
+  gate1Exclusions: {
+    exerciseId: string;
+    excludedBy:
+      | 'contraindication'
+      | 'intensity'
+      | 'impact'
+      | 'equipment'
+      | 'body-area'
+      | 'restriction'
+      | 'inactive'
+      | 'non-trainable';
+  }[];
   gapFillShortfall: number; // > 0 means the library couldn't fill every removed slot — a real, allowed outcome
 };
 
-export function filterAndSubstitute(baselinePlan: BaselinePlan, constraints: EffectiveConstraintSet): FilterResult {
+export function filterAndSubstitute(
+  baselinePlan: BaselinePlan,
+  constraints: EffectiveConstraintSet,
+  biasSimpleFirst: boolean = false
+): FilterResult {
   const baselineExercises = baselinePlan.exerciseIds.map((id) => {
     const ex = exerciseLibrary.getById(id);
     if (!ex) {
@@ -78,7 +122,7 @@ export function filterAndSubstitute(baselinePlan: BaselinePlan, constraints: Eff
   for (const ex of baselineExercises) {
     if (!ex.active) {
       gate1Exclusions.push({ exerciseId: ex.id, excludedBy: 'inactive' });
-    } else if (passesConstraints(ex, constraints)) {
+    } else if (passesConstraints(ex, constraints) && isTrainableExercise(ex.id)) {
       survivors.push(ex);
     } else {
       gate1Exclusions.push({ exerciseId: ex.id, excludedBy: exclusionReason(ex, constraints) });
@@ -92,7 +136,8 @@ export function filterAndSubstitute(baselinePlan: BaselinePlan, constraints: Eff
     const candidates = exerciseLibrary
       .all()
       .filter((e) => e.active && !survivorIds.has(e.id) && !baselinePlan.exerciseIds.includes(e.id))
-      .filter((e) => passesConstraints(e, constraints));
+      .filter((e) => passesConstraints(e, constraints) && isTrainableExercise(e.id))
+      .sort(bySelectionOrder(biasSimpleFirst));
 
     // Force-add first (H1): at least one candidate per forced type, in the
     // deterministic order M5 emitted them, within the removed-slot budget.

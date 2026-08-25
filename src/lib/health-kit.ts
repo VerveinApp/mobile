@@ -1,6 +1,8 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { localDateStr } from '@/lib/local-date';
+
 // iOS-only, read-only wrapper around @kingstinct/react-native-healthkit.
 // HealthKit itself never tells an app which individual read permissions
 // were actually granted (Apple deliberately withholds this to prevent
@@ -96,10 +98,6 @@ export async function disconnectHealthKit(): Promise<void> {
   }
 }
 
-function localDateOnly(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
 /** Daily step totals for the last `days` days, oldest first. Empty if not connected or no data. */
 export async function getRecentSteps(days: number): Promise<DailyMetric[]> {
   const HealthKit = await getModule();
@@ -114,7 +112,7 @@ export async function getRecentSteps(days: number): Promise<DailyMetric[]> {
     });
     const byDate = new Map<string, number>();
     for (const s of samples) {
-      const date = localDateOnly(s.startDate);
+      const date = localDateStr(s.startDate);
       byDate.set(date, (byDate.get(date) ?? 0) + s.quantity);
     }
     return Array.from(byDate.entries())
@@ -125,7 +123,14 @@ export async function getRecentSteps(days: number): Promise<DailyMetric[]> {
   }
 }
 
-/** Resting heart rate samples for the last `days` days, oldest first. Empty if not connected or no data. */
+/**
+ * One resting-heart-rate value per real day for the last `days` days,
+ * oldest first. Empty if not connected or no data. HealthKit can emit more
+ * than one RHR sample per day (multiple sources, recalculation) — averaged
+ * per calendar date rather than returned 1:1 per sample, same aggregation
+ * getRecentSteps/getRecentSleepHours already do, so getRestingHeartRateTrend's
+ * "last 3 entries" really means the last 3 real days, not the last 3 samples.
+ */
 export async function getRecentRestingHeartRate(days: number): Promise<DailyMetric[]> {
   const HealthKit = await getModule();
   if (!HealthKit || !(await hasConnectedHealthKit())) return [];
@@ -137,10 +142,69 @@ export async function getRecentRestingHeartRate(days: number): Promise<DailyMetr
       unit: 'count/min',
       ascending: true,
     });
-    return samples.map((s) => ({ date: localDateOnly(s.startDate), value: Math.round(s.quantity) }));
+    const byDate = new Map<string, { total: number; count: number }>();
+    for (const s of samples) {
+      const date = localDateStr(s.startDate);
+      const entry = byDate.get(date) ?? { total: 0, count: 0 };
+      entry.total += s.quantity;
+      entry.count += 1;
+      byDate.set(date, entry);
+    }
+    return Array.from(byDate.entries())
+      .map(([date, { total, count }]) => ({ date, value: Math.round(total / count) }))
+      .sort((a, b) => a.date.localeCompare(b.date));
   } catch {
     return [];
   }
+}
+
+const RHR_MIN_BASELINE_DAYS = 4;
+
+export type RestingHeartRateTrend = { recentAvg: number; baselineAvg: number; ratio: number };
+
+/**
+ * Real, self-normalized recovery signal: the last 3 days' average resting
+ * heart rate against the trailing baseline before that — never an absolute
+ * bpm target, same principle as the Training Balance radar. `ratio > 1`
+ * means recent RHR is elevated relative to the user's own baseline. Null
+ * when there isn't enough real data to say anything — under-triggering is
+ * always the safe failure mode. Shared by deload.ts (the advisory banner)
+ * and plan-preview.ts (the real volume adjustment) so both read the exact
+ * same real trend, not two independently-computed numbers.
+ */
+export async function getRestingHeartRateTrend(): Promise<RestingHeartRateTrend | null> {
+  const samples = await getRecentRestingHeartRate(10); // oldest-first
+  if (samples.length < RHR_MIN_BASELINE_DAYS + 3) return null;
+
+  const recent = samples.slice(-3);
+  const baseline = samples.slice(0, -3);
+  const recentAvg = recent.reduce((sum, s) => sum + s.value, 0) / recent.length;
+  const baselineAvg = baseline.reduce((sum, s) => sum + s.value, 0) / baseline.length;
+  return { recentAvg, baselineAvg, ratio: recentAvg / baselineAvg };
+}
+
+// The one place real HealthKit data actually changes what the engine
+// produces (see plan-preview.ts). Deliberately one-directional and capped:
+// an elevated RHR can only ever trim volume, never boost it above what the
+// user's own energy score already implies — mirrors M9's own P1 governance
+// language ("conservative interim: reduce and say so") rather than
+// introducing a new policy stance. Capped at a 15% reduction so one noisy
+// reading can't swing a session drastically; always surfaced in the
+// explanation string, never a silent adjustment.
+const READINESS_MAX_REDUCTION = 0.15;
+
+/**
+ * A multiplier in [1 - READINESS_MAX_REDUCTION, 1] to apply alongside the
+ * calibration multiplier in scaleVolume — inclusive lower bound, reached
+ * exactly at >=15% RHR elevation (Math.min caps there, doesn't approach it
+ * asymptotically). 1 means "no adjustment" — either RHR isn't elevated, or
+ * there isn't enough real data yet.
+ */
+export async function getHealthReadinessModifier(): Promise<number> {
+  const trend = await getRestingHeartRateTrend();
+  if (!trend || trend.ratio <= 1) return 1;
+  const elevation = trend.ratio - 1;
+  return 1 - Math.min(elevation, READINESS_MAX_REDUCTION);
 }
 
 /**
@@ -166,7 +230,7 @@ export async function getRecentSleepHours(days: number): Promise<DailyMetric[]> 
     const hoursByDate = new Map<string, number>();
     for (const sample of samples) {
       if (!asleepValues.has(sample.value as unknown as number)) continue;
-      const date = localDateOnly(sample.startDate);
+      const date = localDateStr(sample.startDate);
       const hours = (sample.endDate.getTime() - sample.startDate.getTime()) / 3_600_000;
       hoursByDate.set(date, (hoursByDate.get(date) ?? 0) + hours);
     }

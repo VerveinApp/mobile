@@ -18,8 +18,7 @@ import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight } from '@/lib/haptics';
 import { goBack } from '@/lib/onboarding-nav';
-import { markOnboardingComplete } from '@/lib/onboarding-draft';
-import { saveProfile, withHealthConsent } from '@/lib/user-profile';
+import { supabase } from '@/lib/supabase';
 import {
   AppleIconGraphic,
   ArrowUpIconGraphic,
@@ -64,6 +63,12 @@ export default function CreateAccountScreen() {
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailFocused, setEmailFocused] = useState(false);
+  const [sendingCode, setSendingCode] = useState(false);
+  // Apple/Google aren't wired to a real SDK or a configured Supabase OAuth
+  // provider yet — see handleAppleAuth/handleGoogleAuth's own comment for
+  // why silently completing a fake signup on tap (the previous behavior)
+  // was a real honesty gap, not a harmless placeholder.
+  const [socialAuthNotice, setSocialAuthNotice] = useState<string | null>(null);
 
   const continueHover = useHoverFade();
   const appleHover = useHoverFade();
@@ -82,7 +87,7 @@ export default function CreateAccountScreen() {
     goBack('/onboarding/first-look', onboardingParams);
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     const trimmed = email.trim();
     if (!trimmed || !EMAIL_PATTERN.test(trimmed)) {
       setEmailError('Enter a valid email address.');
@@ -91,62 +96,48 @@ export default function CreateAccountScreen() {
     }
     setEmailError(null);
     hapticImpactLight();
+    setSendingCode(true);
+    // The real send — previously this just navigated to verify.tsx without
+    // ever dispatching a code anywhere, which is how that screen used to
+    // accept literally any 4 digits typed in.
+    const { error } = await supabase.auth.signInWithOtp({ email: trimmed });
+    setSendingCode(false);
+    if (error) {
+      setEmailError(error.message);
+      hapticError();
+      return;
+    }
     // Manual email sign-in is the only path that goes through verification.
     // All onboarding answers ride along so verify.tsx can hand them to the
     // post-signup destination once the account is confirmed.
     router.push({ pathname: '/auth/verify', params: { ...onboardingParams, email: trimmed } } as never);
   };
 
-  // Apple/Google are separate auth paths — they intentionally skip email
-  // verification. Not implemented yet (no backend/SDK integration), so
-  // these are placeholders that preserve the correct routing shape: once
-  // wired up, a real success callback replaces this immediate completion.
-  //
-  // What a placeholder must never skip, though, is saving the onboarding
-  // answers that got the user to this screen — this used to call
-  // markOnboardingComplete() and navigate straight to Home without ever
-  // calling saveProfile(), silently discarding goal/experience/environment/
-  // duration/days/commitment/health data the user had just entered. Every
-  // downstream screen (Profile, Progress, Train) reads an empty profile
-  // from that point on. saveProfile() here mirrors exactly what
-  // auth/verify.tsx does for the email path, minus `email` — these paths
-  // haven't collected one (a real Apple/Google SDK would supply it; nothing
-  // here fabricates one in its place).
-  // Both writes are awaited before navigating — this lands straight on
-  // Home with no buffer screens in between (unlike the email path, which
-  // passes through all-set/trajectory first), so there's nothing to absorb
-  // the AsyncStorage write's latency. Firing router.replace before these
-  // resolved was the same race that produced the empty-profile bug this
-  // function was written to fix in the first place, just one layer deeper.
-  const finishSocialAuth = async () => {
-    await saveProfile({
-      name: onboardingParams.name,
-      goal: onboardingParams.goal,
-      experience: onboardingParams.experience,
-      environment: onboardingParams.environment,
-      duration: onboardingParams.duration,
-      commitmentLevel: onboardingParams.commitmentLevel,
-      days: onboardingParams.days,
-      ...withHealthConsent(onboardingParams.healthConsent === 'true' ? 'true' : 'false'),
-      sex: onboardingParams.sex,
-      heightCm: onboardingParams.heightCm,
-      weightKg: onboardingParams.weightKg,
-    });
-    await markOnboardingComplete();
-    router.replace('/(tabs)' as never);
-  };
-
+  // DISCLOSED FIX: Apple/Google used to silently complete a fake signup on
+  // tap — saving the real onboarding profile, marking onboarding complete,
+  // and landing on Home with full haptic/navigation feedback, exactly like
+  // a genuine sign-in, with no real Apple/Google SDK call and no real
+  // Supabase session behind any of it. That's a real "looks like it worked,
+  // didn't" gap, not a harmless placeholder — Settings' own Account row now
+  // shows the real signed-in state, and a fake-social-signup account would
+  // permanently read "Not signed in" there despite onboarding having
+  // visually completed. Real Sign in with Apple/Google needs a native SDK
+  // (expo-apple-authentication / a Google OAuth client), Apple
+  // Developer/Google Cloud credentials, and a configured Supabase OAuth
+  // provider — none of which exist yet, so these buttons honestly say so
+  // instead of pretending. Once that real integration exists, its success
+  // callback should do what the old finishSocialAuth() did (save the
+  // profile collected during onboarding, mark onboarding complete, and
+  // navigate to Home) plus the real email/identity Apple/Google actually
+  // supply — nothing here fabricates one in its place.
   const handleAppleAuth = () => {
     hapticImpactLight();
-    // TODO: integrate real Sign in with Apple — finishSocialAuth() below is
-    // the data-saving half only; the auth itself still isn't implemented.
-    finishSocialAuth();
+    setSocialAuthNotice("Apple sign-in isn't set up yet — continue with email below.");
   };
 
   const handleGoogleAuth = () => {
     hapticImpactLight();
-    // TODO: integrate real Google auth — same split as handleAppleAuth above.
-    finishSocialAuth();
+    setSocialAuthNotice("Google sign-in isn't set up yet — continue with email below.");
   };
 
   return (
@@ -219,6 +210,7 @@ export default function CreateAccountScreen() {
               onChangeText={(value) => {
                 setEmail(value);
                 if (emailError) setEmailError(null);
+                if (socialAuthNotice) setSocialAuthNotice(null);
               }}
               onFocus={() => setEmailFocused(true)}
               onBlur={() => setEmailFocused(false)}
@@ -244,7 +236,7 @@ export default function CreateAccountScreen() {
           <Pressable
             style={styles.primaryButtonHit}
             onPress={handleContinue}
-            disabled={isEmailEmpty}
+            disabled={isEmailEmpty || sendingCode}
             onHoverIn={continueHover.onHoverIn}
             onHoverOut={continueHover.onHoverOut}
             onPressIn={continuePress.onPressIn}
@@ -254,7 +246,7 @@ export default function CreateAccountScreen() {
               style={[
                 styles.primaryButtonVisual,
                 isGlassAvailable && styles.primaryButtonVisualGlass,
-                isEmailEmpty && styles.primaryButtonDisabled,
+                (isEmailEmpty || sendingCode) && styles.primaryButtonDisabled,
                 { transform: [{ scale: continuePress.scale }] },
               ]}
             >
@@ -284,10 +276,14 @@ export default function CreateAccountScreen() {
                   { opacity: continuePress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
                 ]}
               />
-              <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>Continue</Text>
-              <View style={styles.buttonArrow}>
-                <ArrowUpIconGraphic size={24} />
-              </View>
+              <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>
+                {sendingCode ? 'Sending…' : 'Continue'}
+              </Text>
+              {sendingCode ? null : (
+                <View style={styles.buttonArrow}>
+                  <ArrowUpIconGraphic size={24} />
+                </View>
+              )}
             </Animated.View>
           </Pressable>
 
@@ -372,6 +368,16 @@ export default function CreateAccountScreen() {
               <Text style={[styles.socialText, styles.googleText]} maxFontSizeMultiplier={1.2}>Continue with Google</Text>
             </Animated.View>
           </Pressable>
+
+          {socialAuthNotice ? (
+            <ReanimatedAnimated.Text
+              entering={FadeIn.duration(150)}
+              style={styles.socialNoticeText}
+              maxFontSizeMultiplier={1.3}
+            >
+              {socialAuthNotice}
+            </ReanimatedAnimated.Text>
+          ) : null}
         </View>
 
         <Text style={styles.termsText} maxFontSizeMultiplier={1.4}>
@@ -483,33 +489,37 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       left: 26,
       top: 355,
     },
+    // Was position:'absolute' with a fixed height:322 — emailError comes
+    // straight from Supabase (error.message: unbounded, unpredictable
+    // length, e.g. rate-limit messages run a full sentence), so a fixed
+    // absolute gap between inputWrap and primaryButtonHit could let a long
+    // message overlap the button instead of pushing it down. Flow layout
+    // (minHeight preserves the visual size in the common no-error case,
+    // but lets the card grow if it genuinely needs to) fixes that without
+    // touching cardFrame's decorative background graphic below it.
     card: {
       position: 'absolute',
       left: 26,
       top: 355,
       width: 326,
-      height: 322,
+      minHeight: 322,
+      paddingTop: 21,
+      paddingHorizontal: 18,
+      paddingBottom: 16,
     },
     formHeading: {
-      position: 'absolute',
-      left: 17,
-      top: 21,
       color: colors.text,
       fontSize: 14,
       fontFamily: 'Geist-SemiBold',
     },
     fieldLabel: {
-      position: 'absolute',
-      left: 17,
-      top: 51,
+      marginTop: 12,
       color: colors.text,
       fontSize: 10.5,
       fontFamily: 'Geist-Regular',
     },
     inputWrap: {
-      position: 'absolute',
-      left: 19,
-      top: 71,
+      marginTop: 7,
       width: 285,
       height: 35,
       flexDirection: 'row',
@@ -538,20 +548,32 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       borderColor: '#438C63',
     },
     errorText: {
-      position: 'absolute',
-      left: 19,
-      top: 109,
+      marginTop: 6,
       color: '#e5484d',
       fontSize: 9,
       fontFamily: 'Geist-Regular',
+    },
+    // Absolutely positioned, matching every other element on this
+    // pixel-coordinate canvas — sits just below the Google button
+    // (top:261 + height:35), well clear of termsText's own fixed top:741.
+    // Neutral tone, not error-red: this isn't something the user did
+    // wrong, it's the app being honest that the button isn't wired up yet.
+    socialNoticeText: {
+      position: 'absolute',
+      left: 19,
+      top: 300,
+      width: 285,
+      textAlign: 'center',
+      color: colors.textTertiary,
+      fontSize: 10,
+      lineHeight: 14,
+      fontFamily: 'Geist-Medium',
     },
     // A few px taller than every other button in the app — this is one of the
     // two milestone moments (see isGlassAvailable above) that's allowed to
     // carry a little more physical weight than the standard CTA.
     primaryButtonHit: {
-      position: 'absolute',
-      left: 19,
-      top: 130,
+      marginTop: 16,
       width: 285,
       height: 44,
     },

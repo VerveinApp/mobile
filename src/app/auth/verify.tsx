@@ -18,6 +18,7 @@ import { hapticError, hapticImpactLight, hapticSuccess } from '@/lib/haptics';
 import { markOnboardingComplete } from '@/lib/onboarding-draft';
 import { goBack } from '@/lib/onboarding-nav';
 import { useFadeInEntering } from '@/lib/screen-transitions';
+import { supabase } from '@/lib/supabase';
 import { useAppColors, useAppTheme } from '@/lib/theme-context';
 import { saveProfile, withHealthConsent } from '@/lib/user-profile';
 import {
@@ -36,7 +37,9 @@ const CANVAS_WIDTH = 375;
 const CANVAS_HEIGHT = 812;
 const CARD_RADIUS = 10;
 
-const CODE_LENGTH = 4;
+// Supabase's real email OTP is 6 digits by default — this used to be a
+// placeholder 4, back when nothing actually sent or checked a code.
+const CODE_LENGTH = 6;
 const RESEND_COOLDOWN_SECONDS = 30;
 
 function formatCountdown(seconds: number) {
@@ -70,6 +73,7 @@ export default function VerifyEmailScreen() {
 
   const [digits, setDigits] = useState<string[]>(Array(CODE_LENGTH).fill(''));
   const [codeError, setCodeError] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
   const inputRefs = useRef<(TextInput | null)[]>([]);
 
@@ -133,17 +137,36 @@ export default function VerifyEmailScreen() {
   const handleContinue = async () => {
     const code = digits.join('');
     if (code.length < CODE_LENGTH) {
-      setCodeError('Enter the full 4-digit code.');
+      setCodeError(`Enter the full ${CODE_LENGTH}-digit code.`);
+      hapticError();
+      return;
+    }
+    if (!params.email) {
+      setCodeError('Missing email — go back and try again.');
       hapticError();
       return;
     }
     setCodeError(null);
+    setVerifying(true);
+    // The real check — Supabase rejects a wrong or expired code here.
+    // Previously this accepted any 4 digits typed in; that's the whole gap
+    // this wiring closes.
+    const { error } = await supabase.auth.verifyOtp({ email: params.email, token: code, type: 'email' });
+    setVerifying(false);
+    if (error) {
+      setCodeError(error.message);
+      hapticError();
+      return;
+    }
     hapticSuccess();
     // Onboarding is fully complete once email verification succeeds — this
     // was the last step in the flow, not a launch point back into it. The
     // draft itself gets cleared right after, so the parts of it Home still
     // needs (experience/duration/commitment/days) are copied into a small
-    // durable profile first — see lib/user-profile.ts.
+    // durable profile first — see lib/user-profile.ts. Supabase's own
+    // session (the real account) is separately persisted by the client's
+    // AsyncStorage adapter — this local profile is still the engine's own
+    // input data, not a duplicate of auth state.
     // Both writes are awaited before navigating on — all-set/trajectory
     // read the profile again a couple screens later, and there's no reason
     // to leave that read racing this write when awaiting costs nothing
@@ -167,11 +190,12 @@ export default function VerifyEmailScreen() {
     router.replace('/onboarding/all-set' as never);
   };
 
-  const handleResend = () => {
-    if (cooldown > 0) return;
+  const handleResend = async () => {
+    if (cooldown > 0 || !params.email) return;
     hapticImpactLight();
     setCooldown(RESEND_COOLDOWN_SECONDS);
-    // TODO: trigger the actual resend-code request once the backend is wired up.
+    const { error } = await supabase.auth.signInWithOtp({ email: params.email });
+    if (error) setCodeError(error.message);
   };
 
   const handleChangeEmail = () => {
@@ -214,47 +238,53 @@ export default function VerifyEmailScreen() {
           <View style={styles.cardSheen} />
         </View>
 
-        <View style={styles.otpRow}>
-          {digits.map((digit, index) => (
-            <View key={index} style={[styles.otpBox, focusedIndex === index && styles.otpBoxFocused]}>
-              <View pointerEvents="none" style={styles.otpBoxSheen} />
-              <TextInput
-                ref={(ref) => {
-                  inputRefs.current[index] = ref;
-                }}
-                style={styles.otpInput}
-                value={digit}
-                onChangeText={(value) => handleDigitChange(index, value)}
-                onKeyPress={({ nativeEvent }) => handleKeyPress(index, nativeEvent.key)}
-                onFocus={() => setFocusedIndex(index)}
-                onBlur={() => setFocusedIndex((current) => (current === index ? null : current))}
-                keyboardType="number-pad"
-                autoFocus={index === 0}
-                maxLength={1}
-                textAlign="center"
-                returnKeyType={index === CODE_LENGTH - 1 ? 'done' : 'next'}
-                onSubmitEditing={index === CODE_LENGTH - 1 ? handleContinue : undefined}
-              />
-            </View>
-          ))}
-        </View>
-
-        {codeError ? (
-          <ReanimatedAnimated.Text entering={FadeIn.duration(150)} style={styles.codeErrorText} maxFontSizeMultiplier={1.3}>
-            {codeError}
-          </ReanimatedAnimated.Text>
-        ) : null}
-
-        <Pressable
-          style={[styles.primaryButton, isCodeIncomplete && styles.primaryButtonDisabled]}
-          onPress={handleContinue}
-          disabled={isCodeIncomplete}
-        >
-          <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>Continue</Text>
-          <View style={styles.buttonArrow}>
-            <ArrowUpIconGraphic size={24} />
+        <View style={styles.otpGroup}>
+          <View style={styles.otpRow}>
+            {digits.map((digit, index) => (
+              <View key={index} style={[styles.otpBox, focusedIndex === index && styles.otpBoxFocused]}>
+                <View pointerEvents="none" style={styles.otpBoxSheen} />
+                <TextInput
+                  ref={(ref) => {
+                    inputRefs.current[index] = ref;
+                  }}
+                  style={styles.otpInput}
+                  value={digit}
+                  onChangeText={(value) => handleDigitChange(index, value)}
+                  onKeyPress={({ nativeEvent }) => handleKeyPress(index, nativeEvent.key)}
+                  onFocus={() => setFocusedIndex(index)}
+                  onBlur={() => setFocusedIndex((current) => (current === index ? null : current))}
+                  keyboardType="number-pad"
+                  autoFocus={index === 0}
+                  maxLength={1}
+                  textAlign="center"
+                  returnKeyType={index === CODE_LENGTH - 1 ? 'done' : 'next'}
+                  onSubmitEditing={index === CODE_LENGTH - 1 ? handleContinue : undefined}
+                />
+              </View>
+            ))}
           </View>
-        </Pressable>
+
+          {codeError ? (
+            <ReanimatedAnimated.Text entering={FadeIn.duration(150)} style={styles.codeErrorText} maxFontSizeMultiplier={1.3}>
+              {codeError}
+            </ReanimatedAnimated.Text>
+          ) : null}
+
+          <Pressable
+            style={[styles.primaryButton, (isCodeIncomplete || verifying) && styles.primaryButtonDisabled]}
+            onPress={handleContinue}
+            disabled={isCodeIncomplete || verifying}
+          >
+            <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>
+              {verifying ? 'Verifying…' : 'Continue'}
+            </Text>
+            {verifying ? null : (
+              <View style={styles.buttonArrow}>
+                <ArrowUpIconGraphic size={24} />
+              </View>
+            )}
+          </Pressable>
+        </View>
 
         <View style={styles.resendCardContent}>
           <Pressable
@@ -437,17 +467,34 @@ function createStyles(
       height: '48%',
       backgroundColor: colors.surfaceSheen,
     },
-    otpRow: {
+    // Was three separately absolute-positioned siblings with a fixed 39px
+    // gap reserved for codeError between otpRow and primaryButton below.
+    // codeError comes straight from Supabase (error.message: unbounded,
+    // e.g. rate-limit messages run a full sentence), so that fixed gap
+    // could let a long message overlap the button instead of pushing it
+    // down. This group flows instead — resendCardContent below stays
+    // absolutely positioned (its own content is fixed, known-short text,
+    // so it isn't at risk the same way) and has enough clearance below
+    // this group's original size that a couple of extra wrapped lines here
+    // still won't reach it.
+    otpGroup: {
       position: 'absolute',
-      left: 65,
+      left: 46,
       top: 369,
+      width: 285,
+      alignItems: 'center',
+    },
+    otpRow: {
       width: 244,
       height: 73,
       flexDirection: 'row',
       justifyContent: 'space-between',
     },
+    // 33 (was 53 for 4 boxes) keeps the same ~5:1 box-to-gap ratio within
+    // the same 244px row width (see cardFrame's own background graphic,
+    // sized for that row width) now that there are 6 boxes, not 4.
     otpBox: {
-      width: 53,
+      width: 33,
       height: 73,
       borderRadius: CARD_RADIUS,
       borderWidth: StyleSheet.hairlineWidth,
@@ -472,22 +519,20 @@ function createStyles(
       width: '100%',
       height: '100%',
       color: colors.text,
-      fontSize: 28,
+      fontSize: 22, // scaled down from 28 to fit the narrower 6-box layout
       fontFamily: 'Geist-SemiBold',
       padding: 0,
     },
     codeErrorText: {
-      position: 'absolute',
-      left: 65,
-      top: 446,
+      marginTop: 6,
+      marginBottom: 4,
+      textAlign: 'center',
       color: '#e5484d',
       fontSize: 9,
       fontFamily: 'Geist-Regular',
     },
     primaryButton: {
-      position: 'absolute',
-      left: 46,
-      top: 485,
+      marginTop: 20,
       width: 285,
       height: 38,
       backgroundColor: '#29563a',

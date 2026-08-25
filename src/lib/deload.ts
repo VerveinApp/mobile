@@ -1,6 +1,6 @@
 import { checkDeloadPattern } from '@/lib/engine/deload-nudge';
 import type { DeloadNudge } from '@/lib/engine/types';
-import { getRecentRestingHeartRate } from '@/lib/health-kit';
+import { getRestingHeartRateTrend } from '@/lib/health-kit';
 import { getSessionHistory } from '@/lib/session-history';
 
 /**
@@ -21,27 +21,23 @@ async function getEnergyDeloadNudge(): Promise<DeloadNudge> {
 // deliberately NOT folded into M16's own checkDeloadPattern (that module is
 // a verbatim port of the vault's exact interim rule; extending its logic
 // here would blur what's real vault logic vs. an app-side addition). This
-// runs as a separate, additive check instead: self-normalized against the
-// user's own trailing baseline (never a fixed absolute bpm target, same
-// principle as the Training Balance radar), and only when there's enough
-// real data to say anything — under-triggering is always the safe failure
-// mode, same as the energy-based check above.
+// runs as a separate, additive check instead, sharing its real trend
+// computation with plan-preview.ts's actual volume adjustment (see
+// health-kit.ts's getRestingHeartRateTrend) rather than an independent
+// duplicate — this banner and today's actual plan should never disagree
+// about what the same real data says.
 const RHR_ELEVATION_THRESHOLD = 1.07; // +7% sustained — within the commonly-cited 5-10% range for reduced-recovery signals
-const RHR_MIN_BASELINE_DAYS = 4;
 
 async function getHeartRateDeloadNudge(): Promise<DeloadNudge> {
-  const samples = await getRecentRestingHeartRate(10); // oldest-first
-  if (samples.length < RHR_MIN_BASELINE_DAYS + 3) return { triggered: false, message: null };
-
-  const recent = samples.slice(-3);
-  const baseline = samples.slice(0, -3);
-  const recentAvg = recent.reduce((sum, s) => sum + s.value, 0) / recent.length;
-  const baselineAvg = baseline.reduce((sum, s) => sum + s.value, 0) / baseline.length;
-
-  if (recentAvg >= baselineAvg * RHR_ELEVATION_THRESHOLD) {
+  const trend = await getRestingHeartRateTrend();
+  if (trend && trend.ratio >= RHR_ELEVATION_THRESHOLD) {
     return {
       triggered: true,
-      message: 'Your resting heart rate has been higher than usual the past few days — consider taking it easier.',
+      // Present tense, not "has already been trimmed" — this banner can
+      // render on Home before the user has checked in today at all, when
+      // there's no finalized session to describe in the past tense yet,
+      // only a live preview.
+      message: "Your resting heart rate has been higher than usual — today's plan reflects that.",
     };
   }
   return { triggered: false, message: null };

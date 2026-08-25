@@ -82,6 +82,14 @@ export function scaleVolume(
     };
   });
 
+  // KNOWN IMPRECISION (verbatim vault math, not a Vervein-introduced bug):
+  // adapted_sets' own Math.max(1, ...) floor above means any exercise with
+  // base_sets=1 always reports a 100%+ ratio here regardless of how low the
+  // real multiplier was — you can't meaningfully deliver "0.4 sets," so
+  // flooring to 1 is the honest minimum, but it pulls the reported "% of
+  // baseline" up for sessions containing single-set exercises. A real,
+  // observable inaccuracy in what overallSetsPct claims, inherited from the
+  // source spec rather than introduced here.
   const ratios = filteredList
     .map((ex, i) => {
       const adapted = scaled[i].adapted_sets;

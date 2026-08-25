@@ -1,6 +1,7 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import ReanimatedAnimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 import type { SFSymbol } from 'sf-symbols-typescript';
@@ -14,6 +15,7 @@ import {
   GOAL_LABELS,
 } from '@/lib/profile-labels';
 import { COMMITMENT_LEVELS } from '@/lib/commitment-levels';
+import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
@@ -22,6 +24,13 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  // Same shared fade used across onboarding, check-in, Home, Progress, and
+  // Train — the loading-skeleton-to-real-content swap below previously
+  // hard-cut with no transition, the one motion-language gap against the
+  // rest of the app. Only fires on the true initial load — loaded stays
+  // true across subsequent focuses (see the useFocusEffect comment below),
+  // so returning from Settings never re-triggers it.
+  const entering = useFadeInEntering();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -74,6 +83,7 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.root}>
+      <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 40 }]}
         showsVerticalScrollIndicator={false}
@@ -112,6 +122,7 @@ export default function ProfileScreen() {
           </View>
         </View>
       </ScrollView>
+      </ReanimatedAnimated.View>
     </View>
   );
 }
@@ -145,6 +156,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     root: {
       flex: 1,
       backgroundColor: colors.background,
+    },
+    fadeLayer: {
+      flex: 1,
     },
     scrollContent: {
       paddingHorizontal: 20,

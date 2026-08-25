@@ -1,6 +1,7 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import ReanimatedAnimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
@@ -11,6 +12,7 @@ import type { DeloadNudge, UserCalibration } from '@/lib/engine/types';
 import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import {
   dismissHealthKitBanner,
+  getHealthReadinessModifier,
   hasConnectedHealthKit,
   isHealthKitAvailable,
   isHealthKitBannerDismissed,
@@ -21,8 +23,11 @@ import { hasCompletedOnboarding, loadOnboardingDraft, ONBOARDING_STEP_ROUTES } f
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
 import { getWeekActivity, type WeekDay } from '@/lib/session-history';
+import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { getTodaySession, type TodaySession } from '@/lib/today-session';
+import { getTrainingState } from '@/lib/training-state';
+import type { TrainingState } from '@/lib/engine/training-state';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
 import { TodaysTrainingCard } from '@/components/home/todays-training-card';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
@@ -64,6 +69,12 @@ export default function SummaryScreen() {
   const insets = useSafeAreaInsets();
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  // Same shared fade the onboarding flow and check-in's state transitions
+  // already use — the loading-skeleton-to-real-content swap below is a full
+  // remount (a different branch of the status==='ready' conditional), which
+  // previously hard-cut with no transition at all, the one clear motion-
+  // language gap against the rest of the app.
+  const entering = useFadeInEntering();
   const [status, setStatus] = useState<'checking' | 'ready'>('checking');
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [todaySession, setTodaySession] = useState<TodaySession | null>(null);
@@ -74,6 +85,8 @@ export default function SummaryScreen() {
   } | null>(null);
   const [calibration, setCalibration] = useState<UserCalibration | null>(null);
   const [deloadNudge, setDeloadNudge] = useState<DeloadNudge | null>(null);
+  const [healthReadinessModifier, setHealthReadinessModifier] = useState(1);
+  const [trainingState, setTrainingState] = useState<TrainingState | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showHealthKitBanner, setShowHealthKitBanner] = useState(false);
 
@@ -88,9 +101,12 @@ export default function SummaryScreen() {
       computePlanPreview(
         profile ?? {},
         todaySession?.energy ?? 4,
-        calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION }
+        calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
+        todaySession?.symptomTags ?? [],
+        trainingState ?? undefined,
+        healthReadinessModifier
       ),
-    [profile, todaySession?.energy, calibration]
+    [profile, todaySession?.energy, todaySession?.symptomTags, calibration, trainingState, healthReadinessModifier]
   );
 
   useEffect(() => {
@@ -109,17 +125,22 @@ export default function SummaryScreen() {
         return;
       }
 
-      const [loadedProfile, loadedSession, loadedCalibration, loadedDeloadNudge] = await Promise.all([
-        getProfile(),
-        getTodaySession(),
-        getCalibration(),
-        getDeloadNudge(),
-      ]);
+      const [loadedProfile, loadedSession, loadedCalibration, loadedDeloadNudge, loadedReadinessModifier, loadedTrainingState] =
+        await Promise.all([
+          getProfile(),
+          getTodaySession(),
+          getCalibration(),
+          getDeloadNudge(),
+          getHealthReadinessModifier(),
+          getTrainingState(),
+        ]);
       if (cancelled) return;
       setProfile(loadedProfile);
       setTodaySession(loadedSession);
       setCalibration(loadedCalibration);
       setDeloadNudge(loadedDeloadNudge);
+      setHealthReadinessModifier(loadedReadinessModifier);
+      setTrainingState(loadedTrainingState);
 
       const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
       const activity = await getWeekActivity(trainingDays);
@@ -152,16 +173,21 @@ export default function SummaryScreen() {
     useCallback(() => {
       if (status !== 'ready') return;
       (async () => {
-        const [loadedProfile, loadedSession, loadedCalibration, loadedDeloadNudge] = await Promise.all([
-          getProfile(),
-          getTodaySession(),
-          getCalibration(),
-          getDeloadNudge(),
-        ]);
+        const [loadedProfile, loadedSession, loadedCalibration, loadedDeloadNudge, loadedReadinessModifier, loadedTrainingState] =
+          await Promise.all([
+            getProfile(),
+            getTodaySession(),
+            getCalibration(),
+            getDeloadNudge(),
+            getHealthReadinessModifier(),
+            getTrainingState(),
+          ]);
         setProfile(loadedProfile);
         setTodaySession(loadedSession);
         setCalibration(loadedCalibration);
         setDeloadNudge(loadedDeloadNudge);
+        setHealthReadinessModifier(loadedReadinessModifier);
+        setTrainingState(loadedTrainingState);
         const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
         setWeekActivity(await getWeekActivity(trainingDays));
       })();
@@ -170,16 +196,21 @@ export default function SummaryScreen() {
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    const [loadedProfile, loadedSession, loadedCalibration, loadedDeloadNudge] = await Promise.all([
-      getProfile(),
-      getTodaySession(),
-      getCalibration(),
-      getDeloadNudge(),
-    ]);
+    const [loadedProfile, loadedSession, loadedCalibration, loadedDeloadNudge, loadedReadinessModifier, loadedTrainingState] =
+      await Promise.all([
+        getProfile(),
+        getTodaySession(),
+        getCalibration(),
+        getDeloadNudge(),
+        getHealthReadinessModifier(),
+        getTrainingState(),
+      ]);
     setProfile(loadedProfile);
     setTodaySession(loadedSession);
     setCalibration(loadedCalibration);
     setDeloadNudge(loadedDeloadNudge);
+    setHealthReadinessModifier(loadedReadinessModifier);
+    setTrainingState(loadedTrainingState);
     const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
     setWeekActivity(await getWeekActivity(trainingDays));
     setRefreshing(false);
@@ -190,8 +221,13 @@ export default function SummaryScreen() {
     // Fires the real system permission dialog — banner only disappears on
     // completion (granted or not) so a mid-decision tap can't leave the
     // banner stuck in a stale "still asking" state.
-    await requestHealthKitAccess();
+    const granted = await requestHealthKitAccess();
     setShowHealthKitBanner(false);
+    // A user with pre-existing elevated-RHR Health data should see that
+    // reflected immediately, not after the next focus/refresh cycle —
+    // getHealthReadinessModifier already no-ops safely if there isn't
+    // enough real data yet.
+    if (granted) setHealthReadinessModifier(await getHealthReadinessModifier());
   }, []);
 
   const handleDismissHealthKitBanner = useCallback(async () => {
@@ -254,6 +290,7 @@ export default function SummaryScreen() {
 
   return (
     <View style={styles.root}>
+      <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 32 }]}
         showsVerticalScrollIndicator={false}
@@ -264,10 +301,21 @@ export default function SummaryScreen() {
         <Header styles={styles} firstName={firstName} weeklyRecap={weeklyRecap} />
 
         {deloadNudge?.triggered && deloadNudge.message ? (
-          <View style={styles.deloadBanner}>
-            <SymbolView name="moon.zzz.fill" size={15} tintColor={colors.textSecondary} />
-            <Text style={styles.deloadBannerText} maxFontSizeMultiplier={1.4}>{deloadNudge.message}</Text>
-          </View>
+          <Pressable
+            style={styles.deloadBanner}
+            onPress={() => {
+              hapticSelect();
+              router.push('/home/check-in' as never);
+            }}
+          >
+            <View style={styles.deloadBannerRow}>
+              <SymbolView name="moon.zzz.fill" size={15} tintColor={colors.textSecondary} />
+              <Text style={styles.deloadBannerText} maxFontSizeMultiplier={1.4}>{deloadNudge.message}</Text>
+            </View>
+            <Text style={styles.deloadBannerAction} maxFontSizeMultiplier={1.2}>
+              Check in →
+            </Text>
+          </Pressable>
         ) : null}
 
         {showHealthKitBanner ? (
@@ -312,6 +360,7 @@ export default function SummaryScreen() {
           calibration={calibration}
         />
       </ScrollView>
+      </ReanimatedAnimated.View>
     </View>
   );
 }
@@ -484,6 +533,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       flex: 1,
       backgroundColor: colors.background,
     },
+    fadeLayer: {
+      flex: 1,
+    },
     scrollContent: {
       paddingHorizontal: 20,
       gap: 28,
@@ -511,9 +563,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       alignItems: 'center',
     },
     deloadBanner: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
+      gap: 8,
       paddingVertical: 12,
       paddingHorizontal: 14,
       borderRadius: 14,
@@ -521,12 +571,28 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       borderColor: colors.surfaceBorder,
       backgroundColor: colors.surface,
     },
+    deloadBannerRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+    },
     deloadBannerText: {
       flex: 1,
       color: colors.textSecondary,
       fontSize: 12,
       lineHeight: 16,
       fontFamily: 'Geist-Medium',
+    },
+    // Real action, not automatic — tapping goes to check-in so the user
+    // decides what to do about the signal (adjust their own energy, see
+    // today's plan) rather than the engine silently reducing volume behind
+    // their back. Same principle as calibration transparency: surface the
+    // real signal, never act on it invisibly.
+    deloadBannerAction: {
+      alignSelf: 'flex-end',
+      color: '#5FBE84',
+      fontSize: 12,
+      fontFamily: 'Geist-SemiBold',
     },
     healthKitBanner: {
       gap: 10,

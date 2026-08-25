@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { EnergyScore } from '@/components/home/energy-gauge';
 import type { FeedbackResponse } from '@/lib/engine/types';
+import type { CompletionStatus } from '@/lib/workout-log';
 
 import { localDateStr } from './local-date';
 
@@ -11,6 +12,9 @@ const MAX_ENTRIES = 30; // a rolling month is plenty for a 7-day weekly view
 export type SessionHistoryEntry = {
   /** YYYY-MM-DD. */
   date: string;
+  /** true for both 'done' and 'partial' completionStatus — some real effort
+   * happened. Kept as the weekly-dot view's existing boolean contract;
+   * completionStatus below is the real done/partial/skipped granularity. */
   completed: boolean;
   /** Optional free-text reflection captured after finishing a session — see home/check-in.tsx's done state. */
   notes?: string;
@@ -18,6 +22,18 @@ export type SessionHistoryEntry = {
   energy?: EnergyScore;
   /** The post-session feedback tapped, if any — M14-lite's record of what already fed into calibration.ts, so reopening a finished session doesn't re-ask. */
   feedback?: FeedbackResponse;
+  /** Did they do all / some / none of the workout — the real per-exercise
+   * signal from workout-log.ts's getCompletionStatus, not just the flat
+   * `completed` boolean above. Absent for entries logged before this field
+   * existed (never backfilled/guessed). */
+  completionStatus?: CompletionStatus;
+  /** true only for entries written by recordPastSessionCompletion (Progress
+   * & History's "Log a Past Session" flow) — a day that already happened
+   * and was reconstructed from memory afterward, never run through the live
+   * engine. Absent (not false) for every entry recordSessionCompletion
+   * itself writes, so this stays an honest "was this backfilled," not a
+   * guess for old entries logged before the flag existed. */
+  loggedRetroactively?: boolean;
 };
 
 const WEEKDAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
@@ -31,13 +47,43 @@ async function readAll(): Promise<SessionHistoryEntry[]> {
   }
 }
 
-/** Records (or updates) today's completion state — safe to call more than once per day. `energy` is optional so callers that don't have it (none currently) don't need a fake value; check-in.tsx always has it by the time a session finishes. */
-export async function recordSessionCompletion(completed: boolean, energy?: EnergyScore) {
+/** Records (or updates) today's completion state — safe to call more than once per day (check-in.tsx calls this both when a session starts, with completionStatus 'skipped' as the honest starting point, and again at finish with the real final status). `energy` is optional so callers that don't have it don't need a fake value. */
+export async function recordSessionCompletion(completed: boolean, energy?: EnergyScore, completionStatus?: CompletionStatus) {
   try {
     const date = localDateStr();
     const entries = await readAll();
     const withoutToday = entries.filter((e) => e.date !== date);
-    const next = [...withoutToday, { date, completed, energy }].slice(-MAX_ENTRIES);
+    const next = [...withoutToday, { date, completed, energy, completionStatus }].slice(-MAX_ENTRIES);
+    await AsyncStorage.setItem(KEY, JSON.stringify(next));
+  } catch {
+    // Worst case the weekly view just reads a little sparse — never a crash.
+  }
+}
+
+/**
+ * Same real semantics as recordSessionCompletion, but for an explicit past
+ * date rather than always today — the write path behind Progress &
+ * History's "Log a Past Session" flow (check-in.tsx's own live flow always
+ * logs today via recordSessionCompletion; this is the separate, honest
+ * backfill path for a day that already happened and was never logged in
+ * real time). Deliberately does NOT touch check-in-history.ts's
+ * lastCheckIn — that field is reserved for the most recent REAL, live
+ * check-in the engine actually used for "yesterday" comparisons, and a
+ * backfilled entry (which never ran through computePlanPreview at all)
+ * shouldn't silently become "yesterday" for tomorrow's engine comparison.
+ */
+export async function recordPastSessionCompletion(
+  date: string,
+  completed: boolean,
+  energy?: EnergyScore,
+  completionStatus?: CompletionStatus
+) {
+  try {
+    const entries = await readAll();
+    const withoutDate = entries.filter((e) => e.date !== date);
+    const next = [...withoutDate, { date, completed, energy, completionStatus, loggedRetroactively: true }].slice(
+      -MAX_ENTRIES
+    );
     await AsyncStorage.setItem(KEY, JSON.stringify(next));
   } catch {
     // Worst case the weekly view just reads a little sparse — never a crash.
@@ -66,6 +112,19 @@ export async function deleteSessionHistoryEntry(date: string) {
 export async function getSessionHistory(): Promise<SessionHistoryEntry[]> {
   const entries = await readAll();
   return [...entries].sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
+/** Overwrites the whole log wholesale — data-backup.ts's restore path only.
+ * Re-applies the same MAX_ENTRIES trim recordSessionCompletion always does,
+ * so a restore can't exceed the log's normal rolling-window size even if
+ * the exported payload somehow held more. */
+export async function restoreSessionHistory(entries: SessionHistoryEntry[]): Promise<void> {
+  try {
+    const trimmed = [...entries].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-MAX_ENTRIES);
+    await AsyncStorage.setItem(KEY, JSON.stringify(trimmed));
+  } catch {
+    // Worst case this one field doesn't restore — the rest of the backup still applies independently.
+  }
 }
 
 /**

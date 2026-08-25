@@ -1,6 +1,7 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import ReanimatedAnimated from 'react-native-reanimated';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -8,6 +9,7 @@ import { RadarChart } from '@/components/onboarding/radar-chart';
 import { hapticSelect } from '@/lib/haptics';
 import { MOVEMENT_PATTERN_LABELS } from '@/lib/movement-pattern-labels';
 import type { BodyArea } from '@/lib/plan-preview';
+import { useFadeInEntering } from '@/lib/screen-transitions';
 import { getRecentWeeks, type WeekDay } from '@/lib/session-history';
 import { useAppColors } from '@/lib/theme-context';
 import { getTrainingState } from '@/lib/training-state';
@@ -15,6 +17,7 @@ import type { TrainingState } from '@/lib/engine/training-state';
 import { getProfile } from '@/lib/user-profile';
 import {
   getBodyAreaBreakdown,
+  getLoggedSessionCount,
   getMovementPatternBreakdown,
   type BodyAreaBreakdown,
   type MovementPatternBreakdown,
@@ -23,6 +26,22 @@ import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 
 const WEEKDAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 const MONTH_WEEK_COUNT = 4;
+// A rolling trailing cutoff, not a calendar-week reset — see
+// workout-log.ts's sinceDateStr for why a hard reset was rejected (it would
+// collapse the shape to near-empty every reset moment, fighting this
+// section's own "never reads as you didn't do enough" design). 7 days,
+// always trailing today — "the last week," never "since Monday."
+const RECENT_BALANCE_WINDOW_DAYS = 7;
+// The self-normalized radar scales each axis against the user's OWN busiest
+// area — real, deliberate, and documented below (hasMovementData's comment).
+// But with EXERCISES_PER_FOCUS_AREA at 2 (policy-parameters.ts), that means
+// a single session can already max an axis (2 completed / its own max of 2
+// = 100%), which reads as an "achieved" shape after one day — exactly
+// backwards from what a shape built from real history should communicate.
+// Requiring a few distinct real sessions first (not just areasWithData >= 2)
+// is what actually fixes that, without touching the normalization math
+// itself, which has its own separate, still-valid rationale.
+const MIN_SESSIONS_FOR_SHAPE = 3;
 const BODY_AREA_LABELS: Record<BodyArea, string> = {
   upper: 'Upper Body',
   lower: 'Lower Body',
@@ -53,14 +72,24 @@ export default function ProgressScreen() {
   const insets = useSafeAreaInsets();
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  // Same shared fade used across onboarding, check-in, and Home — the
+  // loading-skeleton-to-real-content swap below previously hard-cut with no
+  // transition, the one motion-language gap against the rest of the app.
+  const entering = useFadeInEntering();
   const [weeks, setWeeks] = useState<WeekDay[][]>([]);
   const [bodyAreaBreakdown, setBodyAreaBreakdown] = useState<BodyAreaBreakdown | null>(null);
   const [movementPatternBreakdown, setMovementPatternBreakdown] = useState<MovementPatternBreakdown | null>(null);
+  const [loggedSessionCount, setLoggedSessionCount] = useState(0);
   const [trainingState, setTrainingState] = useState<TrainingState | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [gridRange, setGridRange] = useState<'week' | 'month'>('month');
   const weekCount = gridRange === 'week' ? 1 : MONTH_WEEK_COUNT;
+  // Defaults matching the pre-existing, unwindowed behavior — nothing
+  // changes for someone who never touches either toggle.
+  const [balanceRange, setBalanceRange] = useState<'recent' | 'all'>('all');
+  const [balanceView, setBalanceView] = useState<'body-area' | 'pattern'>('body-area');
+  const balanceSinceDays = balanceRange === 'recent' ? RECENT_BALANCE_WINDOW_DAYS : undefined;
 
   useFocusEffect(
     useCallback(() => {
@@ -68,12 +97,13 @@ export default function ProgressScreen() {
         const profile = await getProfile();
         const trainingDays = profile?.days ? profile.days.split(',') : null;
         setWeeks(await getRecentWeeks(trainingDays, weekCount));
-        setBodyAreaBreakdown(await getBodyAreaBreakdown());
-        setMovementPatternBreakdown(await getMovementPatternBreakdown());
+        setBodyAreaBreakdown(await getBodyAreaBreakdown(balanceSinceDays));
+        setMovementPatternBreakdown(await getMovementPatternBreakdown(balanceSinceDays));
+        setLoggedSessionCount(await getLoggedSessionCount(balanceSinceDays));
         setTrainingState(await getTrainingState());
         setLoaded(true);
       })();
-    }, [weekCount])
+    }, [weekCount, balanceSinceDays])
   );
 
   const handleRefresh = useCallback(async () => {
@@ -81,11 +111,12 @@ export default function ProgressScreen() {
     const profile = await getProfile();
     const trainingDays = profile?.days ? profile.days.split(',') : null;
     setWeeks(await getRecentWeeks(trainingDays, weekCount));
-    setBodyAreaBreakdown(await getBodyAreaBreakdown());
-    setMovementPatternBreakdown(await getMovementPatternBreakdown());
+    setBodyAreaBreakdown(await getBodyAreaBreakdown(balanceSinceDays));
+    setMovementPatternBreakdown(await getMovementPatternBreakdown(balanceSinceDays));
+    setLoggedSessionCount(await getLoggedSessionCount(balanceSinceDays));
     setTrainingState(await getTrainingState());
     setRefreshing(false);
-  }, [weekCount]);
+  }, [weekCount, balanceSinceDays]);
 
   if (!loaded) {
     return (
@@ -134,7 +165,18 @@ export default function ProgressScreen() {
   // chart can never read as "you didn't do enough," only "here's the
   // pattern." See radar-chart.tsx's own doc comment for why this replaced
   // the earlier current-vs-potential overlay design.
-  const hasMovementData = bodyAreaBreakdown ? BODY_AREA_ORDER.some((area) => bodyAreaBreakdown[area].completed > 0) : false;
+  // Requires real spread across at least 2 areas, not just "something,
+  // somewhere" — one completed exercise alone produces a single full spike
+  // and three empty axes, which reads as a broken chart rather than an
+  // honest shape. The plain list below has no such guard: a lone "1/3" row
+  // is a perfectly honest fact on its own, it's only the radar's geometry
+  // that misleads with too little spread.
+  const areasWithData = bodyAreaBreakdown ? BODY_AREA_ORDER.filter((area) => bodyAreaBreakdown[area].completed > 0).length : 0;
+  // AND, not OR — see MIN_SESSIONS_FOR_SHAPE's own comment above for why
+  // area-spread alone isn't enough: a single session can already touch 2+
+  // areas and self-normalize each to 100%, which is exactly the "achieved
+  // too easily" case this second condition exists to block.
+  const hasMovementData = areasWithData >= 2 && loggedSessionCount >= MIN_SESSIONS_FOR_SHAPE;
   const maxAreaCompleted = bodyAreaBreakdown
     ? Math.max(1, ...BODY_AREA_ORDER.map((area) => bodyAreaBreakdown[area].completed))
     : 1;
@@ -161,6 +203,7 @@ export default function ProgressScreen() {
 
   return (
     <View style={styles.root}>
+      <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 40 }]}
         showsVerticalScrollIndicator={false}
@@ -246,7 +289,29 @@ export default function ProgressScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TRAINING BALANCE</Text>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TRAINING BALANCE</Text>
+            <View style={styles.rangeToggle}>
+              {(['recent', 'all'] as const).map((option) => (
+                <Pressable
+                  key={option}
+                  style={[styles.rangeOption, balanceRange === option && styles.rangeOptionActive]}
+                  onPress={() => {
+                    if (balanceRange === option) return;
+                    hapticSelect();
+                    setBalanceRange(option);
+                  }}
+                >
+                  <Text
+                    style={[styles.rangeOptionText, balanceRange === option && styles.rangeOptionTextActive]}
+                    maxFontSizeMultiplier={1.2}
+                  >
+                    {option === 'recent' ? 'Last 7 Days' : 'All'}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
           {bodyAreaBreakdown && BODY_AREA_ORDER.some((area) => bodyAreaBreakdown[area].total > 0) ? (
             <View style={styles.card}>
               {hasMovementData ? (
@@ -255,56 +320,86 @@ export default function ProgressScreen() {
                     <RadarChart size={172} data={movementShapeData} />
                   </View>
                   <Text style={styles.movementShapeCaption} maxFontSizeMultiplier={1.3}>
-                    Your movement pattern so far — no target, just the shape.
+                    {balanceRange === 'recent'
+                      ? 'Your movement pattern, last 7 days — no target, just the shape.'
+                      : 'Your movement pattern so far — no target, just the shape.'}
                   </Text>
                 </>
+              ) : areasWithData >= 2 ? (
+                // Real data across 2+ areas already, just not from enough
+                // distinct sessions yet — same neutral, no-pressure register
+                // as the shown caption above, explaining an absence rather
+                // than leaving it unexplained.
+                <Text style={styles.movementShapeCaption} maxFontSizeMultiplier={1.3}>
+                  Your shape will show once a few more sessions are logged.
+                </Text>
               ) : null}
-              {BODY_AREA_ORDER.map((area, index) => {
-                const { completed, total } = bodyAreaBreakdown[area];
-                return (
-                  <View
-                    key={area}
-                    style={[styles.balanceRow, index < BODY_AREA_ORDER.length - 1 && styles.rowDivider]}
-                  >
-                    <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{BODY_AREA_LABELS[area]}</Text>
-                    <Text style={styles.balanceCount} maxFontSizeMultiplier={1.2}>
-                      {completed}/{total}
-                    </Text>
+              {/* Same real sessions, one more granular cut — a toggle instead
+                  of a second full section, since movementPatternRows' own
+                  comment already called this "a more granular cut of the
+                  same real sessions," not a different dataset. */}
+              {movementPatternRows.length > 0 ? (
+                <View style={styles.balanceViewToggleWrap}>
+                  <View style={styles.rangeToggle}>
+                    {(['body-area', 'pattern'] as const).map((option) => (
+                      <Pressable
+                        key={option}
+                        style={[styles.rangeOption, balanceView === option && styles.rangeOptionActive]}
+                        onPress={() => {
+                          if (balanceView === option) return;
+                          hapticSelect();
+                          setBalanceView(option);
+                        }}
+                      >
+                        <Text
+                          style={[styles.rangeOptionText, balanceView === option && styles.rangeOptionTextActive]}
+                          maxFontSizeMultiplier={1.2}
+                        >
+                          {option === 'body-area' ? 'Body Area' : 'Movement'}
+                        </Text>
+                      </Pressable>
+                    ))}
                   </View>
-                );
-              })}
+                </View>
+              ) : null}
+              {balanceView === 'body-area'
+                ? BODY_AREA_ORDER.map((area, index) => {
+                    const { completed, total } = bodyAreaBreakdown[area];
+                    return (
+                      <View
+                        key={area}
+                        style={[styles.balanceRow, index < BODY_AREA_ORDER.length - 1 && styles.rowDivider]}
+                      >
+                        <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{BODY_AREA_LABELS[area]}</Text>
+                        <Text style={styles.balanceCount} maxFontSizeMultiplier={1.2}>
+                          {completed}/{total}
+                        </Text>
+                      </View>
+                    );
+                  })
+                : movementPatternRows.map(([pattern, counts], index) => (
+                    <View
+                      key={pattern}
+                      style={[styles.balanceRow, index < movementPatternRows.length - 1 && styles.rowDivider]}
+                    >
+                      <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{MOVEMENT_PATTERN_LABELS[pattern]}</Text>
+                      <Text style={styles.balanceCount} maxFontSizeMultiplier={1.2}>
+                        {counts.completed}/{counts.total}
+                      </Text>
+                    </View>
+                  ))}
             </View>
           ) : (
             <View style={styles.emptyCard}>
               <SymbolView name="figure.strengthtraining.traditional" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />
               <Text style={styles.emptyText} maxFontSizeMultiplier={1.3}>
-                Finish a session and check off exercises to see your training balance here.
+                {balanceRange === 'recent'
+                  ? 'No sessions in the last 7 days yet — switch to All to see your full history.'
+                  : 'Finish a session and check off exercises to see your training balance here.'}
               </Text>
             </View>
           )}
         </View>
-
-        {movementPatternRows.length > 0 ? (
-          <View style={styles.section}>
-            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>MOVEMENT PATTERNS</Text>
-            <View style={styles.card}>
-              <Text style={styles.movementShapeCaption} maxFontSizeMultiplier={1.3}>
-                A more granular cut of the same real sessions — what kinds of movement, not just which body areas.
-              </Text>
-              {movementPatternRows.map(([pattern, counts], index) => (
-                <View
-                  key={pattern}
-                  style={[styles.balanceRow, index < movementPatternRows.length - 1 && styles.rowDivider]}
-                >
-                  <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{MOVEMENT_PATTERN_LABELS[pattern]}</Text>
-                  <Text style={styles.balanceCount} maxFontSizeMultiplier={1.2}>
-                    {counts.completed}/{counts.total}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        ) : null}
 
         <View style={styles.section}>
           <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TRAINING LOAD</Text>
@@ -358,6 +453,7 @@ export default function ProgressScreen() {
           )}
         </View>
       </ScrollView>
+      </ReanimatedAnimated.View>
     </View>
   );
 }
@@ -384,6 +480,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     root: {
       flex: 1,
       backgroundColor: colors.background,
+    },
+    fadeLayer: {
+      flex: 1,
     },
     scrollContent: {
       paddingHorizontal: 20,
@@ -453,6 +552,14 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       color: colors.textTertiary,
       fontSize: 11,
       fontFamily: 'Geist-Medium',
+    },
+    // Reuses rangeToggle/rangeOption's exact pill styling (same segmented-
+    // control language as the section-header range toggle) — just needs its
+    // own wrapper for in-card centering/spacing instead of the header row's
+    // space-between layout.
+    balanceViewToggleWrap: {
+      alignItems: 'center',
+      marginBottom: 12,
     },
     // Plain numbers, no fill bar — the vault's brand system treats progress
     // bars as permanently off-limits (same reasoning as dropping streaks:
