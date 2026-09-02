@@ -67,7 +67,13 @@ jobs:
           echo "UDID=$UDID" >> "$GITHUB_ENV"
           xcrun simctl bootstatus "$UDID" -b
           open -a Simulator --args -CurrentDeviceUDID "$UDID"
-          npx expo run:ios --configuration Release --device "$UDID"
+          # Deliberately NOT passing --device "$UDID" here: expo run:ios
+          # mis-resolved that UDID as a physical device and demanded code
+          # signing certificates ("No code signing certificates are
+          # available to use"). With exactly one simulator booted (the one
+          # just booted above), omitting --device lets it auto-target that
+          # booted simulator instead.
+          npx expo run:ios --configuration Release
 
       - name: Run Maestro flows
         run: |
