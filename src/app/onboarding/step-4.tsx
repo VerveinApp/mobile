@@ -30,12 +30,23 @@ export default function OnboardingEnvironmentScreen() {
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
-  const { name, goal, experience } = useLocalSearchParams<{ name?: string; goal?: string; experience?: string }>();
+  const { name, goal, experience, verifiedEmail } = useLocalSearchParams<{
+    name?: string;
+    goal?: string;
+    experience?: string;
+    verifiedEmail?: string;
+  }>();
 
   const entering = useFadeInEntering();
 
   const handleSelectEnvironment = (environment: TrainingEnvironmentId) => {
-    const params = { name: name ?? '', goal: goal ?? '', experience: experience ?? '', environment };
+    const params = {
+      name: name ?? '',
+      goal: goal ?? '',
+      experience: experience ?? '',
+      verifiedEmail: verifiedEmail ?? '',
+      environment,
+    };
     saveOnboardingDraft({ step: 5, params });
     // step-5 is the health-data consent gate + Biometrics merged, not Duration.
     router.push({ pathname: '/onboarding/step-5', params } as never);
@@ -60,10 +71,10 @@ export default function OnboardingEnvironmentScreen() {
 
         <View style={styles.logoMark} pointerEvents="none">
           <View style={styles.logoAccent}>
-            <LogoMarkAccentGraphic width={45.32} height={52.31} color={colors.text} />
+            <LogoMarkAccentGraphic width={41.52} height={52.31} color={colors.text} />
           </View>
           <View style={styles.logoCheck}>
-            <LogoMarkGraphic width={33.99} height={44.75} color={colors.text} />
+            <LogoMarkGraphic width={31.82} height={44.75} color={colors.text} />
           </View>
         </View>
 
@@ -105,9 +116,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     logoMark: {
       position: 'absolute',
-      left: 153,
+      left: 155.68,
       top: 83,
-      width: 71,
+      width: 65.65,
       height: 58.91,
     },
     logoAccent: {
@@ -117,7 +128,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     logoCheck: {
       position: 'absolute',
-      left: 37.01,
+      left: 33.83,
       top: 0,
     },
     title: {

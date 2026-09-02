@@ -100,3 +100,18 @@ export async function clearOnboardingCompleted() {
     // Best-effort — same as never having completed onboarding.
   }
 }
+
+// BUG FIX (removed): this file used to also export savePendingVerifiedEmail/
+// takePendingVerifiedEmail — a device-wide AsyncStorage flag (with a
+// 30-minute TTL) that let auth/verify.tsx's bare "Sign in" branch skip
+// re-verifying an email once the user reached create-account.tsx a second
+// time. A global, time-based flag couldn't distinguish "the same in-progress
+// onboarding chain that set it" from "a different, unrelated 'Get Started'
+// attempt on the same device a few minutes later" — reachable on any shared/
+// family device, and silent when it happened (the second person's own
+// answers would get bound to the first person's already-verified email,
+// with no email form ever shown). Replaced with an ordinary `verifiedEmail`
+// route param threaded through onboarding/index.tsx → step-2..7 → first-look
+// → create-account.tsx, the same way every other onboarding answer already
+// rides forward — a route param can't leak across unrelated navigation
+// chains the way a global flag could, which is what actually closes this.

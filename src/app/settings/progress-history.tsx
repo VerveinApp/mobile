@@ -8,7 +8,7 @@ import { SymbolView } from 'expo-symbols';
 
 import { LogPastSessionSheet } from '@/components/settings/log-past-session-sheet';
 import { useHoverFade } from '@/lib/button-interactions';
-import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
+import { hapticError, hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import {
   deleteSessionHistoryEntry,
   getSessionHistory,
@@ -75,16 +75,25 @@ export default function ProgressHistoryScreen() {
 
   const completedCount = entries.filter((e) => e.completed).length;
 
-  const handleDelete = (date: string) => {
+  const handleDelete = async (date: string) => {
     hapticImpactLight();
+    const previousEntries = entries;
+    const previousWorkoutLogs = workoutLogs;
     setEntries((prev) => prev.filter((e) => e.date !== date));
     setWorkoutLogs((prev) => {
       const next = new Map(prev);
       next.delete(date);
       return next;
     });
-    deleteSessionHistoryEntry(date);
-    deleteWorkoutLog(date);
+    try {
+      await Promise.all([deleteSessionHistoryEntry(date), deleteWorkoutLog(date)]);
+    } catch {
+      // Persisted delete failed — restore the exact prior state instead of
+      // silently letting the entry reappear on next load with no signal.
+      hapticError();
+      setEntries(previousEntries);
+      setWorkoutLogs(previousWorkoutLogs);
+    }
   };
 
   return (

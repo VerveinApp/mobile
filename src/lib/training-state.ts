@@ -14,7 +14,15 @@ export async function getTrainingState(): Promise<TrainingState> {
 
   const checkIns = history
     .filter((e) => e.energy !== undefined)
-    .map((e) => ({ date: e.date, energyScore: e.energy as number, skipped: false }))
+    .map((e) => ({
+      date: e.date,
+      energyScore: e.energy as number,
+      // completionStatus is the precise signal when present; entries logged
+      // before that field existed fall back to the older `completed`
+      // boolean. Previously hardcoded false here, so rollingWindow.days[].
+      // skipped could never report true regardless of real session outcome.
+      skipped: e.completionStatus ? e.completionStatus === 'skipped' : !e.completed,
+    }))
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 
   return compileTrainingState({ checkIns, traces, referenceDate: localDateStr() });

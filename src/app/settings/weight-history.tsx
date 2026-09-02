@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
-import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
+import { hapticError, hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { localDateStr } from '@/lib/local-date';
 import { useAppColors } from '@/lib/theme-context';
 import { getUnitSystem, type UnitSystem } from '@/lib/unit-preference';
@@ -90,10 +90,18 @@ export default function WeightHistoryScreen() {
     setAdding(false);
   };
 
-  const handleDelete = (date: string) => {
+  const handleDelete = async (date: string) => {
     hapticImpactLight();
+    const previous = entries;
     setEntries((prev) => prev.filter((e) => e.date !== date));
-    deleteWeightEntry(date);
+    try {
+      await deleteWeightEntry(date);
+    } catch {
+      // Persisted delete failed — restore the exact prior list instead of
+      // silently letting the entry reappear on next load with no signal.
+      hapticError();
+      setEntries(previous);
+    }
   };
 
   const lbIndex = kgToLbIndex(draftWeightKg);

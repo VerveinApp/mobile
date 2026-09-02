@@ -90,9 +90,17 @@ type CommitmentDialProps = {
  */
 export function CommitmentDial({ size = 220, canvasScale = 1, value, onChange, levelLabel }: CommitmentDialProps) {
   const { resolvedScheme } = useAppTheme();
-  const sweep = useSharedValue(0);
+  // DISCLOSED FIX: previously always useSharedValue(0), regardless of an
+  // incoming non-null `value` — step-7.tsx explicitly seeds `value` from a
+  // route param when navigating back to this screen ("carries the prior
+  // commitment level forward"), so the readout text/checkmark showed the
+  // right level while the handle itself sat at the ring's start position,
+  // pointing at the wrong stop. Seeding the initializer (mount-time only,
+  // not a reactive effect) fixes the real bug without touching live-drag
+  // behavior — sweep is otherwise only ever driven by the gesture itself.
+  const sweep = useSharedValue(value !== null ? value * STEP : 0);
   const lastAngle = useSharedValue(0);
-  const lastIndex = useSharedValue(-1);
+  const lastIndex = useSharedValue(value !== null ? value : -1);
 
   const half = (Platform.OS === 'web' ? size * canvasScale : size) / 2;
   const angleAt = (x: number, y: number) => {

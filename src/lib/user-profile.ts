@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { markOnboardingComplete } from '@/lib/onboarding-draft';
+
 const PROFILE_KEY = 'vervein.profile.v1';
 
 /**
@@ -73,6 +75,38 @@ export function withHealthConsent(consent: 'true' | 'false'): Pick<UserProfile, 
   return consent === 'true'
     ? { healthConsent: 'true', healthConsentedAt: new Date().toISOString() }
     : { healthConsent: 'false' };
+}
+
+/**
+ * The shared tail of every real way onboarding finishes — verify.tsx's
+ * email-OTP path, and create-account.tsx's bypass for a chain that already
+ * carries a verified email (email sign-in, Apple, or Google — see
+ * onboarding/index.tsx's own doc comment on the verifiedEmail route param
+ * for how that rides forward). Kept as one function so every call site can't
+ * drift on which fields get saved.
+ */
+export async function finishOnboarding(
+  answers: Pick<
+    UserProfile,
+    'name' | 'goal' | 'experience' | 'environment' | 'duration' | 'commitmentLevel' | 'days' | 'sex' | 'heightCm' | 'weightKg'
+  > & { healthConsent?: string },
+  email: string
+) {
+  await saveProfile({
+    name: answers.name,
+    email,
+    goal: answers.goal,
+    experience: answers.experience,
+    environment: answers.environment,
+    duration: answers.duration,
+    commitmentLevel: answers.commitmentLevel,
+    days: answers.days,
+    ...withHealthConsent(answers.healthConsent === 'true' ? 'true' : 'false'),
+    sex: answers.sex,
+    heightCm: answers.heightCm,
+    weightKg: answers.weightKg,
+  });
+  await markOnboardingComplete();
 }
 
 export async function clearProfile() {

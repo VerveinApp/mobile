@@ -53,6 +53,16 @@ export function bySelectionOrder(biasSimpleFirst: boolean) {
 
 class ExerciseLibraryModule {
   private exercises: Exercise[];
+  // Vervein addition, not in the vault — getById/getByName were both a
+  // linear .find() over the full ~1,449-exercise array, and both are called
+  // repeatedly inside loops (training-state.ts's ledger/debt/recency folds
+  // call getById once per exercise per trace; workout-log.ts's breakdown
+  // readers call getByName once per logged exercise per entry). Safe to
+  // index once, up front: the library is a frozen singleton built once per
+  // process ("no runtime mutation" — this class's own constructor comment
+  // below), so there's no invalidation case a Map could ever miss.
+  private byId: Map<string, Exercise>;
+  private byName: Map<string, Exercise>;
 
   constructor() {
     const parsed = exerciseData as unknown as Exercise[];
@@ -78,10 +88,15 @@ class ExerciseLibraryModule {
       Object.freeze(ex);
     }
     this.exercises = parsed;
+    this.byId = new Map(parsed.map((e) => [e.id, e]));
+    // Duplicate names would silently shadow each other here (last write
+    // wins) — same tradeoff getByName's own linear .find() already had
+    // (first match wins there instead), not a new risk this introduces.
+    this.byName = new Map(parsed.map((e) => [e.name, e]));
   }
 
   getById(id: string): Exercise | null {
-    return this.exercises.find((e) => e.id === id) ?? null;
+    return this.byId.get(id) ?? null;
   }
 
   /** workout-log.ts records exercises by name, not id (see its own doc
@@ -89,7 +104,7 @@ class ExerciseLibraryModule {
    * human-facing identifier, same assumption check-in.tsx's exclusion
    * summary already relies on. */
   getByName(name: string): Exercise | null {
-    return this.exercises.find((e) => e.name === name) ?? null;
+    return this.byName.get(name) ?? null;
   }
 
   query(filterCriteria: Partial<Exercise>): Exercise[] {

@@ -44,12 +44,25 @@ async function getHeartRateDeloadNudge(): Promise<DeloadNudge> {
 }
 
 /** Energy-based (M16, vault-verbatim) takes precedence — it's the more
- * established, deliberately conservative signal. The heart-rate check only
- * runs as a fallback when energy alone hasn't already flagged anything, and
- * only ever fires from real HealthKit data (getRecentRestingHeartRate
- * already returns empty when not connected). */
-export async function getDeloadNudge(): Promise<DeloadNudge> {
+ * established, deliberately conservative signal, and is free for everyone
+ * (reads only session-history.ts, no HealthKit involved). The heart-rate
+ * check only runs as a fallback when energy alone hasn't already flagged
+ * anything, and only ever fires from real HealthKit data
+ * (getRecentRestingHeartRate already returns empty when not connected).
+ *
+ * BUG FIX: `isPremium` gates that heart-rate fallback specifically — this
+ * function used to run it for every caller regardless of entitlement, while
+ * check-in.tsx (the other real reader of this exact RHR trend) already
+ * treats it as VerveIn Plus-only via its own effectiveHealthReadinessModifier.
+ * A free user could see this banner's "today's plan reflects that" and have
+ * that be a real, true claim here while check-in.tsx silently withheld the
+ * same adjustment moments later — the banner was making a promise the rest
+ * of the app didn't keep for that user. isPremium === null (still checking)
+ * takes the same safe default as every other reader of this signal: no.
+ */
+export async function getDeloadNudge(isPremium: boolean | null): Promise<DeloadNudge> {
   const energyNudge = await getEnergyDeloadNudge();
   if (energyNudge.triggered) return energyNudge;
+  if (!isPremium) return { triggered: false, message: null };
   return getHeartRateDeloadNudge();
 }

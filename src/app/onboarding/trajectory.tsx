@@ -74,10 +74,10 @@ export default function OnboardingTrajectoryScreen() {
 
         <View style={styles.logoMark} pointerEvents="none">
           <View style={styles.logoAccent}>
-            <LogoMarkAccentGraphic width={45.32} height={52.31} color={colors.text} />
+            <LogoMarkAccentGraphic width={41.52} height={52.31} color={colors.text} />
           </View>
           <View style={styles.logoCheck}>
-            <LogoMarkGraphic width={33.99} height={44.75} color={colors.text} />
+            <LogoMarkGraphic width={31.82} height={44.75} color={colors.text} />
           </View>
         </View>
 
@@ -189,9 +189,9 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     logoMark: {
       position: 'absolute',
-      left: 153,
+      left: 155.68,
       top: 83,
-      width: 71,
+      width: 65.65,
       height: 58.91,
     },
     logoAccent: {
@@ -201,7 +201,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     logoCheck: {
       position: 'absolute',
-      left: 37.01,
+      left: 33.83,
       top: 0,
     },
     title: {

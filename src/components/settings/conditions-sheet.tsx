@@ -23,6 +23,7 @@ export const ConditionsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [selected, setSelected] = useState<Set<Condition>>(new Set());
+  const [saving, setSaving] = useState(false);
 
   const loadFromProfile = useCallback(async () => {
     const profile = await getProfile();
@@ -52,8 +53,11 @@ export const ConditionsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
   };
 
   const handleSave = async () => {
+    if (saving) return;
     hapticImpactLight();
+    setSaving(true);
     await updateProfile({ conditions: Array.from(selected) });
+    setSaving(false);
     sheetRef.current?.dismiss();
   };
 
@@ -119,9 +123,12 @@ export const ConditionsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
           onHoverOut={saveHover.onHoverOut}
           onPressIn={savePress.onPressIn}
           onPressOut={savePress.onPressOut}
+          disabled={saving}
         >
-          <View style={styles.saveButton}>
-            <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>Save</Text>
+          <View style={[styles.saveButton, saving && styles.saveButtonDisabled]}>
+            <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>
+              {saving ? 'Saving…' : 'Save'}
+            </Text>
           </View>
         </Pressable>
       </BottomSheetScrollView>
@@ -204,6 +211,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       borderRadius: 16,
       backgroundColor: '#438C63',
       alignItems: 'center',
+    },
+    saveButtonDisabled: {
+      opacity: 0.5,
     },
     saveButtonText: {
       color: '#ffffff',

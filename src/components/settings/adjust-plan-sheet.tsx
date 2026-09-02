@@ -54,6 +54,7 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
   const [duration, setDuration] = useState('');
   const [days, setDays] = useState<string[]>([]);
   const [commitmentIndex, setCommitmentIndex] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const loadFromProfile = useCallback(async () => {
     const profile = await getProfile();
@@ -85,8 +86,9 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
   const isValid = goal && experience && environment && duration && days.length > 0 && commitmentIndex !== null;
 
   const handleSave = async () => {
-    if (!isValid) return;
+    if (!isValid || saving) return;
     hapticImpactLight();
+    setSaving(true);
     await updateProfile({
       goal,
       experience,
@@ -104,6 +106,7 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
     // someone who hasn't. See session-reminders.ts and Settings' own
     // Workout Reminders toggle for the opt-in path this is completing.
     if (await isReminderEnabled()) await enableSessionReminders(days);
+    setSaving(false);
     sheetRef.current?.dismiss();
   };
 
@@ -234,10 +237,12 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
           onHoverOut={saveHover.onHoverOut}
           onPressIn={savePress.onPressIn}
           onPressOut={savePress.onPressOut}
-          disabled={!isValid}
+          disabled={!isValid || saving}
         >
-          <View style={[styles.saveButton, !isValid && styles.saveButtonDisabled]}>
-            <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>Save Changes</Text>
+          <View style={[styles.saveButton, (!isValid || saving) && styles.saveButtonDisabled]}>
+            <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>
+              {saving ? 'Saving…' : 'Save Changes'}
+            </Text>
           </View>
         </Pressable>
       </BottomSheetScrollView>

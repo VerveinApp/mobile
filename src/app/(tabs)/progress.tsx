@@ -6,15 +6,18 @@ import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { RadarChart } from '@/components/onboarding/radar-chart';
+import { PremiumGate } from '@/components/premium-gate';
+import { getImprovedExercises, type ExercisePerformance } from '@/lib/exercise-performance';
 import { hapticSelect } from '@/lib/haptics';
 import { MOVEMENT_PATTERN_LABELS } from '@/lib/movement-pattern-labels';
 import type { BodyArea } from '@/lib/plan-preview';
+import { usePremiumEntitlement } from '@/lib/purchases';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { getRecentWeeks, type WeekDay } from '@/lib/session-history';
 import { useAppColors } from '@/lib/theme-context';
 import { getTrainingState } from '@/lib/training-state';
 import type { TrainingState } from '@/lib/engine/training-state';
-import { getProfile } from '@/lib/user-profile';
+import { getProfile, type UserProfile } from '@/lib/user-profile';
 import {
   getBodyAreaBreakdown,
   getLoggedSessionCount,
@@ -62,16 +65,20 @@ const TREND_ICON: Record<'improving' | 'stable' | 'declining', SFSymbol> = {
 
 /**
  * Real consistency and training-balance data only — no fabricated
- * performance deltas, since this app doesn't log sets/reps/weight so it
- * doesn't claim to show strength gains. The old "Your Potential" section
- * (a synthetic %-of-potential score + trajectory projection, computed by
- * the since-deleted potential-score.ts) was cut for the same anti-guilt
+ * performance deltas. The old "Your Potential" section (a synthetic
+ * %-of-potential score + trajectory projection, computed by the
+ * since-deleted potential-score.ts) was cut for the same anti-guilt
  * reasoning as onboarding/potential.tsx and Home's Fitness/Trends cards.
+ * STRENGTH PROGRESS below is a real exception, not a reversal of that rule:
+ * it only ever reports a genuine, self-referential 1RM improvement someone
+ * opted into logging (see exercise-performance.ts) — never a synthetic
+ * score, never a comparison to anyone but their own last session.
  */
 export default function ProgressScreen() {
   const insets = useSafeAreaInsets();
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const isPremium = usePremiumEntitlement();
   // Same shared fade used across onboarding, check-in, and Home — the
   // loading-skeleton-to-real-content swap below previously hard-cut with no
   // transition, the one motion-language gap against the rest of the app.
@@ -81,6 +88,10 @@ export default function ProgressScreen() {
   const [movementPatternBreakdown, setMovementPatternBreakdown] = useState<MovementPatternBreakdown | null>(null);
   const [loggedSessionCount, setLoggedSessionCount] = useState(0);
   const [trainingState, setTrainingState] = useState<TrainingState | null>(null);
+  const [improvedExercises, setImprovedExercises] = useState<
+    { exerciseName: string; performance: ExercisePerformance }[]
+  >([]);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [gridRange, setGridRange] = useState<'week' | 'month'>('month');
@@ -94,13 +105,15 @@ export default function ProgressScreen() {
   useFocusEffect(
     useCallback(() => {
       (async () => {
-        const profile = await getProfile();
-        const trainingDays = profile?.days ? profile.days.split(',') : null;
+        const loadedProfile = await getProfile();
+        setProfile(loadedProfile);
+        const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
         setWeeks(await getRecentWeeks(trainingDays, weekCount));
         setBodyAreaBreakdown(await getBodyAreaBreakdown(balanceSinceDays));
         setMovementPatternBreakdown(await getMovementPatternBreakdown(balanceSinceDays));
         setLoggedSessionCount(await getLoggedSessionCount(balanceSinceDays));
         setTrainingState(await getTrainingState());
+        setImprovedExercises(await getImprovedExercises());
         setLoaded(true);
       })();
     }, [weekCount, balanceSinceDays])
@@ -108,13 +121,15 @@ export default function ProgressScreen() {
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    const profile = await getProfile();
-    const trainingDays = profile?.days ? profile.days.split(',') : null;
+    const loadedProfile = await getProfile();
+    setProfile(loadedProfile);
+    const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
     setWeeks(await getRecentWeeks(trainingDays, weekCount));
     setBodyAreaBreakdown(await getBodyAreaBreakdown(balanceSinceDays));
     setMovementPatternBreakdown(await getMovementPatternBreakdown(balanceSinceDays));
     setLoggedSessionCount(await getLoggedSessionCount(balanceSinceDays));
     setTrainingState(await getTrainingState());
+    setImprovedExercises(await getImprovedExercises());
     setRefreshing(false);
   }, [weekCount, balanceSinceDays]);
 
@@ -155,6 +170,13 @@ export default function ProgressScreen() {
   const bankedAreas = trainingState
     ? BODY_AREA_ORDER.filter((area) => trainingState.stimulusDebt.value[area].debtSets > 0)
     : [];
+
+  // Relative strength (Vervein addition) — same "no fabricated default"
+  // discipline check-in.tsx's own calorie estimate already applies to this
+  // exact field: a positive bodyweight or nothing, never a guessed average.
+  // Self-referential only, same as everything else in this section — 1RM ÷
+  // OWN latest bodyweight, never a population strength-standard percentile.
+  const weightKg = Number(profile?.weightKg);
 
   // The shape of real training done, not a score against a target — no
   // "total assigned" denominator anywhere in this computation. Each axis is
@@ -252,40 +274,52 @@ export default function ProgressScreen() {
             </View>
           </View>
 
-          <View style={styles.card}>
-            <View style={styles.gridHeaderRow}>
-              {WEEKDAY_LETTERS.map((letter, index) => (
-                <Text key={index} style={styles.gridHeaderText} maxFontSizeMultiplier={1.15}>
-                  {letter}
-                </Text>
-              ))}
-            </View>
-            {weeks.map((week, weekIndex) => (
-              <View key={weekIndex} style={styles.gridRow}>
-                {week.map((day, dayIndex) => (
-                  <View key={dayIndex} style={styles.gridCellWrap}>
-                    {day.isScheduled ? (
-                      <View
-                        style={[
-                          styles.gridCell,
-                          day.completed === true && styles.gridCellCompleted,
-                          day.completed === false && styles.gridCellMissed,
-                          day.completed === null && styles.gridCellPending,
-                        ]}
-                      />
-                    ) : (
-                      <View style={styles.gridCellEmpty} />
-                    )}
-                  </View>
+          <PremiumGate isPremium={isPremium} label="The consistency calendar">
+            <View style={styles.card}>
+              <View style={styles.gridHeaderRow}>
+                {WEEKDAY_LETTERS.map((letter, index) => (
+                  <Text key={index} style={styles.gridHeaderText} maxFontSizeMultiplier={1.15}>
+                    {letter}
+                  </Text>
                 ))}
               </View>
-            ))}
-            <View style={styles.legendRow}>
-              <LegendDot styles={styles} style={styles.gridCellCompleted} label="Completed" />
-              <LegendDot styles={styles} style={styles.gridCellMissed} label="Missed" />
-              <LegendDot styles={styles} style={styles.gridCellPending} label="Upcoming" />
+              {weeks.map((week, weekIndex) => (
+                <View key={weekIndex} style={styles.gridRow}>
+                  {week.map((day, dayIndex) => (
+                    <View key={dayIndex} style={styles.gridCellWrap}>
+                      {day.isScheduled ? (
+                        <View
+                          style={[
+                            styles.gridCell,
+                            day.completed === true && styles.gridCellCompleted,
+                            // Fixed bug: previously `day.completed === false`
+                            // only — a past day with zero recorded entry
+                            // (completed: null, not false — see WeekDay's own
+                            // doc comment) fell through to gridCellPending
+                            // below and rendered as "Upcoming" even though it
+                            // had already happened. !isFuture alone isn't
+                            // enough either: today is also !isFuture and
+                            // typically still completed:null before check-in,
+                            // so today is explicitly excluded from "Missed" —
+                            // the day isn't over yet.
+                            !day.isFuture && !day.isToday && day.completed !== true && styles.gridCellMissed,
+                            (day.isFuture || day.isToday) && day.completed !== true && styles.gridCellPending,
+                          ]}
+                        />
+                      ) : (
+                        <View style={styles.gridCellEmpty} />
+                      )}
+                    </View>
+                  ))}
+                </View>
+              ))}
+              <View style={styles.legendRow}>
+                <LegendDot styles={styles} style={styles.gridCellCompleted} label="Completed" />
+                <LegendDot styles={styles} style={styles.gridCellMissed} label="Missed" />
+                <LegendDot styles={styles} style={styles.gridCellPending} label="Upcoming" />
+              </View>
             </View>
-          </View>
+          </PremiumGate>
         </View>
 
         <View style={styles.section}>
@@ -312,93 +346,95 @@ export default function ProgressScreen() {
               ))}
             </View>
           </View>
-          {bodyAreaBreakdown && BODY_AREA_ORDER.some((area) => bodyAreaBreakdown[area].total > 0) ? (
-            <View style={styles.card}>
-              {hasMovementData ? (
-                <>
-                  <View style={styles.movementRadarWrap}>
-                    <RadarChart size={172} data={movementShapeData} />
-                  </View>
+          <PremiumGate isPremium={isPremium} label="Training Balance">
+            {bodyAreaBreakdown && BODY_AREA_ORDER.some((area) => bodyAreaBreakdown[area].total > 0) ? (
+              <View style={styles.card}>
+                {hasMovementData ? (
+                  <>
+                    <View style={styles.movementRadarWrap}>
+                      <RadarChart size={172} data={movementShapeData} />
+                    </View>
+                    <Text style={styles.movementShapeCaption} maxFontSizeMultiplier={1.3}>
+                      {balanceRange === 'recent'
+                        ? 'Your movement pattern, last 7 days — no target, just the shape.'
+                        : 'Your movement pattern so far — no target, just the shape.'}
+                    </Text>
+                  </>
+                ) : areasWithData >= 2 ? (
+                  // Real data across 2+ areas already, just not from enough
+                  // distinct sessions yet — same neutral, no-pressure register
+                  // as the shown caption above, explaining an absence rather
+                  // than leaving it unexplained.
                   <Text style={styles.movementShapeCaption} maxFontSizeMultiplier={1.3}>
-                    {balanceRange === 'recent'
-                      ? 'Your movement pattern, last 7 days — no target, just the shape.'
-                      : 'Your movement pattern so far — no target, just the shape.'}
+                    Your shape will show once a few more sessions are logged.
                   </Text>
-                </>
-              ) : areasWithData >= 2 ? (
-                // Real data across 2+ areas already, just not from enough
-                // distinct sessions yet — same neutral, no-pressure register
-                // as the shown caption above, explaining an absence rather
-                // than leaving it unexplained.
-                <Text style={styles.movementShapeCaption} maxFontSizeMultiplier={1.3}>
-                  Your shape will show once a few more sessions are logged.
-                </Text>
-              ) : null}
-              {/* Same real sessions, one more granular cut — a toggle instead
-                  of a second full section, since movementPatternRows' own
-                  comment already called this "a more granular cut of the
-                  same real sessions," not a different dataset. */}
-              {movementPatternRows.length > 0 ? (
-                <View style={styles.balanceViewToggleWrap}>
-                  <View style={styles.rangeToggle}>
-                    {(['body-area', 'pattern'] as const).map((option) => (
-                      <Pressable
-                        key={option}
-                        style={[styles.rangeOption, balanceView === option && styles.rangeOptionActive]}
-                        onPress={() => {
-                          if (balanceView === option) return;
-                          hapticSelect();
-                          setBalanceView(option);
-                        }}
-                      >
-                        <Text
-                          style={[styles.rangeOptionText, balanceView === option && styles.rangeOptionTextActive]}
-                          maxFontSizeMultiplier={1.2}
+                ) : null}
+                {/* Same real sessions, one more granular cut — a toggle instead
+                    of a second full section, since movementPatternRows' own
+                    comment already called this "a more granular cut of the
+                    same real sessions," not a different dataset. */}
+                {movementPatternRows.length > 0 ? (
+                  <View style={styles.balanceViewToggleWrap}>
+                    <View style={styles.rangeToggle}>
+                      {(['body-area', 'pattern'] as const).map((option) => (
+                        <Pressable
+                          key={option}
+                          style={[styles.rangeOption, balanceView === option && styles.rangeOptionActive]}
+                          onPress={() => {
+                            if (balanceView === option) return;
+                            hapticSelect();
+                            setBalanceView(option);
+                          }}
                         >
-                          {option === 'body-area' ? 'Body Area' : 'Movement'}
-                        </Text>
-                      </Pressable>
-                    ))}
+                          <Text
+                            style={[styles.rangeOptionText, balanceView === option && styles.rangeOptionTextActive]}
+                            maxFontSizeMultiplier={1.2}
+                          >
+                            {option === 'body-area' ? 'Body Area' : 'Movement'}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
                   </View>
-                </View>
-              ) : null}
-              {balanceView === 'body-area'
-                ? BODY_AREA_ORDER.map((area, index) => {
-                    const { completed, total } = bodyAreaBreakdown[area];
-                    return (
+                ) : null}
+                {balanceView === 'body-area'
+                  ? BODY_AREA_ORDER.map((area, index) => {
+                      const { completed, total } = bodyAreaBreakdown[area];
+                      return (
+                        <View
+                          key={area}
+                          style={[styles.balanceRow, index < BODY_AREA_ORDER.length - 1 && styles.rowDivider]}
+                        >
+                          <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{BODY_AREA_LABELS[area]}</Text>
+                          <Text style={styles.balanceCount} maxFontSizeMultiplier={1.2}>
+                            {completed}/{total}
+                          </Text>
+                        </View>
+                      );
+                    })
+                  : movementPatternRows.map(([pattern, counts], index) => (
                       <View
-                        key={area}
-                        style={[styles.balanceRow, index < BODY_AREA_ORDER.length - 1 && styles.rowDivider]}
+                        key={pattern}
+                        style={[styles.balanceRow, index < movementPatternRows.length - 1 && styles.rowDivider]}
                       >
-                        <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{BODY_AREA_LABELS[area]}</Text>
+                        <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{MOVEMENT_PATTERN_LABELS[pattern]}</Text>
                         <Text style={styles.balanceCount} maxFontSizeMultiplier={1.2}>
-                          {completed}/{total}
+                          {counts.completed}/{counts.total}
                         </Text>
                       </View>
-                    );
-                  })
-                : movementPatternRows.map(([pattern, counts], index) => (
-                    <View
-                      key={pattern}
-                      style={[styles.balanceRow, index < movementPatternRows.length - 1 && styles.rowDivider]}
-                    >
-                      <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{MOVEMENT_PATTERN_LABELS[pattern]}</Text>
-                      <Text style={styles.balanceCount} maxFontSizeMultiplier={1.2}>
-                        {counts.completed}/{counts.total}
-                      </Text>
-                    </View>
-                  ))}
-            </View>
-          ) : (
-            <View style={styles.emptyCard}>
-              <SymbolView name="figure.strengthtraining.traditional" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />
-              <Text style={styles.emptyText} maxFontSizeMultiplier={1.3}>
-                {balanceRange === 'recent'
-                  ? 'No sessions in the last 7 days yet — switch to All to see your full history.'
-                  : 'Finish a session and check off exercises to see your training balance here.'}
-              </Text>
-            </View>
-          )}
+                    ))}
+              </View>
+            ) : (
+              <View style={styles.emptyCard}>
+                <SymbolView name="figure.strengthtraining.traditional" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />
+                <Text style={styles.emptyText} maxFontSizeMultiplier={1.3}>
+                  {balanceRange === 'recent'
+                    ? 'No sessions in the last 7 days yet — switch to All to see your full history.'
+                    : 'Finish a session and check off exercises to see your training balance here.'}
+                </Text>
+              </View>
+            )}
+          </PremiumGate>
         </View>
 
         <View style={styles.section}>
@@ -451,6 +487,49 @@ export default function ProgressScreen() {
               </Text>
             </View>
           )}
+        </View>
+
+        {/* Plus-gated — same "deeper insight" tier as Training Load and
+            Training Balance above. Only ever lists an exercise someone
+            opted into logging a weight for AND that showed a real 1RM
+            improvement — most people will see the empty state, and that's
+            the honest default, not a lesser version of this section. */}
+        <View style={styles.section}>
+          <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>STRENGTH PROGRESS</Text>
+          <PremiumGate isPremium={isPremium} label="Strength Progress">
+            {improvedExercises.length > 0 ? (
+              <View style={styles.card}>
+                {improvedExercises.map((entry, index) => (
+                  <View
+                    key={entry.exerciseName}
+                    style={[styles.debtRow, index < improvedExercises.length - 1 && styles.rowDivider]}
+                  >
+                    <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{entry.exerciseName}</Text>
+                    <View style={styles.strengthProgressStats}>
+                      <View style={styles.strengthProgressValue}>
+                        <SymbolView name="arrow.up.right" size={12} tintColor="#5FBE84" />
+                        <Text style={styles.debtValue} maxFontSizeMultiplier={1.2}>
+                          {Math.round(entry.performance.estimatedOneRepMax)} kg est. 1RM
+                        </Text>
+                      </View>
+                      {weightKg > 0 ? (
+                        <Text style={styles.strengthProgressRelative} maxFontSizeMultiplier={1.3}>
+                          {(entry.performance.estimatedOneRepMax / weightKg).toFixed(2)}× bodyweight
+                        </Text>
+                      ) : null}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View style={styles.emptyCard}>
+                <SymbolView name="arrow.up.right" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />
+                <Text style={styles.emptyText} maxFontSizeMultiplier={1.3}>
+                  Log a weight next time you finish a strength exercise to see your progress here.
+                </Text>
+              </View>
+            )}
+          </PremiumGate>
         </View>
       </ScrollView>
       </ReanimatedAnimated.View>
@@ -612,6 +691,23 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       color: '#5FBE84',
       fontSize: 12.5,
       fontFamily: 'Geist-SemiBold',
+    },
+    strengthProgressStats: {
+      alignItems: 'flex-end',
+      gap: 2,
+    },
+    strengthProgressValue: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    // Only rendered when a real bodyweight exists (see weightKg's own
+    // comment) — never a second row of empty space for someone who hasn't
+    // set one.
+    strengthProgressRelative: {
+      color: colors.textTertiary,
+      fontSize: 11,
+      fontFamily: 'Geist-Medium',
     },
     emptyCard: {
       borderRadius: 16,

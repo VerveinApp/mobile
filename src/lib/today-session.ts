@@ -19,6 +19,20 @@ export type TodaySession = {
   completed: boolean;
   /** Symptom tags picked at check-in time (see lib/symptom-tags.ts) — persisted alongside energy so reopening the app same-day re-derives the identical plan, not a symptom-blind one. */
   symptomTags: string[];
+  /** Minutes picked at check-in time, if any (see plan-preview.ts's own
+   * time-ceiling trim step) — undefined (not a default number) for entries
+   * saved before this field existed, and for anyone who never picks a time,
+   * since "no constraint" and "picked a specific number" are genuinely
+   * different states, not the same thing defaulted. */
+  timeAvailableMin?: number;
+  /** Whether the Energy-5 optional finisher was accepted at check-in time
+   * (see plan-preview.ts's own finisherAccepted param) — undefined (not
+   * `false`) for entries saved before this field existed, same
+   * absent-vs-declined distinction timeAvailableMin already draws. Only ever
+   * meaningful at energy 5; check-in.tsx resets it the moment energy changes
+   * away from 5, so a stored `true` alongside a non-5 energy should never
+   * actually occur, but this stays optional rather than required regardless. */
+  finisherAccepted?: boolean;
 };
 
 function today() {
@@ -39,9 +53,15 @@ export async function getTodaySession(): Promise<TodaySession | null> {
   }
 }
 
-export async function saveTodaySession(energy: EnergyScore, completed: boolean, symptomTags: string[] = []) {
+export async function saveTodaySession(
+  energy: EnergyScore,
+  completed: boolean,
+  symptomTags: string[] = [],
+  timeAvailableMin?: number,
+  finisherAccepted?: boolean
+) {
   try {
-    const session: TodaySession = { date: today(), energy, completed, symptomTags };
+    const session: TodaySession = { date: today(), energy, completed, symptomTags, timeAvailableMin, finisherAccepted };
     await AsyncStorage.setItem(KEY, JSON.stringify(session));
   } catch {
     // Worst case the app re-asks for a check-in it already had — same as a first check-in.

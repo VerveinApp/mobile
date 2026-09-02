@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
   Animated,
@@ -38,6 +38,24 @@ export default function OnboardingNameScreen() {
   const hoverWashColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
   const styles = useMemo(() => createStyles(colors, hoverWashColor), [colors, hoverWashColor]);
 
+  // Only ever real when this screen was reached via auth/verify.tsx's bare
+  // "Sign in" redirect (a device with no local profile that just proved
+  // ownership of an email via a real OTP, before any onboarding answers
+  // exist) — see create-account.tsx's own doc comment for how this rides
+  // forward, step by step, as an ordinary route param exactly like `name`
+  // does, rather than a separate global/timed AsyncStorage flag. Threading
+  // it through route params (this screen's own navigation chain) instead of
+  // a device-wide flag is the actual fix for a real bug: a global flag with
+  // only a time-based expiry couldn't tell "the same in-progress flow that
+  // set it" apart from "a completely different, unrelated onboarding
+  // attempt on the same device a few minutes later" — reachable on any
+  // shared/family device, and silent when it happened (the second person's
+  // own answers would get bound to the first person's already-verified
+  // email with no email form ever shown). Absent (welcome.tsx's ordinary
+  // "Get Started" tap) means create-account.tsx always asks for a real
+  // email, same as it always has.
+  const { verifiedEmail } = useLocalSearchParams<{ verifiedEmail?: string }>();
+
   const [name, setName] = useState('');
   const [nameError, setNameError] = useState<string | null>(null);
   const [nameFocused, setNameFocused] = useState(false);
@@ -57,8 +75,9 @@ export default function OnboardingNameScreen() {
     }
     setNameError(null);
     hapticImpactLight();
-    saveOnboardingDraft({ step: 2, params: { name: trimmed } });
-    router.push({ pathname: '/onboarding/step-2', params: { name: trimmed } } as never);
+    const params = { name: trimmed, verifiedEmail: verifiedEmail ?? '' };
+    saveOnboardingDraft({ step: 2, params });
+    router.push({ pathname: '/onboarding/step-2', params } as never);
   };
 
   return (
@@ -80,10 +99,10 @@ export default function OnboardingNameScreen() {
 
         <View style={styles.logoMark} pointerEvents="none">
           <View style={styles.logoAccent}>
-            <LogoMarkAccentGraphic width={45.32} height={52.31} color={colors.text} />
+            <LogoMarkAccentGraphic width={41.52} height={52.31} color={colors.text} />
           </View>
           <View style={styles.logoCheck}>
-            <LogoMarkGraphic width={33.99} height={44.75} color={colors.text} />
+            <LogoMarkGraphic width={31.82} height={44.75} color={colors.text} />
           </View>
         </View>
 
@@ -93,7 +112,7 @@ export default function OnboardingNameScreen() {
         </Text>
 
         <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>
-          This helps us personalize ur experience & recommendations.
+          This helps us personalize your experience & recommendations.
         </Text>
 
         <View style={[styles.inputWrap, nameFocused && styles.inputWrapFocused]}>
@@ -201,9 +220,9 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     logoMark: {
       position: 'absolute',
-      left: 153,
+      left: 155.68,
       top: 83,
-      width: 71,
+      width: 65.65,
       height: 58.91,
     },
     logoAccent: {
@@ -213,7 +232,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     logoCheck: {
       position: 'absolute',
-      left: 37.01,
+      left: 33.83,
       top: 0,
     },
     title: {

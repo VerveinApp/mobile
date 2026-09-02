@@ -1,6 +1,6 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AppState, ScrollView, StyleSheet, Text, View } from 'react-native';
 import ReanimatedAnimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
@@ -10,9 +10,10 @@ import { getCalibration } from '@/lib/calibration';
 import { DEFAULT_CALIBRATION } from '@/lib/engine/personal-calibration';
 import type { UserCalibration } from '@/lib/engine/types';
 import type { TrainingState } from '@/lib/engine/training-state';
-import { getHealthReadinessModifier } from '@/lib/health-kit';
+import { getHealthReadinessModifier, getHealthReadinessReasons } from '@/lib/health-kit';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
+import { usePremiumEntitlement } from '@/lib/purchases';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { getTodaySession, type TodaySession } from '@/lib/today-session';
@@ -59,24 +60,65 @@ export default function TrainScreen() {
   const [calibration, setCalibration] = useState<UserCalibration | null>(null);
   const [trainingState, setTrainingState] = useState<TrainingState | null>(null);
   const [healthReadinessModifier, setHealthReadinessModifier] = useState(1);
+  const [healthReadinessReasons, setHealthReadinessReasons] = useState<
+    { rhrElevated: boolean; sleepDeficit: boolean } | undefined
+  >(undefined);
   const [loaded, setLoaded] = useState(false);
+  const isPremium = usePremiumEntitlement();
+  // BUG FIX: the HealthKit-informed trim is a VerveIn Plus benefit —
+  // check-in.tsx already gates it this exact way (its own
+  // effectiveHealthReadinessModifier), but this screen was applying the raw,
+  // ungated modifier to every user's plan preview, meaning free users' Train
+  // tab could already reflect the paid RHR/sleep-based adjustment while
+  // check-in.tsx silently withheld the same adjustment from that same user's
+  // check-in flow. isPremium === null (still checking) falls back to 1 too —
+  // an unverified session should never silently get the paid trim.
+  const effectiveHealthReadinessModifier = isPremium ? healthReadinessModifier : 1;
+  const effectiveHealthReadinessReasons = isPremium ? healthReadinessReasons : undefined;
+
+  // `today` below (WEEKDAY_NAMES[new Date().getDay()]) has no other reason
+  // to re-run once this screen renders — useFocusEffect already refreshes
+  // it on every visit, but someone who opens Train and just leaves it open
+  // across midnight without navigating away would keep seeing the
+  // previous day's rest-day/training-day read. Same fix as Home's
+  // getGreeting() staleness: a slow periodic tick plus an AppState listener
+  // so reopening the app after a while corrects it immediately.
+  const [, setClockTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => setClockTick((t) => t + 1), 5 * 60 * 1000);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') setClockTick((t) => t + 1);
+    });
+    return () => {
+      clearInterval(interval);
+      subscription.remove();
+    };
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
       (async () => {
-        const [loadedProfile, loadedSession, loadedCalibration, loadedTrainingState, loadedReadinessModifier] =
-          await Promise.all([
-            getProfile(),
-            getTodaySession(),
-            getCalibration(),
-            getTrainingState(),
-            getHealthReadinessModifier(),
-          ]);
+        const [
+          loadedProfile,
+          loadedSession,
+          loadedCalibration,
+          loadedTrainingState,
+          loadedReadinessModifier,
+          loadedReadinessReasons,
+        ] = await Promise.all([
+          getProfile(),
+          getTodaySession(),
+          getCalibration(),
+          getTrainingState(),
+          getHealthReadinessModifier(),
+          getHealthReadinessReasons(),
+        ]);
         setProfile(loadedProfile);
         setTodaySession(loadedSession);
         setCalibration(loadedCalibration);
         setTrainingState(loadedTrainingState);
         setHealthReadinessModifier(loadedReadinessModifier);
+        setHealthReadinessReasons(loadedReadinessReasons);
         setLoaded(true);
       })();
     }, [])
@@ -99,9 +141,49 @@ export default function TrainScreen() {
         calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
         todaySession?.symptomTags ?? [],
         trainingState ?? undefined,
-        healthReadinessModifier
+        effectiveHealthReadinessModifier,
+        undefined,
+        todaySession?.timeAvailableMin,
+        undefined,
+        undefined,
+        effectiveHealthReadinessReasons
       ),
-    [profile, todaySession?.energy, todaySession?.symptomTags, calibration, trainingState, healthReadinessModifier]
+    [
+      profile,
+      todaySession?.energy,
+      todaySession?.symptomTags,
+      todaySession?.timeAvailableMin,
+      calibration,
+      trainingState,
+      effectiveHealthReadinessModifier,
+      effectiveHealthReadinessReasons,
+    ]
+  );
+
+  // BUG FIX: "This week's plan" below used to show every scheduled day's
+  // estimate from the SAME `preview` above — i.e. today's real, energy-
+  // adjusted plan — contradicting this file's own header comment, which
+  // promises days other than today use a neutral baseline-4 estimate since
+  // there's no real check-in for a day that hasn't happened yet. In
+  // practice, a real low-energy check-in today shrank every OTHER
+  // scheduled day's displayed "Est." figures too, which is backwards: those
+  // are supposed to read as "what a normal day looks like," not "today's
+  // mood, projected onto the rest of the week." acuteSymptomTags and
+  // timeAvailableMin are also today-only inputs (an acute symptom pick or a
+  // stated time budget don't apply to a hypothetical future day), so both
+  // are omitted here — trainingState/healthReadinessModifier stay, since
+  // those are standing signals a future day would genuinely still carry.
+  const baselinePreview = useMemo(
+    () =>
+      computePlanPreview(
+        profile ?? {},
+        4,
+        calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
+        [],
+        trainingState ?? undefined,
+        effectiveHealthReadinessModifier
+      ),
+    [profile, calibration, trainingState, effectiveHealthReadinessModifier]
   );
 
   if (!loaded) {
@@ -161,6 +243,12 @@ export default function TrainScreen() {
             <View style={styles.card}>
               {orderedScheduledDays.map((day, index) => {
                 const isToday = day === today;
+                // Today shows the real, energy-adjusted plan (same figures
+                // as the TODAY card above); every other day shows the
+                // neutral baseline-4 estimate — see baselinePreview's own
+                // comment for why these must differ.
+                const rowExerciseCount = isToday ? preview.exerciseCount : baselinePreview.exerciseCount;
+                const rowDurationMin = isToday ? preview.durationMin : baselinePreview.durationMin;
                 return (
                   <View
                     key={day}
@@ -174,7 +262,7 @@ export default function TrainScreen() {
                       <Text style={styles.planRowLabel} maxFontSizeMultiplier={1.3}>{sessionLabel}</Text>
                     </View>
                     <Text style={styles.planRowMeta} maxFontSizeMultiplier={1.3}>
-                      Est. {preview.exerciseCount} · {preview.durationMin} min
+                      Est. {rowExerciseCount} · {rowDurationMin} min
                     </Text>
                   </View>
                 );

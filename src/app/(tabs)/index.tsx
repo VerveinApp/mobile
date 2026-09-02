@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppState, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import ReanimatedAnimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -13,21 +13,24 @@ import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import {
   dismissHealthKitBanner,
   getHealthReadinessModifier,
+  getHealthReadinessReasons,
   hasConnectedHealthKit,
   isHealthKitAvailable,
   isHealthKitBannerDismissed,
   requestHealthKitAccess,
 } from '@/lib/health-kit';
-import { getWeeklyRecap } from '@/lib/momentum';
+import { getImprovedExercises } from '@/lib/exercise-performance';
+import { getShareableWeeklyRecapText, getWeeklyRecap } from '@/lib/momentum';
 import { hasCompletedOnboarding, loadOnboardingDraft, ONBOARDING_STEP_ROUTES } from '@/lib/onboarding-draft';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
+import { usePremiumEntitlement } from '@/lib/purchases';
 import { getWeekActivity, type WeekDay } from '@/lib/session-history';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { getTodaySession, type TodaySession } from '@/lib/today-session';
 import { getTrainingState } from '@/lib/training-state';
-import type { TrainingState } from '@/lib/engine/training-state';
+import { tierOf, type TrainingState } from '@/lib/engine/training-state';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
 import { TodaysTrainingCard } from '@/components/home/todays-training-card';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
@@ -86,9 +89,22 @@ export default function SummaryScreen() {
   const [calibration, setCalibration] = useState<UserCalibration | null>(null);
   const [deloadNudge, setDeloadNudge] = useState<DeloadNudge | null>(null);
   const [healthReadinessModifier, setHealthReadinessModifier] = useState(1);
+  const [healthReadinessReasons, setHealthReadinessReasons] = useState<
+    { rhrElevated: boolean; sleepDeficit: boolean } | undefined
+  >(undefined);
   const [trainingState, setTrainingState] = useState<TrainingState | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showHealthKitBanner, setShowHealthKitBanner] = useState(false);
+  const isPremium = usePremiumEntitlement();
+  // BUG FIX: the HealthKit-informed trim is a VerveIn Plus benefit —
+  // check-in.tsx already gates it this exact way (its own
+  // effectiveHealthReadinessModifier), but this screen was applying the raw,
+  // ungated modifier to every user's plan preview (and, via getDeloadNudge
+  // below, showing a banner claiming the RHR-based trim happened even for
+  // free users). isPremium === null (still checking) falls back to 1/undefined
+  // too — an unverified session should never silently get the paid trim.
+  const effectiveHealthReadinessModifier = isPremium ? healthReadinessModifier : 1;
+  const effectiveHealthReadinessReasons = isPremium ? healthReadinessReasons : undefined;
 
   // Memoized — this now runs the real engine's filtering over the full
   // exercise library (see plan-preview.ts), not a cheap lookup, so it
@@ -104,9 +120,23 @@ export default function SummaryScreen() {
         calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
         todaySession?.symptomTags ?? [],
         trainingState ?? undefined,
-        healthReadinessModifier
+        effectiveHealthReadinessModifier,
+        undefined,
+        todaySession?.timeAvailableMin,
+        undefined,
+        undefined,
+        effectiveHealthReadinessReasons
       ),
-    [profile, todaySession?.energy, todaySession?.symptomTags, calibration, trainingState, healthReadinessModifier]
+    [
+      profile,
+      todaySession?.energy,
+      todaySession?.symptomTags,
+      todaySession?.timeAvailableMin,
+      calibration,
+      trainingState,
+      effectiveHealthReadinessModifier,
+      effectiveHealthReadinessReasons,
+    ]
   );
 
   useEffect(() => {
@@ -125,21 +155,30 @@ export default function SummaryScreen() {
         return;
       }
 
-      const [loadedProfile, loadedSession, loadedCalibration, loadedDeloadNudge, loadedReadinessModifier, loadedTrainingState] =
-        await Promise.all([
-          getProfile(),
-          getTodaySession(),
-          getCalibration(),
-          getDeloadNudge(),
-          getHealthReadinessModifier(),
-          getTrainingState(),
-        ]);
+      const [
+        loadedProfile,
+        loadedSession,
+        loadedCalibration,
+        loadedDeloadNudge,
+        loadedReadinessModifier,
+        loadedReadinessReasons,
+        loadedTrainingState,
+      ] = await Promise.all([
+        getProfile(),
+        getTodaySession(),
+        getCalibration(),
+        getDeloadNudge(isPremium),
+        getHealthReadinessModifier(),
+        getHealthReadinessReasons(),
+        getTrainingState(),
+      ]);
       if (cancelled) return;
       setProfile(loadedProfile);
       setTodaySession(loadedSession);
       setCalibration(loadedCalibration);
       setDeloadNudge(loadedDeloadNudge);
       setHealthReadinessModifier(loadedReadinessModifier);
+      setHealthReadinessReasons(loadedReadinessReasons);
       setTrainingState(loadedTrainingState);
 
       const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
@@ -162,6 +201,14 @@ export default function SummaryScreen() {
     return () => {
       cancelled = true;
     };
+    // Deliberately mount-only (see this effect's own leading comment) —
+    // isPremium is read here at whatever value it happens to be at first
+    // mount (usually still resolving), which is the same safe default this
+    // whole gating fix relies on elsewhere; the isPremium-aware
+    // useFocusEffect below corrects it moments later once entitlement
+    // actually resolves, same "eventually refreshed on focus" pattern this
+    // screen already uses for every other one-time-fetched value.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Settings' Adjust My Plan / Biometrics screens push on top of this tab
@@ -173,48 +220,71 @@ export default function SummaryScreen() {
     useCallback(() => {
       if (status !== 'ready') return;
       (async () => {
-        const [loadedProfile, loadedSession, loadedCalibration, loadedDeloadNudge, loadedReadinessModifier, loadedTrainingState] =
-          await Promise.all([
-            getProfile(),
-            getTodaySession(),
-            getCalibration(),
-            getDeloadNudge(),
-            getHealthReadinessModifier(),
-            getTrainingState(),
-          ]);
+        const [
+          loadedProfile,
+          loadedSession,
+          loadedCalibration,
+          loadedDeloadNudge,
+          loadedReadinessModifier,
+          loadedReadinessReasons,
+          loadedTrainingState,
+        ] = await Promise.all([
+          getProfile(),
+          getTodaySession(),
+          getCalibration(),
+          getDeloadNudge(isPremium),
+          getHealthReadinessModifier(),
+          getHealthReadinessReasons(),
+          getTrainingState(),
+        ]);
         setProfile(loadedProfile);
         setTodaySession(loadedSession);
         setCalibration(loadedCalibration);
         setDeloadNudge(loadedDeloadNudge);
         setHealthReadinessModifier(loadedReadinessModifier);
+        setHealthReadinessReasons(loadedReadinessReasons);
         setTrainingState(loadedTrainingState);
         const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
         setWeekActivity(await getWeekActivity(trainingDays));
       })();
-    }, [status])
+      // isPremium added alongside the getDeloadNudge/effectiveHealthReadinessModifier
+      // gating fix — without it, this callback (and the isPremium value it
+      // closes over when calling getDeloadNudge) would stay frozen at
+      // whatever isPremium was the one time `status` flipped to 'ready',
+      // never picking up entitlement resolving moments later.
+    }, [status, isPremium])
   );
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    const [loadedProfile, loadedSession, loadedCalibration, loadedDeloadNudge, loadedReadinessModifier, loadedTrainingState] =
-      await Promise.all([
-        getProfile(),
-        getTodaySession(),
-        getCalibration(),
-        getDeloadNudge(),
-        getHealthReadinessModifier(),
-        getTrainingState(),
-      ]);
+    const [
+      loadedProfile,
+      loadedSession,
+      loadedCalibration,
+      loadedDeloadNudge,
+      loadedReadinessModifier,
+      loadedReadinessReasons,
+      loadedTrainingState,
+    ] = await Promise.all([
+      getProfile(),
+      getTodaySession(),
+      getCalibration(),
+      getDeloadNudge(isPremium),
+      getHealthReadinessModifier(),
+      getHealthReadinessReasons(),
+      getTrainingState(),
+    ]);
     setProfile(loadedProfile);
     setTodaySession(loadedSession);
     setCalibration(loadedCalibration);
     setDeloadNudge(loadedDeloadNudge);
     setHealthReadinessModifier(loadedReadinessModifier);
+    setHealthReadinessReasons(loadedReadinessReasons);
     setTrainingState(loadedTrainingState);
     const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
     setWeekActivity(await getWeekActivity(trainingDays));
     setRefreshing(false);
-  }, []);
+  }, [isPremium]);
 
   const handleConnectHealthKit = useCallback(async () => {
     hapticImpactLight();
@@ -227,7 +297,11 @@ export default function SummaryScreen() {
     // reflected immediately, not after the next focus/refresh cycle —
     // getHealthReadinessModifier already no-ops safely if there isn't
     // enough real data yet.
-    if (granted) setHealthReadinessModifier(await getHealthReadinessModifier());
+    if (granted) {
+      const [modifier, reasons] = await Promise.all([getHealthReadinessModifier(), getHealthReadinessReasons()]);
+      setHealthReadinessModifier(modifier);
+      setHealthReadinessReasons(reasons);
+    }
   }, []);
 
   const handleDismissHealthKitBanner = useCallback(async () => {
@@ -235,6 +309,39 @@ export default function SummaryScreen() {
     setShowHealthKitBanner(false);
     await dismissHealthKitBanner();
   }, []);
+
+  // Computed on demand, not kept in component state — this text is only
+  // ever needed at the moment someone taps Share, so there's no reason to
+  // fetch/recompute it on every load/focus/refresh cycle the way the
+  // screen's other data does. Same pattern as referral.tsx's handleShare:
+  // build the message, hand it to the native share sheet, swallow a
+  // dismiss/cancel silently (nothing else in the app depends on whether
+  // this share actually completed).
+  const handleShareWeek = useCallback(async () => {
+    if (!weekActivity) return;
+    hapticImpactLight();
+    const cutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const improved = await getImprovedExercises();
+    const recentImprovement = improved
+      .filter((e) => Date.parse(`${e.performance.date}T00:00:00`) >= cutoffMs)
+      .sort((a, b) => b.performance.date.localeCompare(a.performance.date))[0];
+    const message = getShareableWeeklyRecapText(
+      weekActivity,
+      recentImprovement
+        ? {
+            exerciseName: recentImprovement.exerciseName,
+            estimatedOneRepMaxKg: recentImprovement.performance.estimatedOneRepMax,
+          }
+        : null
+    );
+    if (!message) return;
+    try {
+      await Share.share({ message });
+    } catch {
+      // Share sheet dismissed/cancelled — no separate error state, same as
+      // referral.tsx's own handleShare.
+    }
+  }, [weekActivity]);
 
   if (status !== 'ready' || !weekActivity) {
     return (
@@ -350,7 +457,7 @@ export default function SummaryScreen() {
           explanation={preview.explanation}
         />
 
-        <WeeklyActivity styles={styles} weekActivity={weekActivity} />
+        <WeeklyActivity styles={styles} colors={colors} weekActivity={weekActivity} onShare={handleShareWeek} />
 
         <YourFitness
           styles={styles}
@@ -377,6 +484,27 @@ function Header({
   const hover = useHoverFade();
   const press = useLiquidPress();
   const initial = firstName ? firstName[0].toUpperCase() : '·';
+
+  // Neither getGreeting() nor formatToday() below have any other reason to
+  // re-run once this component mounts — without this, leaving Home open
+  // across an hour (or day) boundary freezes both at whatever they were on
+  // the last render, e.g. still "Good morning" well into the afternoon.
+  // Re-ticking every minute keeps them live; the AppState listener catches
+  // the larger jump from being backgrounded for a while immediately rather
+  // than waiting up to a minute for the interval to fire (JS timers don't
+  // run in the background on iOS, so the interval alone only catches up
+  // once the app resumes anyway).
+  const [, setClockTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => setClockTick((t) => t + 1), 60 * 1000);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') setClockTick((t) => t + 1);
+    });
+    return () => {
+      clearInterval(interval);
+      subscription.remove();
+    };
+  }, []);
 
   return (
     <View style={styles.header}>
@@ -410,11 +538,21 @@ function Header({
 
 function WeeklyActivity({
   styles,
+  colors,
   weekActivity,
+  onShare,
 }: {
   styles: ReturnType<typeof createStyles>;
+  colors: ReturnType<typeof useAppColors>;
   weekActivity: { days: WeekDay[]; completedCount: number; scheduledCount: number };
+  onShare: () => void;
 }) {
+  const shareHover = useHoverFade();
+  const sharePress = useLiquidPress();
+  // Same gate getWeeklyRecap itself applies — no share affordance for a
+  // week with nothing real to report yet (blameless silence, not a lesser/
+  // empty version of the button).
+  const canShare = weekActivity.completedCount > 0;
   return (
     <View style={styles.section}>
       <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>THIS WEEK</Text>
@@ -426,17 +564,44 @@ function WeeklyActivity({
               style={[
                 styles.weekDot,
                 !day.isScheduled && styles.weekDotUnscheduled,
-                day.isScheduled && day.completed && styles.weekDotCompleted,
-                day.isScheduled && day.completed === false && styles.weekDotMissed,
+                day.isScheduled && day.completed === true && styles.weekDotCompleted,
+                // Fixed bug: previously `day.completed === false` only — a
+                // past day with zero recorded entry (completed: null, not
+                // false — recordSessionCompletion only ever writes once
+                // "Start Session" is tapped, so a day the user never opened
+                // check-in on at all has no entry) fell through to the
+                // default dot instead of reading as missed. Today is
+                // explicitly excluded — it's !isFuture too, but the day
+                // isn't over yet, so completed:null there just means "not
+                // checked in yet," not "missed."
+                day.isScheduled && !day.isFuture && !day.isToday && day.completed !== true && styles.weekDotMissed,
                 day.isToday && styles.weekDotToday,
               ]}
             />
           </View>
         ))}
       </View>
-      <Text style={styles.weekSummary} maxFontSizeMultiplier={1.3}>
-        {weekActivity.completedCount} / {weekActivity.scheduledCount} workouts completed
-      </Text>
+      <View style={styles.weekSummaryRow}>
+        <Text style={styles.weekSummary} maxFontSizeMultiplier={1.3}>
+          {weekActivity.completedCount} / {weekActivity.scheduledCount} workouts completed
+        </Text>
+        {canShare ? (
+          <Pressable
+            style={styles.weekShareButton}
+            onPress={onShare}
+            hitSlop={8}
+            onHoverIn={shareHover.onHoverIn}
+            onHoverOut={shareHover.onHoverOut}
+            onPressIn={sharePress.onPressIn}
+            onPressOut={sharePress.onPressOut}
+          >
+            <SymbolView name="square.and.arrow.up" size={13} tintColor={colors.textSecondary} />
+            <Text style={styles.weekShareText} maxFontSizeMultiplier={1.2}>
+              Share
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -467,13 +632,15 @@ function YourFitness({
           : 'Consider taking it easier today.';
 
   // M15's calibration multiplier is the one real learned state this app
-  // has — invisible until now. Only surfaced once "established" (same
-  // TIER_ESTABLISHED_MIN=10 threshold M20's Tiered pattern uses elsewhere)
-  // and only when the deviation is a real signal, not early noise — 0.08 is
-  // personal-calibration.ts's own STEP size, so anything smaller is less
-  // than a single full adjustment's worth of movement.
+  // has — invisible until now. Only surfaced once "established" (tierOf,
+  // shared from engine/training-state.ts — same TIER_ESTABLISHED_MIN=10
+  // threshold M20's Tiered pattern uses elsewhere, no longer a second,
+  // driftable inline copy of that number) and only when the deviation is a
+  // real signal, not early noise — 0.08 is personal-calibration.ts's own
+  // STEP size, so anything smaller is less than a single full adjustment's
+  // worth of movement.
   const calibrationNote =
-    calibration && calibration.sampleCount >= 10
+    calibration && tierOf(calibration.sampleCount) === 'established'
       ? calibration.multiplier >= 1.08
         ? "Your plan's been running heavier than baseline — recent sessions came back easy."
         : calibration.multiplier <= 0.92
@@ -495,6 +662,11 @@ function YourFitness({
         : ratio >= 0.25
           ? 'Some sessions logged this week.'
           : 'A quieter week so far.';
+
+  // Only surfaced on an actual quiet stretch, not preemptively — the brand
+  // thesis lands as reassurance after a real shortfall, not as a caveat
+  // shown by default.
+  const isQuietWeek = weekActivity.scheduledCount > 0 && ratio < 0.25;
 
   return (
     <View style={styles.section}>
@@ -522,6 +694,11 @@ function YourFitness({
           </Text>
         </View>
         <Text style={styles.fitnessCardNote} maxFontSizeMultiplier={1.4}>{consistencyNote}</Text>
+        {isQuietWeek ? (
+          <Text style={styles.fitnessCardCalibrationNote} maxFontSizeMultiplier={1.4}>
+            On your side, not your goal&apos;s side.
+          </Text>
+        ) : null}
       </View>
     </View>
   );
@@ -709,9 +886,24 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     weekDotToday: {
       borderColor: colors.text,
     },
+    weekSummaryRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
     weekSummary: {
       color: colors.textSecondary,
       fontSize: 13,
+      fontFamily: 'Geist-Medium',
+    },
+    weekShareButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+    },
+    weekShareText: {
+      color: colors.textSecondary,
+      fontSize: 12,
       fontFamily: 'Geist-Medium',
     },
     fitnessCard: {

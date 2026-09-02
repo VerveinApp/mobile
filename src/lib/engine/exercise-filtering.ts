@@ -61,7 +61,11 @@ function contraindicated(ex: Exercise, c: EffectiveConstraintSet): boolean {
   return ex.contraindications.some((cond) => c.excludeContraindicatedFor.includes(cond));
 }
 
-function passesConstraints(ex: Exercise, c: EffectiveConstraintSet): boolean {
+/** Exported for exercise-swap.ts — the swap feature reuses this exact Gate 1
+ * check rather than re-deriving its own equipment/intensity/impact/body-area/
+ * movement-pattern/contraindication rules, so a swap candidate can never pass
+ * under a looser rule than the one that governed today's own session. */
+export function passesConstraints(ex: Exercise, c: EffectiveConstraintSet): boolean {
   const intensityOk = ex.intensity === null || INTENSITY_RANK[ex.intensity] <= INTENSITY_RANK[c.intensityCeiling];
   const impactOk = IMPACT_RANK[ex.impact] <= IMPACT_RANK[c.impactCeiling];
   const equipmentOk = EQUIPMENT_RANK[ex.equipment] <= EQUIPMENT_RANK[c.equipmentCeiling];
