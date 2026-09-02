@@ -52,14 +52,18 @@ jobs:
 
       - name: Boot simulator and build + install the app
         run: |
-          # "iPhone 11 Pro Max" matches the device the coordinate-based taps
-          # in exercise-swap-sheet.yaml/rest-day-checkin.yaml were tuned
-          # against locally. If this runner's Xcode image doesn't have that
-          # model available, `xcrun simctl list devices available` (run here
-          # for the log) will show what does exist so the grep can be
-          # retargeted.
+          # The coordinate-based taps in exercise-swap-sheet.yaml/
+          # rest-day-checkin.yaml were tuned against an "iPhone 11 Pro Max"
+          # locally, but GitHub's macOS runner images don't carry that model
+          # (confirmed: their available list only goes down to the 16
+          # family / SE 3rd gen). Anchored on "iPhone 16 (" specifically
+          # (not "iPhone 16 Pro"/"Plus"/"16e") so the match is exact, and
+          # take the last (newest iOS runtime) match. If the flows'
+          # percentage-based taps land wrong on this device's different
+          # aspect ratio, that's the next thing to debug.
           xcrun simctl list devices available
-          UDID=$(xcrun simctl list devices available | grep "iPhone 11 Pro Max" | head -1 | grep -oE '[0-9A-F-]{36}')
+          UDID=$(xcrun simctl list devices available | grep -E '^ *iPhone 16 \(' | tail -1 | grep -oE '[0-9A-F-]{36}')
+          echo "Selected UDID: $UDID"
           echo "UDID=$UDID" >> "$GITHUB_ENV"
           open -a Simulator --args -CurrentDeviceUDID "$UDID"
           xcrun simctl bootstatus "$UDID" -b
