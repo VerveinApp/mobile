@@ -65,8 +65,8 @@ jobs:
           UDID=$(xcrun simctl list devices available | grep -E '^ *iPhone 16 \(' | tail -1 | grep -oE '[0-9A-F-]{36}')
           echo "Selected UDID: $UDID"
           echo "UDID=$UDID" >> "$GITHUB_ENV"
-          open -a Simulator --args -CurrentDeviceUDID "$UDID"
           xcrun simctl bootstatus "$UDID" -b
+          open -a Simulator --args -CurrentDeviceUDID "$UDID"
           npx expo run:ios --configuration Release --device "$UDID"
 
       - name: Run Maestro flows
