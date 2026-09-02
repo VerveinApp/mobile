@@ -2,7 +2,7 @@
   "expo": {
     "name": "VerveIn",
     "slug": "vervein",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "vervein",
@@ -13,7 +13,7 @@
         "dark": "./assets/icon-source/icon-dark.png"
       },
       "bundleIdentifier": "app.vervein",
-      "buildNumber": "2"
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
@@ -33,11 +33,13 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "backgroundColor": "#ffffff",
+          "dark": {
+            "backgroundColor": "#000000"
+          }
         }
       ],
+      "expo-apple-authentication",
       "expo-font",
       "expo-image",
       "expo-notifications",
@@ -55,6 +57,19 @@
           "NSHealthShareUsageDescription": "VerveIn reads your recent activity, sleep, and resting heart rate to give more honest readiness context alongside how you say you feel — nothing is written back to Health.",
           "NSHealthUpdateUsageDescription": "VerveIn never writes any data to Health — this permission is requested by a library VerveIn uses, but write access is not used.",
           "background": false
+        }
+      ],
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.111758217482-jvl0jpan0ur9irepshacboidlvp765b9"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "VerveIn uses your photo library so you can add a progress photo — nothing is uploaded anywhere, it stays on this device.",
+          "cameraPermission": "VerveIn uses your camera to take a progress photo — nothing is uploaded anywhere, it stays on this device."
         }
       ]
     ],

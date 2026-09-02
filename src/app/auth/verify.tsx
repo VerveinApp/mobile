@@ -15,12 +15,12 @@ import ReanimatedAnimated, { FadeIn } from 'react-native-reanimated';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight, hapticSuccess } from '@/lib/haptics';
-import { markOnboardingComplete } from '@/lib/onboarding-draft';
+import { hasCompletedOnboarding } from '@/lib/onboarding-draft';
 import { goBack } from '@/lib/onboarding-nav';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { supabase } from '@/lib/supabase';
 import { useAppColors, useAppTheme } from '@/lib/theme-context';
-import { saveProfile, withHealthConsent } from '@/lib/user-profile';
+import { finishOnboarding } from '@/lib/user-profile';
 import {
   ArrowUpIconGraphic,
   LogoMarkAccentGraphic,
@@ -159,34 +159,51 @@ export default function VerifyEmailScreen() {
       return;
     }
     hapticSuccess();
+    // This screen has three real entry points now, not one: mid-onboarding
+    // (real profile params in the route, onboarding not complete yet),
+    // re-authenticating after a plain Sign Out (no profile params at all,
+    // onboarding already complete on this device — see settings/index.tsx's
+    // handleSignOut), and "Already have an account? Sign in" from
+    // welcome.tsx (also no profile params, but onboarding is NOT complete on
+    // this device — that screen's own precondition, per its doc comment, is
+    // reachable only when there's no local profile yet). Only the true
+    // mid-onboarding path should touch the profile — the other two must not
+    // fall into saveProfile with a batch of undefined fields.
+    if (await hasCompletedOnboarding()) {
+      router.replace('/(tabs)' as never);
+      return;
+    }
+    if (!params.name) {
+      // No local profile AND no real onboarding data was ever collected in
+      // this session — the welcome.tsx Sign In path. Nothing about the
+      // account restores a profile (no data syncs to it — see account.ts's
+      // own doc comment), so there's nothing to save; route into the real
+      // questionnaire instead of permanently marking onboarding "complete"
+      // with garbage. This email is already verified, though — carry it
+      // forward as an ordinary route param (onboarding/index.tsx forwards
+      // it step by step, same as `name`) so create-account.tsx's second
+      // visit at the end of the questionnaire can skip re-sending and
+      // re-entering another OTP code for an email this device just proved
+      // ownership of. A route param, not a global AsyncStorage flag — see
+      // onboarding/index.tsx's own doc comment for why that distinction is
+      // what actually keeps an unrelated, later "Get Started" attempt on
+      // the same device from ever picking this up by accident.
+      router.replace({ pathname: '/onboarding', params: { verifiedEmail: params.email } } as never);
+      return;
+    }
     // Onboarding is fully complete once email verification succeeds — this
     // was the last step in the flow, not a launch point back into it. The
     // draft itself gets cleared right after, so the parts of it Home still
     // needs (experience/duration/commitment/days) are copied into a small
-    // durable profile first — see lib/user-profile.ts. Supabase's own
-    // session (the real account) is separately persisted by the client's
-    // AsyncStorage adapter — this local profile is still the engine's own
-    // input data, not a duplicate of auth state.
-    // Both writes are awaited before navigating on — all-set/trajectory
-    // read the profile again a couple screens later, and there's no reason
-    // to leave that read racing this write when awaiting costs nothing
-    // visible (see the same fix in onboarding/create-account.tsx, where
-    // skipping the await was a real bug).
-    await saveProfile({
-      name: params.name,
-      email: params.email,
-      goal: params.goal,
-      experience: params.experience,
-      environment: params.environment,
-      duration: params.duration,
-      commitmentLevel: params.commitmentLevel,
-      days: params.days,
-      ...withHealthConsent(params.healthConsent === 'true' ? 'true' : 'false'),
-      sex: params.sex,
-      heightCm: params.heightCm,
-      weightKg: params.weightKg,
-    });
-    await markOnboardingComplete();
+    // durable profile first — see lib/user-profile.ts's finishOnboarding.
+    // Supabase's own session (the real account) is separately persisted by
+    // the client's AsyncStorage adapter — this local profile is still the
+    // engine's own input data, not a duplicate of auth state. Awaited
+    // before navigating on — all-set/trajectory read the profile again a
+    // couple screens later, and there's no reason to leave that read racing
+    // this write when awaiting costs nothing visible (see the same fix in
+    // onboarding/create-account.tsx, where skipping the await was a real bug).
+    await finishOnboarding(params, params.email);
     router.replace('/onboarding/all-set' as never);
   };
 
@@ -230,7 +247,7 @@ export default function VerifyEmailScreen() {
         <Text style={styles.title} maxFontSizeMultiplier={1.3}>Almost there</Text>
 
         <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>
-          Enter the 4-digit code sent to{' '}
+          Enter the 6-digit code sent to{' '}
           <Text style={styles.subtitleEmail}>{displayEmail}</Text>
         </Text>
 

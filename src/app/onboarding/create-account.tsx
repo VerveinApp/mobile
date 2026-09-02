@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   KeyboardAvoidingView,
@@ -16,9 +16,11 @@ import ReanimatedAnimated, { FadeIn } from 'react-native-reanimated';
 import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
-import { hapticError, hapticImpactLight } from '@/lib/haptics';
+import { hapticError, hapticImpactLight, hapticSuccess } from '@/lib/haptics';
 import { goBack } from '@/lib/onboarding-nav';
+import { signInWithApple, signInWithGoogle } from '@/lib/social-auth';
 import { supabase } from '@/lib/supabase';
+import { finishOnboarding } from '@/lib/user-profile';
 import {
   AppleIconGraphic,
   ArrowUpIconGraphic,
@@ -60,15 +62,83 @@ export default function CreateAccountScreen() {
 
   const onboardingParams = useLocalSearchParams<Record<string, string>>();
 
+  // True only when THIS navigation chain carries a real verifiedEmail param
+  // — see onboarding/index.tsx's own doc comment for why that's threaded
+  // forward as an ordinary route param (like `name`), not a global, time-
+  // based AsyncStorage flag: welcome.tsx's "Sign in" path verifies an email
+  // BEFORE any onboarding answers exist, then auth/verify.tsx sends that
+  // exact chain through the full questionnaire with `verifiedEmail`
+  // attached at every step, ending here again. Only a chain that actually
+  // carries it can skip straight to finishing onboarding instead of
+  // sending and re-entering a second OTP code for an email this device
+  // already proved ownership of moments earlier — an unrelated "Get
+  // Started" chain never has this param, so it always reaches the real
+  // email form below.
+  //
+  // BUG FIX: this used to read a device-wide AsyncStorage flag
+  // (onboarding-draft.ts's now-removed savePendingVerifiedEmail/
+  // takePendingVerifiedEmail, expiring only after 30 minutes) instead of a
+  // route param. On a shared/family device, an abandoned "Sign in" attempt
+  // could leave that flag valid for up to 30 minutes — long enough for a
+  // second, completely unrelated "Get Started" signup on the same device to
+  // land here, silently consume the first person's already-verified email,
+  // and finish with the WRONG email attached, never showing an email form
+  // at all. Route params can't leak across unrelated navigation chains the
+  // way a global flag can, which is what actually closes this.
+  // A plain derived const, not state — it's fixed by whatever this screen
+  // mounted with and never needs to flip back: when true, the effect below
+  // always either navigates away (all-set) before render matters again, so
+  // there's no "resolved, show the form now" transition for a setter to
+  // drive.
+  const checkingVerifiedEmail = !!onboardingParams.verifiedEmail;
+  // BUG FIX: finishOnboarding (an AsyncStorage write) has no guaranteed
+  // success — a real write failure here used to leave this screen rendering
+  // `null` forever with no error, no retry, and no way forward short of
+  // force-quitting, since checkingVerifiedEmail itself never had a way back
+  // to false once it started true. This flag is that way back: only ever
+  // set on a genuine failure, letting the gate below fall through to the
+  // real email form as a manual fallback instead of a permanent blank screen.
+  const [verifiedEmailFinishFailed, setVerifiedEmailFinishFailed] = useState(false);
+
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailFocused, setEmailFocused] = useState(false);
   const [sendingCode, setSendingCode] = useState(false);
-  // Apple/Google aren't wired to a real SDK or a configured Supabase OAuth
-  // provider yet — see handleAppleAuth/handleGoogleAuth's own comment for
-  // why silently completing a fake signup on tap (the previous behavior)
-  // was a real honesty gap, not a harmless placeholder.
+  // Real error surface for handleAppleAuth/handleGoogleAuth below — no
+  // longer a permanent "not set up yet" notice now that both are wired to
+  // real SDK calls, but a real provider/network failure still needs
+  // somewhere honest to show up rather than silently doing nothing.
   const [socialAuthNotice, setSocialAuthNotice] = useState<string | null>(null);
+  // Guards both handlers against a double-tap firing two concurrent native
+  // sheets/browser sessions. BUG FIX: this used to be a single useState
+  // boolean checked-then-set inside each async handler — but two fast taps
+  // can both read the same stale `false` before React commits the first
+  // tap's setState, since state updates aren't synchronous across separate
+  // event-handler invocations. The ref is the real, synchronous gate (immune
+  // to two calls landing before either has a chance to observe the other's
+  // write); the state twin only drives the buttons' visual disabled style.
+  // Same ref+state-twin pattern as check-in.tsx's isStartingSessionRef/
+  // isFinishingSessionRef.
+  const isSocialAuthInProgressRef = useRef(false);
+  const [isSocialAuthInProgress, setIsSocialAuthInProgress] = useState(false);
+
+  useEffect(() => {
+    if (!onboardingParams.verifiedEmail) return;
+    (async () => {
+      try {
+        await finishOnboarding(onboardingParams, onboardingParams.verifiedEmail);
+        hapticSuccess();
+        router.replace('/onboarding/all-set' as never);
+      } catch {
+        setSocialAuthNotice("Something went wrong finishing setup — enter your email below to try again.");
+        setVerifiedEmailFinishFailed(true);
+      }
+    })();
+    // Intentionally empty — this is a one-time check for whatever params
+    // this screen mounted with, not a subscription that should re-run if
+    // onboardingParams' identity happens to change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const continueHover = useHoverFade();
   const appleHover = useHoverFade();
@@ -113,32 +183,75 @@ export default function CreateAccountScreen() {
     router.push({ pathname: '/auth/verify', params: { ...onboardingParams, email: trimmed } } as never);
   };
 
-  // DISCLOSED FIX: Apple/Google used to silently complete a fake signup on
-  // tap — saving the real onboarding profile, marking onboarding complete,
-  // and landing on Home with full haptic/navigation feedback, exactly like
-  // a genuine sign-in, with no real Apple/Google SDK call and no real
-  // Supabase session behind any of it. That's a real "looks like it worked,
-  // didn't" gap, not a harmless placeholder — Settings' own Account row now
-  // shows the real signed-in state, and a fake-social-signup account would
-  // permanently read "Not signed in" there despite onboarding having
-  // visually completed. Real Sign in with Apple/Google needs a native SDK
-  // (expo-apple-authentication / a Google OAuth client), Apple
-  // Developer/Google Cloud credentials, and a configured Supabase OAuth
-  // provider — none of which exist yet, so these buttons honestly say so
-  // instead of pretending. Once that real integration exists, its success
-  // callback should do what the old finishSocialAuth() did (save the
-  // profile collected during onboarding, mark onboarding complete, and
-  // navigate to Home) plus the real email/identity Apple/Google actually
-  // supply — nothing here fabricates one in its place.
-  const handleAppleAuth = () => {
-    hapticImpactLight();
-    setSocialAuthNotice("Apple sign-in isn't set up yet — continue with email below.");
+  // Real Apple/Google sign-in (replaces the old honest "not set up yet"
+  // placeholder — see social-auth.ts's own doc comment for the actual
+  // provider calls). Apple/Google each verify identity themselves before
+  // this ever resolves 'success', so neither path goes through
+  // handleContinue's email-OTP screen at all — that's the whole point of
+  // using a real identity provider, not a shortcut around verification.
+  //
+  // Same branch `handleContinue`'s email path effectively defers to
+  // verify.tsx for: does this navigation chain carry a real, full
+  // questionnaire (onboardingParams.name present — this device already
+  // answered everything and just needs an identity to finish with), or is
+  // this welcome.tsx's bare "Sign in" path (no local profile, no answers
+  // collected yet)? The full-questionnaire case finishes immediately, same
+  // as verify.tsx's own mid-onboarding branch. The bare case can't finish
+  // onboarding with no real answers to save, so it routes into the real
+  // questionnaire instead — carrying the now-verified email forward as an
+  // ordinary route param (see onboarding/index.tsx's own doc comment for
+  // why that's a route param, not a global flag) so this screen's own
+  // mount effect above skips straight through when that chain reaches here
+  // again at the end.
+  const handleSocialAuthSuccess = async (email: string) => {
+    hapticSuccess();
+    if (onboardingParams.name) {
+      await finishOnboarding(onboardingParams, email);
+      router.replace('/onboarding/all-set' as never);
+    } else {
+      router.replace({ pathname: '/onboarding', params: { verifiedEmail: email } } as never);
+    }
   };
 
-  const handleGoogleAuth = () => {
+  const handleAppleAuth = async () => {
+    if (isSocialAuthInProgressRef.current) return;
+    isSocialAuthInProgressRef.current = true;
     hapticImpactLight();
-    setSocialAuthNotice("Google sign-in isn't set up yet — continue with email below.");
+    setIsSocialAuthInProgress(true);
+    setSocialAuthNotice(null);
+    const result = await signInWithApple();
+    isSocialAuthInProgressRef.current = false;
+    setIsSocialAuthInProgress(false);
+    if (result.kind === 'success') {
+      await handleSocialAuthSuccess(result.email);
+    } else if (result.kind === 'error') {
+      hapticError();
+      setSocialAuthNotice(result.message);
+    }
+    // 'cancelled' — the user backed out of Apple's own sheet, the most
+    // common outcome. No error, nothing to say.
   };
+
+  const handleGoogleAuth = async () => {
+    if (isSocialAuthInProgressRef.current) return;
+    isSocialAuthInProgressRef.current = true;
+    hapticImpactLight();
+    setIsSocialAuthInProgress(true);
+    setSocialAuthNotice(null);
+    const result = await signInWithGoogle();
+    isSocialAuthInProgressRef.current = false;
+    setIsSocialAuthInProgress(false);
+    if (result.kind === 'success') {
+      await handleSocialAuthSuccess(result.email);
+    } else if (result.kind === 'error') {
+      hapticError();
+      setSocialAuthNotice(result.message);
+    }
+    // 'cancelled' — the user closed the browser sheet, the most common
+    // outcome. No error, nothing to say.
+  };
+
+  if (checkingVerifiedEmail && !verifiedEmailFinishFailed) return null;
 
   return (
     <KeyboardAvoidingView
@@ -296,6 +409,7 @@ export default function CreateAccountScreen() {
           <Pressable
             style={styles.socialButtonHit}
             onPress={handleAppleAuth}
+            disabled={isSocialAuthInProgress}
             onHoverIn={appleHover.onHoverIn}
             onHoverOut={appleHover.onHoverOut}
             onPressIn={applePress.onPressIn}
@@ -334,6 +448,7 @@ export default function CreateAccountScreen() {
           <Pressable
             style={styles.socialButtonGoogleHit}
             onPress={handleGoogleAuth}
+            disabled={isSocialAuthInProgress}
             onHoverIn={googleHover.onHoverIn}
             onHoverOut={googleHover.onHoverOut}
             onPressIn={googlePress.onPressIn}
@@ -441,19 +556,29 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       width: 145,
       height: 51.25,
     },
+    // Shifted +5.16 right (0 -> 5.16): a true nearest-point pixel measurement
+    // (not a column scan) showed the icon-to-"e" gap sitting at ~9.16pt on
+    // device, more than double Figma's real ~4.0pt gap between the same two
+    // shapes. Moving the icon closer to the fixed wordmark position closes
+    // that gap without touching.
     brandAccent: {
       position: 'absolute',
-      left: 0,
+      left: 5.16,
       top: 5.66,
     },
     brandMark: {
       position: 'absolute',
-      left: 29.18,
+      left: 34.34,
       top: 0,
     },
+    // Box-position math against Figma's CSS said 41.03 was correct, but the
+    // wordmark SVG's left-bearing doesn't match Figma's live text layer, so
+    // that value fused the icon into the "e" with zero gap on device. Shifted
+    // to 45.45 against a real Figma-vs-simulator pixel diff — left as-is here
+    // since the follow-up correction above moves the icon instead.
     brandWordmark: {
       position: 'absolute',
-      left: 41.03,
+      left: 45.45,
       top: 23.75,
     },
     title: {

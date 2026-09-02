@@ -1,3 +1,4 @@
+import './crypto-polyfill';
 import 'react-native-url-polyfill/auto';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -19,12 +20,25 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 /**
- * The one Supabase client for the app — real auth (email OTP, and Apple/
- * Google once those are wired), not the AsyncStorage-only mock this
- * replaces. `storage: AsyncStorage` is required on React Native (Supabase's
- * default assumes a browser's localStorage, which doesn't exist here);
- * `detectSessionInUrl: false` because there's no browser URL for a redirect
- * to land in on a native app.
+ * The one Supabase client for the app — real auth (email OTP, Apple, and
+ * Google), not the AsyncStorage-only mock this replaces. `storage:
+ * AsyncStorage` is required on React Native (Supabase's default assumes a
+ * browser's localStorage, which doesn't exist here); `detectSessionInUrl:
+ * false` because there's no browser URL for a redirect to land in on a
+ * native app.
+ *
+ * BUG FIX: `flowType: 'pkce'` is required for social-auth.ts's Google
+ * sign-in to work at all — `@supabase/auth-js` defaults to the IMPLICIT
+ * flow, which returns the session as a URL FRAGMENT
+ * (`#access_token=...&refresh_token=...`) after the OAuth redirect, never a
+ * `?code=` query param. social-auth.ts's Google flow reads
+ * `new URL(result.url).searchParams.get('code')` (matching
+ * exchangeCodeForSession's PKCE-flow contract) — under the implicit-flow
+ * default that's always null, so Google sign-in failed with "didn't return
+ * a real authorization code" on every attempt regardless of how correctly
+ * Google Cloud/Supabase's dashboard were configured. PKCE is also
+ * Supabase's own documented recommendation for native/mobile clients
+ * generally, not just a fix for this one symptom.
  */
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
@@ -32,5 +46,6 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+    flowType: 'pkce',
   },
 });
