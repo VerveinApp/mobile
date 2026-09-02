@@ -19,7 +19,13 @@ export type MovementPattern =
   | 'rotate' | 'jump' | 'overhead' | 'kneel' | 'floor' | 'run';
 export type RepStructure = 'discrete' | 'isometric_hold' | 'loaded_carry';
 export type RomDemand = 'partial' | 'moderate' | 'full';
-export type FeedbackResponse = 'too_easy' | 'just_right' | 'too_hard';
+// Widened from the original 3-value ('too_easy' | 'just_right' | 'too_hard')
+// to a 5-point scale — the three original strings are unchanged so every
+// already-stored session-history/calibration record stays a valid value of
+// this wider type with no migration needed. See personal-calibration.ts's
+// own DELTA_BY_FEEDBACK for how the two new outer values map to a bigger
+// (not just directional) calibration nudge.
+export type FeedbackResponse = 'much_too_easy' | 'too_easy' | 'just_right' | 'too_hard' | 'much_too_hard';
 export type PolicyId = 'P1' | 'P2' | 'P3' | 'P4' | 'P5';
 export type PolicyStatus = 'ran-interim' | 'no-mechanism-v1' | 'deferred-v1.1';
 export type FallbackTrigger = 'empty-filter' | 'energy-1' | 'p5-stacking-transition';

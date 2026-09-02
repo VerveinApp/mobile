@@ -1,11 +1,13 @@
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   Animated,
   KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -30,17 +32,24 @@ import { openBrowserAsync } from 'expo-web-browser';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { getCalibration, submitSessionFeedback } from '@/lib/calibration';
 import { getLastCheckIn, recordCheckIn, type CheckInRecord } from '@/lib/check-in-history';
-import { recordDecisionTrace } from '@/lib/decision-trace-log';
+import { getDecisionTraceLog, recordDecisionTrace } from '@/lib/decision-trace-log';
 import { TAG_LINES } from '@/lib/engine/explanation-string';
 import { DEFAULT_CALIBRATION } from '@/lib/engine/personal-calibration';
-import type { FeedbackResponse, UserCalibration } from '@/lib/engine/types';
+import type { Exercise, FeedbackResponse, UserCalibration } from '@/lib/engine/types';
 import { getCueFor, type ExerciseCue } from '@/lib/exercise-form-cues';
 import { formatTimerClock, getExerciseIntervals } from '@/lib/exercise-timer';
+import { buildSwapReplacement, getSwapCandidates } from '@/lib/exercise-swap';
 import { hapticImpactLight, hapticSelect, hapticSuccess, hapticWarning } from '@/lib/haptics';
-import { getPostSessionNote } from '@/lib/momentum';
+import { getCoachingInsightNote } from '@/lib/coaching-insights';
+import { getPlanFitNote } from '@/lib/plan-fit';
+import { recordCheckInAndShouldShowPaywall } from '@/lib/paywall-trigger';
+import { getLoadImprovementNote, getPacingTrendNote, getPostSessionNote } from '@/lib/momentum';
+import { recordPerformance } from '@/lib/exercise-performance';
 import { recordSessionForMilestones } from '@/lib/session-milestones';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
-import { getHealthReadinessModifier } from '@/lib/health-kit';
+import { estimateCaloriesBurned } from '@/lib/calorie-estimate';
+import { getHealthReadinessModifier, getHealthReadinessReasons, saveCompletedWorkout } from '@/lib/health-kit';
+import { usePremiumEntitlement } from '@/lib/purchases';
 import { computePlanPreview, type PlanExercise } from '@/lib/plan-preview';
 import { getTrainingState } from '@/lib/training-state';
 import type { TrainingState } from '@/lib/engine/training-state';
@@ -48,12 +57,14 @@ import { useFadeInEntering } from '@/lib/screen-transitions';
 import { exerciseLibrary } from '@/lib/engine/exercise-library';
 import {
   getSessionFeedback,
+  getSessionHistory,
   getSessionNote,
   recordSessionCompletion,
   saveSessionFeedback,
   saveSessionNote,
 } from '@/lib/session-history';
 import { SYMPTOM_TAG_LABELS, SYMPTOM_TAGS } from '@/lib/symptom-tags';
+import { TIME_AVAILABLE_LABELS, TIME_AVAILABLE_OPTIONS } from '@/lib/time-available';
 import { getTodaySession, saveTodaySession } from '@/lib/today-session';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
 import {
@@ -71,6 +82,7 @@ import {
 } from '@/components/auth/create-account-graphics';
 import { ENERGY_LABELS, EnergyGauge, type EnergyScore } from '@/components/home/energy-gauge';
 import { SuccessCheckmark } from '@/components/onboarding/success-checkmark';
+import { PremiumGate } from '@/components/premium-gate';
 import { useAppTheme } from '@/lib/theme-context';
 
 const CANVAS_WIDTH = 375;
@@ -87,9 +99,11 @@ const WEEKDAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', '
 // actually happened, since the multiplier itself only shows up in a future
 // session's explanation line, never retroactively on this one.
 const FEEDBACK_CONFIRM_TEXT: Record<FeedbackResponse, string> = {
+  much_too_easy: "Noted — tomorrow's session nudges up.",
   too_easy: "Noted — tomorrow's session nudges up slightly.",
   just_right: 'Noted — keeping things as they are.',
   too_hard: "Noted — tomorrow's session eases back slightly.",
+  much_too_hard: "Noted — tomorrow's session eases back.",
 };
 
 /**
@@ -199,8 +213,21 @@ export default function EnergyCheckInScreen() {
   const { colors, resolvedScheme } = useAppTheme();
   const hoverWashColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
   const styles = useMemo(() => createStyles(colors, hoverWashColor), [colors, hoverWashColor]);
+  const isPremium = usePremiumEntitlement();
 
   const [energy, setEnergy] = useState<EnergyScore | null>(null);
+  // A second, independent input alongside energy — someone can have high
+  // energy and 15 minutes, or low energy and an hour. null means no
+  // constraint picked (the plan runs at full energy-driven length), not "0
+  // minutes" — see plan-preview.ts's own timeAvailableMin param comment.
+  const [timeAvailableMin, setTimeAvailableMin] = useState<number | null>(null);
+  // Wires up BASE_TEMPLATES[5]'s own rhetorical question (explanation-
+  // string.ts's verbatim M11 copy) to a real mechanism — see plan-preview.ts's
+  // finisherAccepted param comment. Only ever meaningful at energy 5;
+  // handleEnergyChange resets it the moment energy changes away from 5, same
+  // "prevent the malformed state instead of validating around it" discipline
+  // as the symptom-tag reset just below it.
+  const [finisherAccepted, setFinisherAccepted] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [lastCheckIn, setLastCheckIn] = useState<CheckInRecord | null>(null);
   const [sessionState, setSessionState] = useState<'checkin' | 'resolved' | 'done'>('checkin');
@@ -231,10 +258,27 @@ export default function EnergyCheckInScreen() {
   const [calibration, setCalibration] = useState<UserCalibration | null>(null);
   const [trainingState, setTrainingState] = useState<TrainingState | null>(null);
   const [healthReadinessModifier, setHealthReadinessModifier] = useState(1);
+  const [healthReadinessReasons, setHealthReadinessReasons] = useState<
+    { rhrElevated: boolean; sleepDeficit: boolean } | undefined
+  >(undefined);
+  // The HealthKit-informed trim is a VerveIn Plus benefit — a free user's
+  // plan sees 1 (no adjustment), the same neutral default
+  // healthReadinessModifier itself starts at above before the real signal
+  // loads, rather than a second code path that skips reading HealthKit
+  // altogether. isPremium === null (still checking) falls back to 1 too —
+  // an unverified session should never silently get the paid trim.
+  const effectiveHealthReadinessModifier = isPremium ? healthReadinessModifier : 1;
+  const effectiveHealthReadinessReasons = isPremium ? healthReadinessReasons : undefined;
   // The one post-session question (M14-lite) — null until the user taps one
   // of the three buttons, then locked to whatever they picked (real feedback
   // isn't editable after the fact any more than the session itself is).
   const [feedbackGiven, setFeedbackGiven] = useState<FeedbackResponse | null>(null);
+  // True only the very first time this user ever submits feedback — the
+  // pacing-trend note (momentum.ts) can't fire for weeks, so without this,
+  // whoever churns in the first sessions never feels any proof that "pacing
+  // is a skill" is real, not just onboarding copy. This is that proof,
+  // moved as early as it can possibly land.
+  const [isFirstFeedback, setIsFirstFeedback] = useState(false);
   // Symptom tags picked on the check-in screen (M2/M5's real acute-tag
   // input) — only editable here, in the 'checkin' branch; once "Start
   // session" is tapped it's fixed for the day, same as energy itself.
@@ -242,6 +286,41 @@ export default function EnergyCheckInScreen() {
   // The post-session counterpart to Home's weekly recap — same "only ever
   // earned, never a streak" rule.
   const [postSessionNote, setPostSessionNote] = useState<string | null>(null);
+  const [estimatedCalories, setEstimatedCalories] = useState<number | null>(null);
+  // Entirely optional, per exercise — most sessions will log none of these.
+  // Keyed by exercise index (same indexing preview.exercises/
+  // completedExercises already use), raw string from the input so an
+  // in-progress "12" vs "120" keystroke never gets coerced mid-typing.
+  const [loggedWeightsKg, setLoggedWeightsKg] = useState<Record<number, string>>({});
+  const [loadImprovementNote, setLoadImprovementNote] = useState<string | null>(null);
+  // Mid-workout exercise swap (Vervein addition — see exercise-swap.ts's own
+  // doc comment for scope). Keyed by index into preview.exercises, same
+  // indexing as completedExercises/loggedWeightsKg — a same-session-only
+  // substitution, never persisted, so a fresh open of this screen (or any
+  // change to today's real inputs, which recomputes `preview` from scratch)
+  // naturally starts clean again rather than needing an explicit reset.
+  const [swappedExercises, setSwappedExercises] = useState<Record<number, PlanExercise>>({});
+  // Which exercise index the swap picker is open for — null means closed.
+  // Doubles as the sheet's visibility flag instead of a second boolean, since
+  // the two states can never disagree (there's never a picker open for "no
+  // particular exercise").
+  const [swapModalIndex, setSwapModalIndex] = useState<number | null>(null);
+  // Occasional, additive recognition when "how did that feel?" feedback has
+  // genuinely trended toward "just right" — see momentum.ts's
+  // getPacingTrendNote for why this is separate from postSessionNote rather
+  // than competing with it (a low-energy day and an improving pacing trend
+  // aren't mutually exclusive, so both should be able to show).
+  const [pacingTrendNote, setPacingTrendNote] = useState<string | null>(null);
+  // A rarer, retrospective cousin of pacingTrendNote — see
+  // coaching-insights.ts's own doc comment. Ephemeral by design like
+  // milestoneReached below: its own 14-day cooldown is what actually governs
+  // repeat visibility, not this component's lifecycle, so not restoring it
+  // on a same-day reopen is a feature of that design, not a gap.
+  const [coachingInsightNote, setCoachingInsightNote] = useState<string | null>(null);
+  // Same ephemeral-by-cooldown pattern as coachingInsightNote above — see
+  // plan-fit.ts's own doc comment for what this actually detects (a specific
+  // exercise recurrently excluded from recent sessions).
+  const [planFitNote, setPlanFitNote] = useState<string | null>(null);
   const [doneInsight, setDoneInsight] = useState<string | null>(null);
   // Ephemeral by design, never restored on reopen (see
   // recordSessionForMilestones' own doc comment) — only ever set the one
@@ -261,6 +340,19 @@ export default function EnergyCheckInScreen() {
   // 'done' at the end and this component branch unmounts.
   const isFinishingSessionRef = useRef(false);
   const [isFinishingSession, setIsFinishingSession] = useState(false);
+  // Same synchronous-ref + state-twin pattern as isFinishingSessionRef above,
+  // for the same reason: recordCheckInAndShouldShowPaywall() unconditionally
+  // increments a persistent counter on every call with no idempotency check,
+  // so a double-tap landing before the first call's awaits resolve would
+  // count one real session start as two toward the 3-check-in paywall
+  // trigger — silently pulling the paywall a session earlier than intended.
+  const isStartingSessionRef = useRef(false);
+  // Real wall-clock start time for the HealthKit workout write at Finish —
+  // see saveCompletedWorkout's own doc comment. Not persisted (same
+  // simplification as currentExerciseIndex above not surviving an app
+  // kill) — a resumed 'resolved' session just won't get a HealthKit entry,
+  // which is an acceptable gap for a nice-to-have sync.
+  const sessionStartedAtRef = useRef<Date | null>(null);
   // Guided per-exercise timer — exercises are worked one at a time, in
   // order; the next one only unlocks once the current one's timer reaches
   // 0 (the countdown itself lives in the ExerciseTimer subcomponent below,
@@ -293,26 +385,53 @@ export default function EnergyCheckInScreen() {
   const handleEnergyChange = (value: EnergyScore) => {
     setEnergy(value);
     if (value > 2 && symptomTags.size > 0) setSymptomTags(new Set());
+    // Same prevention-not-validation discipline as the symptom-tag reset
+    // above — the finisher only means something at energy 5.
+    if (value !== 5 && finisherAccepted) setFinisherAccepted(false);
+  };
+
+  const handleFinisherToggle = () => {
+    hapticSelect();
+    setFinisherAccepted((prev) => !prev);
+  };
+
+  const handleTimeAvailableChange = (value: number) => {
+    hapticSelect();
+    setTimeAvailableMin((prev) => (prev === value ? null : value));
   };
 
   useEffect(() => {
     (async () => {
-      const [loadedProfile, loadedLastCheckIn, loadedTodaySession, loadedCalibration, loadedTrainingState, loadedReadinessModifier] =
-        await Promise.all([
-          getProfile(),
-          getLastCheckIn(),
-          getTodaySession(),
-          getCalibration(),
-          getTrainingState(),
-          getHealthReadinessModifier(),
-        ]);
+      const [
+        loadedProfile,
+        loadedLastCheckIn,
+        loadedTodaySession,
+        loadedCalibration,
+        loadedTrainingState,
+        loadedReadinessModifier,
+        loadedReadinessReasons,
+      ] = await Promise.all([
+        getProfile(),
+        getLastCheckIn(),
+        getTodaySession(),
+        getCalibration(),
+        getTrainingState(),
+        getHealthReadinessModifier(),
+        getHealthReadinessReasons(),
+      ]);
       setProfile(loadedProfile);
       setLastCheckIn(loadedLastCheckIn);
       setCalibration(loadedCalibration);
       setTrainingState(loadedTrainingState);
       setHealthReadinessModifier(loadedReadinessModifier);
+      setHealthReadinessReasons(loadedReadinessReasons);
       if (loadedTodaySession) {
         setEnergy(loadedTodaySession.energy);
+        setTimeAvailableMin(loadedTodaySession.timeAvailableMin ?? null);
+        // Same guard as handleEnergyChange's own reset — a stored `true`
+        // alongside a non-5 energy (e.g. from before this reset existed)
+        // should never load straight into computePlanPreview as accepted.
+        setFinisherAccepted(loadedTodaySession.energy === 5 && (loadedTodaySession.finisherAccepted ?? false));
         setSessionState(loadedTodaySession.completed ? 'done' : 'resolved');
         // Restored regardless of completed/resolved — this feeds preview's
         // computation either way, not just the done-screen display fields.
@@ -332,6 +451,19 @@ export default function EnergyCheckInScreen() {
           if (existingNote) setNoteText(existingNote);
           if (existingFeedback) setFeedbackGiven(existingFeedback);
           setPostSessionNote(getPostSessionNote(loadedTodaySession.energy));
+          // Two independent AsyncStorage reads (session-history.ts and
+          // decision-trace-log.ts are separate keys, neither depends on the
+          // other), then two independent note computations over them — was
+          // four sequential round-trips stacked one after another, now two
+          // parallel batches.
+          const [history, traceLog] = await Promise.all([getSessionHistory(), getDecisionTraceLog()]);
+          setPacingTrendNote(getPacingTrendNote(history));
+          const [insightNote, fitNote] = await Promise.all([
+            getCoachingInsightNote(history),
+            getPlanFitNote(traceLog),
+          ]);
+          setCoachingInsightNote(insightNote);
+          setPlanFitNote(fitNote);
           setDoneInsight(insight);
         }
       }
@@ -345,6 +477,8 @@ export default function EnergyCheckInScreen() {
 
   const handleSubmitFeedback = async (response: FeedbackResponse) => {
     hapticSelect();
+    const priorHistory = await getSessionHistory();
+    setIsFirstFeedback(!priorHistory.some((e) => e.feedback !== undefined));
     setFeedbackGiven(response);
     saveSessionFeedback(localDateStr(), response);
     const updated = await submitSessionFeedback(response);
@@ -390,12 +524,16 @@ export default function EnergyCheckInScreen() {
   const skipCancelPress = useLiquidPress();
   const skipConfirmHover = useHoverFade();
   const skipConfirmPress = useLiquidPress();
+  const feedbackMuchTooEasyHover = useHoverFade();
+  const feedbackMuchTooEasyPress = useLiquidPress();
   const feedbackTooEasyHover = useHoverFade();
   const feedbackTooEasyPress = useLiquidPress();
   const feedbackJustRightHover = useHoverFade();
   const feedbackJustRightPress = useLiquidPress();
   const feedbackTooHardHover = useHoverFade();
   const feedbackTooHardPress = useLiquidPress();
+  const feedbackMuchTooHardHover = useHoverFade();
+  const feedbackMuchTooHardPress = useLiquidPress();
   const backToHomeHover = useHoverFade();
   const backToHomePress = useLiquidPress();
 
@@ -415,6 +553,43 @@ export default function EnergyCheckInScreen() {
   }, [reducedMotion, restLinkPulse, showRestDay]);
   const restLinkAnimatedStyle = useAnimatedStyle(() => ({ opacity: restLinkPulse.value }));
 
+  // showRestDay flips true only after the async profile load resolves —
+  // never on the very first render — and content that arrives that way
+  // doesn't get picked up by iOS's accessibility tree on its own (same real,
+  // narrow platform gap as handleOpenSwap's announcement below). Confirmed
+  // ruled out against a clean app install, each a genuinely different
+  // mechanism: (1) a key-forced remount of the rest-day subtree; (2)
+  // AccessibilityInfo.setAccessibilityFocus + findNodeHandle, called
+  // synchronously in this effect; (3) the Fabric-correct replacement for
+  // that same call — sendAccessibilityEvent(ref.current, 'focus') (the
+  // host-component ref directly, not a findNodeHandle() numeric tag, which
+  // is the old-architecture calling convention setAccessibilityFocus still
+  // uses under the hood) — deferred two animation frames past the mount to
+  // rule out a component-view-registry timing race. All three post the
+  // identical native UIAccessibilityLayoutChangedNotification
+  // (RCTMountingManager.mm's synchronouslyDispatchAccessbilityEventOnUIThread
+  // does this for both the legacy and modern JS APIs), so the fact that even
+  // the timing-corrected, architecture-correct version had no durable effect
+  // — Maestro's own tapOn-by-label intermittently found the element but the
+  // underlying onPress didn't reliably fire — points at something below
+  // this notification working as intended, plausibly Reanimated's
+  // FadeIn/FadeOut wrapping the whole subject interfering with how the OS
+  // tree treats the wrapped hierarchy, not a timing or API-choice problem.
+  // This announcement remains the one piece that's a real, if partial,
+  // improvement: it does get spoken, even though discovering "Check in
+  // anyway" by swiping afterward still doesn't work. Latched via a ref so
+  // this only fires on the actual false→true transition, not on every
+  // render where showRestDay happens to already be true.
+  const wasRestDayRef = useRef(showRestDay);
+  useEffect(() => {
+    if (showRestDay && !wasRestDayRef.current) {
+      AccessibilityInfo.announceForAccessibility(
+        'Rest day. No session scheduled today — recovery is part of the plan.'
+      );
+    }
+    wasRestDayRef.current = showRestDay;
+  }, [showRestDay]);
+
   // Guards against comparing today against itself: recordCheckIn overwrites
   // the single stored "last check-in" record the moment today's check-in is
   // submitted, so any path that re-reads it later the same day would
@@ -422,6 +597,17 @@ export default function EnergyCheckInScreen() {
   // comparisonText below and the gauge's ghost marker. Computed here (not
   // just where it's used) so it's available before `preview`'s useMemo too.
   const realLastCheckIn = lastCheckIn && lastCheckIn.date !== localDateStr() ? lastCheckIn : null;
+  // Feeds plan-preview.ts's daysSinceLastCheckIn param (Vervein addition —
+  // see that param's own doc comment for why this only ever changes the
+  // explanation's wording, never the plan itself). UTC midnight parsing,
+  // same pattern engine/training-state.ts's own date math already uses, so
+  // this can't drift by a day around a DST boundary the way plain `new
+  // Date(dateStr)` local-time parsing sometimes does.
+  const daysSinceLastCheckIn = realLastCheckIn
+    ? Math.round(
+        (Date.parse(`${localDateStr()}T00:00:00Z`) - Date.parse(`${realLastCheckIn.date}T00:00:00Z`)) / 86400000
+      )
+    : undefined;
   // Stricter than realLastCheckIn: computePlanPreview's yesterdayEnergy
   // param makes a specific factual claim ("yesterday") the engine's
   // explanation states as fact, not comparisonText's looser "last time"
@@ -462,11 +648,27 @@ export default function EnergyCheckInScreen() {
             calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
             Array.from(symptomTags),
             trainingState ?? undefined,
-            healthReadinessModifier,
-            verifiedYesterdayEnergy
+            effectiveHealthReadinessModifier,
+            verifiedYesterdayEnergy,
+            timeAvailableMin ?? undefined,
+            daysSinceLastCheckIn,
+            finisherAccepted,
+            effectiveHealthReadinessReasons
           )
         : null,
-    [profile, energy, calibration, symptomTags, trainingState, healthReadinessModifier, verifiedYesterdayEnergy]
+    [
+      profile,
+      energy,
+      calibration,
+      symptomTags,
+      trainingState,
+      effectiveHealthReadinessModifier,
+      verifiedYesterdayEnergy,
+      timeAvailableMin,
+      daysSinceLastCheckIn,
+      finisherAccepted,
+      effectiveHealthReadinessReasons,
+    ]
   );
   // The baseline ("Good") session — comparing against it is what makes the
   // adaptation legible on the resolved view, not just implied by a sentence.
@@ -481,9 +683,14 @@ export default function EnergyCheckInScreen() {
         calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
         Array.from(symptomTags),
         undefined,
-        healthReadinessModifier
+        effectiveHealthReadinessModifier,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        effectiveHealthReadinessReasons
       ),
-    [profile, calibration, symptomTags, healthReadinessModifier]
+    [profile, calibration, symptomTags, effectiveHealthReadinessModifier, effectiveHealthReadinessReasons]
   );
   const exerciseDelta = preview ? baseline.exerciseCount - preview.exerciseCount : 0;
   // BUG FIX: exerciseDelta alone can't tell "genuinely standard" apart from
@@ -528,7 +735,17 @@ export default function EnergyCheckInScreen() {
           : 'Lower than last time.'
       : null;
 
-  const currentExercise = preview?.exercises[currentExerciseIndex] ?? null;
+  // Today's real plan with any mid-workout swaps laid over it by index —
+  // every other read of "today's exercises" below uses this, not
+  // preview.exercises directly, so a swap stays consistent everywhere it's
+  // reflected (the live timer, the list below it, the workout log, the
+  // calorie estimate) instead of some readers seeing the original and others
+  // seeing the replacement.
+  const sessionExercises = useMemo(
+    () => (preview ? preview.exercises.map((ex, i) => swappedExercises[i] ?? ex) : []),
+    [preview, swappedExercises]
+  );
+  const currentExercise = sessionExercises[currentExerciseIndex] ?? null;
   const isLastExercise = preview ? currentExerciseIndex >= preview.exercises.length - 1 : false;
   // Derived, not separately tracked — completedExercises is already the
   // real source of truth for "is this one done," so there's no second copy
@@ -554,7 +771,7 @@ export default function EnergyCheckInScreen() {
   // now" from whichever completed-set is current, so the two call sites
   // can't drift into different shapes for the same data.
   const buildWorkoutLogExercises = (completed: Set<number>): WorkoutLogExercise[] =>
-    (preview?.exercises ?? []).map((exercise, index) => ({
+    sessionExercises.map((exercise, index) => ({
       name: exercise.name,
       bodyArea: exercise.bodyArea,
       completed: completed.has(index),
@@ -611,23 +828,86 @@ export default function EnergyCheckInScreen() {
     setShowSkipConfirm(false);
   };
 
-  const handleStartSession = () => {
-    if (energy === null) return;
+  // Candidates for whichever index the swap sheet is currently open for —
+  // computed lazily (only while the sheet is actually up), not on every
+  // render just to decide whether a "Swap" affordance should be visible;
+  // the affordance itself is always shown while an exercise is unresolved,
+  // and an empty result here just means the sheet's own empty state renders
+  // instead of a picker list.
+  const swapModalCandidates = useMemo(() => {
+    if (swapModalIndex === null || !preview) return [];
+    const target = sessionExercises[swapModalIndex];
+    if (!target) return [];
+    return getSwapCandidates(
+      target,
+      preview.constraints,
+      sessionExercises.map((e) => e.id)
+    );
+  }, [swapModalIndex, preview, sessionExercises]);
+
+  const handleOpenSwap = (index: number) => {
+    hapticSelect();
+    setSwapModalIndex(index);
+    // The swap sheet's content is gated behind this state flip, which fires
+    // well after this screen's initial mount — iOS's accessibility tree
+    // doesn't pick up content added that way on its own (same real, narrow
+    // platform gap as showRestDay's announcement above — setAccessibilityFocus
+    // and a key-forced remount were both tried there and ruled out against a
+    // clean app install, so this announcement is left as the one real, if
+    // partial, improvement rather than repeating disproven attempts here).
+    AccessibilityInfo.announceForAccessibility('Swap this exercise');
+  };
+
+  const handleCloseSwap = () => {
+    hapticImpactLight();
+    setSwapModalIndex(null);
+  };
+
+  // Ratio-scales the chosen candidate against the ORIGINAL engine-delivered
+  // exercise at this index (preview.exercises, never a prior swap already
+  // sitting in swappedExercises) — see buildSwapReplacement's own doc
+  // comment for why: re-deriving from the real adapted/base ratio every time
+  // avoids compounding rounding error across more than one swap at the same
+  // index.
+  const handleSelectSwap = (candidate: Exercise) => {
+    if (swapModalIndex === null || !preview) return;
+    hapticSelect();
+    const original = preview.exercises[swapModalIndex];
+    const originalFull = exerciseLibrary.getById(original.id) ?? null;
+    const replacement = buildSwapReplacement(candidate, original, originalFull);
+    setSwappedExercises((prev) => ({ ...prev, [swapModalIndex]: replacement }));
+    setSwapModalIndex(null);
+  };
+
+  const handleStartSession = async () => {
+    if (energy === null || isStartingSessionRef.current) return;
+    isStartingSessionRef.current = true;
+    sessionStartedAtRef.current = new Date();
     setCurrentExerciseIndex(0);
     if (energy === 1) hapticWarning();
     else if (energy === 5) hapticSuccess();
     else hapticImpactLight();
     recordCheckIn(energy);
-    saveTodaySession(energy, false, Array.from(symptomTags));
+    saveTodaySession(energy, false, Array.from(symptomTags), timeAvailableMin ?? undefined, finisherAccepted);
     // The honest starting point for today's completion signal — a real
     // 'skipped' entry the moment the session begins (zero exercises done
     // yet), overwritten with the real status as exercises complete and
     // again at Finish. Without this, a session someone starts and then
     // abandons before finishing a single exercise would leave no entry at
     // all — indistinguishable from a day they never opened the app.
-    saveWorkoutLog(localDateStr(), buildWorkoutLogExercises(new Set()));
-    recordSessionCompletion(false, energy, 'skipped');
+    // Awaited (not fire-and-forget) so this baseline entry is guaranteed
+    // written before the UI moves on — otherwise backgrounding the app in
+    // the instant right after tapping Start could lose it entirely.
+    await saveWorkoutLog(localDateStr(), buildWorkoutLogExercises(new Set()));
+    await recordSessionCompletion(false, energy, 'skipped');
     setSessionState('resolved');
+    // Fires exactly once, at the real third check-in — see paywall-
+    // trigger.ts's own doc comment for why this counts check-ins
+    // specifically (not completions, not session-history.ts's log, which
+    // also includes retroactively-logged past sessions). Pushed after
+    // setSessionState so dismissing it lands right back on the resolved
+    // session, ready to start — never blocking the workout itself.
+    if (await recordCheckInAndShouldShowPaywall()) router.push('/paywall' as never);
   };
 
   const handleFinishSession = async (force = false) => {
@@ -637,9 +917,10 @@ export default function EnergyCheckInScreen() {
     isFinishingSessionRef.current = true;
     setIsFinishingSession(true);
     hapticSuccess();
-    // Re-passes the same tags picked at Start — saveTodaySession replaces
-    // the whole record each call, so omitting this would silently wipe them.
-    saveTodaySession(energy, true, Array.from(symptomTags));
+    // Re-passes the same tags/time/finisher choice picked at Start —
+    // saveTodaySession replaces the whole record each call, so omitting any
+    // of them would silently wipe them.
+    saveTodaySession(energy, true, Array.from(symptomTags), timeAvailableMin ?? undefined, finisherAccepted);
     const finalExercises = buildWorkoutLogExercises(completedExercises);
     const status = getCompletionStatus(finalExercises);
     const completedSomething = status !== 'skipped';
@@ -648,7 +929,73 @@ export default function EnergyCheckInScreen() {
     // total — never a skipped one, so this can't be inflated by opening the
     // app or abandoning a session before doing anything.
     if (completedSomething) setMilestoneReached(await recordSessionForMilestones());
+    // Same "real completion only" rule as the milestone above — a skipped
+    // session never gets written to Apple Health. Fire-and-forget: this is
+    // a nice-to-have sync (see saveCompletedWorkout's own doc comment), not
+    // something worth making Finish wait on.
+    if (completedSomething && sessionStartedAtRef.current) {
+      // Only the exercises actually checked off, each with its own real
+      // intensity/duration — see estimateCaloriesBurned's own doc comment
+      // for why this isn't a single flat per-session number. Weight is the
+      // only profile field this needs (not height/age — those feed a
+      // different metric, daily BMR, not a single workout's active energy);
+      // no honest estimate exists without it, so this stays undefined
+      // rather than guessing a default bodyweight.
+      const weightKg = Number(profile?.weightKg);
+      const caloriesForSession =
+        weightKg > 0
+          ? estimateCaloriesBurned(
+              sessionExercises
+                .filter((_, index) => completedExercises.has(index))
+                .map((ex) => ({ intensity: ex.intensity, durationMin: ex.durationMin })),
+              weightKg
+            )
+          : null;
+      setEstimatedCalories(caloriesForSession);
+      saveCompletedWorkout(
+        profile?.goal,
+        sessionStartedAtRef.current,
+        new Date(),
+        caloriesForSession ?? undefined
+      );
+    }
+    // Entirely separate from completedSomething above — a weight can be
+    // logged against an exercise regardless of whether the session as a
+    // whole reads as done/partial/skipped, since it's about that one
+    // exercise, not the session. Only ever the exercises someone actually
+    // typed a real, positive number for; everything else in
+    // loggedWeightsKg (empty strings, exercises nobody touched) is
+    // silently skipped, matching this being fully optional per exercise.
+    const loggedEntries = Object.entries(loggedWeightsKg)
+      .map(([indexStr, weightText]) => {
+        const index = Number(indexStr);
+        const exercise = sessionExercises[index];
+        const weightKg = Number(weightText);
+        const reps = exercise?.reps;
+        if (!exercise || !(weightKg > 0) || typeof reps !== 'number') return null;
+        return { exerciseName: exercise.name, weightKg, reps };
+      })
+      .filter((entry): entry is { exerciseName: string; weightKg: number; reps: number } => entry !== null);
+    if (loggedEntries.length > 0) {
+      const results = await Promise.all(
+        loggedEntries.map(async ({ exerciseName, weightKg, reps }) => ({
+          exerciseName,
+          result: await recordPerformance(exerciseName, weightKg, reps),
+        }))
+      );
+      setLoadImprovementNote(getLoadImprovementNote(results));
+    }
     setPostSessionNote(getPostSessionNote(energy));
+    // Same parallelization as the initial-load effect above — two
+    // independent reads, then two independent note computations over them.
+    const [historyForNotes, traceLogForNotes] = await Promise.all([getSessionHistory(), getDecisionTraceLog()]);
+    setPacingTrendNote(getPacingTrendNote(historyForNotes));
+    const [insightNote, fitNote] = await Promise.all([
+      getCoachingInsightNote(historyForNotes),
+      getPlanFitNote(traceLogForNotes),
+    ]);
+    setCoachingInsightNote(insightNote);
+    setPlanFitNote(fitNote);
     // Awaited (unlike the old fire-and-forget) so today's exercises are
     // already in storage before getBodyAreaInsight reads the breakdown —
     // otherwise the done screen could render one save-cycle stale.
@@ -666,10 +1013,14 @@ export default function EnergyCheckInScreen() {
   const renderLogoMark = (marginBottom: number) => (
     <View style={[styles.logoMarkFlow, { marginBottom }]} pointerEvents="none">
       <View style={styles.logoAccent}>
-        <LogoMarkAccentGraphic width={57.78} height={66.7} color={colors.text} />
+        {/* Width derived from the graphic's own viewBox ratio (28.6525:36.106)
+            at this fixed height — the previous 57.78 stretched it off-ratio
+            compared to every other rendering of this same mark in the app. */}
+        <LogoMarkAccentGraphic width={52.93} height={66.7} color={colors.text} />
       </View>
       <View style={styles.logoCheck}>
-        <LogoMarkGraphic width={43.34} height={57.06} color={colors.text} />
+        {/* Same fix, this graphic's own viewBox ratio is 21.8156:30.6813. */}
+        <LogoMarkGraphic width={40.57} height={57.06} color={colors.text} />
       </View>
     </View>
   );
@@ -684,10 +1035,10 @@ export default function EnergyCheckInScreen() {
         {showRestDay ? (
           <View style={styles.logoMark} pointerEvents="none">
             <View style={styles.logoAccent}>
-              <LogoMarkAccentGraphic width={57.78} height={66.7} color={colors.text} />
+              <LogoMarkAccentGraphic width={52.93} height={66.7} color={colors.text} />
             </View>
             <View style={styles.logoCheck}>
-              <LogoMarkGraphic width={43.34} height={57.06} color={colors.text} />
+              <LogoMarkGraphic width={40.57} height={57.06} color={colors.text} />
             </View>
           </View>
         ) : null}
@@ -703,7 +1054,13 @@ export default function EnergyCheckInScreen() {
               No session scheduled today — recovery is part of the plan.
             </Text>
 
-            <Pressable style={styles.restDayLinkHit} onPress={() => setShowAnyway(true)} hitSlop={12}>
+            <Pressable
+              style={styles.restDayLinkHit}
+              onPress={() => setShowAnyway(true)}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="Check in anyway"
+            >
               <ReanimatedAnimated.Text
                 style={[styles.restDayLinkText, restLinkAnimatedStyle]}
                 maxFontSizeMultiplier={1.3}
@@ -742,6 +1099,32 @@ export default function EnergyCheckInScreen() {
               />
             </View>
 
+            <View style={styles.timeAvailableSection}>
+              <Text style={styles.noteLabel} maxFontSizeMultiplier={1.3}>
+                HOW MUCH TIME DO YOU HAVE? (OPTIONAL)
+              </Text>
+              <View style={styles.symptomChipRow}>
+                {TIME_AVAILABLE_OPTIONS.map((minutes) => {
+                  const active = timeAvailableMin === minutes;
+                  return (
+                    <Pressable
+                      key={minutes}
+                      style={[styles.timePill, active && styles.timePillActive]}
+                      onPress={() => handleTimeAvailableChange(minutes)}
+                      hitSlop={2}
+                    >
+                      <Text
+                        style={[styles.timePillText, active && styles.timePillTextActive]}
+                        maxFontSizeMultiplier={1.2}
+                      >
+                        {TIME_AVAILABLE_LABELS[minutes]}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
             {preview ? (
               <ReanimatedAnimated.View key={energy} entering={FadeIn.duration(220)} style={styles.checkinExplanationBlock}>
                 <Text style={styles.explanationText} maxFontSizeMultiplier={1.4}>
@@ -755,31 +1138,48 @@ export default function EnergyCheckInScreen() {
               </ReanimatedAnimated.View>
             ) : null}
 
+            {energy === 5 ? (
+              <Pressable
+                style={[styles.timePill, finisherAccepted && styles.timePillActive, styles.finisherPill]}
+                onPress={handleFinisherToggle}
+                hitSlop={4}
+              >
+                <Text
+                  style={[styles.timePillText, finisherAccepted && styles.timePillTextActive]}
+                  maxFontSizeMultiplier={1.2}
+                >
+                  {finisherAccepted ? 'Finisher added' : 'Add a finisher set'}
+                </Text>
+              </Pressable>
+            ) : null}
+
             {energy !== null && energy <= 2 ? (
               <View style={styles.symptomSection}>
-                <Text style={styles.noteLabel} maxFontSizeMultiplier={1.3}>
-                  ANYTHING GOING ON TODAY? (OPTIONAL)
-                </Text>
-                <View style={styles.symptomChipRow}>
-                  {SYMPTOM_TAGS.map((tag) => {
-                    const active = symptomTags.has(tag);
-                    return (
-                      <Pressable
-                        key={tag}
-                        style={[styles.symptomChip, active && styles.symptomChipActive]}
-                        onPress={() => toggleSymptomTag(tag)}
-                        hitSlop={2}
-                      >
-                        <Text
-                          style={[styles.symptomChipText, active && styles.symptomChipTextActive]}
-                          maxFontSizeMultiplier={1.2}
+                <PremiumGate isPremium={isPremium} label="Symptom tracking">
+                  <Text style={styles.noteLabel} maxFontSizeMultiplier={1.3}>
+                    ANYTHING GOING ON TODAY? (OPTIONAL)
+                  </Text>
+                  <View style={styles.symptomChipRow}>
+                    {SYMPTOM_TAGS.map((tag) => {
+                      const active = symptomTags.has(tag);
+                      return (
+                        <Pressable
+                          key={tag}
+                          style={[styles.symptomChip, active && styles.symptomChipActive]}
+                          onPress={() => toggleSymptomTag(tag)}
+                          hitSlop={2}
                         >
-                          {SYMPTOM_TAG_LABELS[tag]}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                          <Text
+                            style={[styles.symptomChipText, active && styles.symptomChipTextActive]}
+                            maxFontSizeMultiplier={1.2}
+                          >
+                            {SYMPTOM_TAG_LABELS[tag]}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </PremiumGate>
               </View>
             ) : null}
 
@@ -907,7 +1307,14 @@ export default function EnergyCheckInScreen() {
                 mid-frame. */}
             {currentExercise ? (
               <ReanimatedAnimated.View
-                key={currentExerciseIndex}
+                // Includes the exercise id, not just the index — a swap
+                // replaces the exercise AT this same index, and ExerciseTimer
+                // computes its countdown intervals once, on mount
+                // (getExerciseIntervals(exercise) inside a lazy useState
+                // initializer) — without the id in the key, swapping mid-
+                // exercise would leave it silently running the OLD
+                // exercise's timer under the new one's name.
+                key={`${currentExerciseIndex}-${currentExercise.id}`}
                 entering={FadeIn.duration(180)}
                 exiting={FadeOut.duration(140)}
               >
@@ -915,6 +1322,7 @@ export default function EnergyCheckInScreen() {
                   <ExerciseTimer
                     exercise={currentExercise}
                     onComplete={() => handleExerciseTimerComplete(currentExerciseIndex)}
+                    onSwap={() => handleOpenSwap(currentExerciseIndex)}
                     styles={styles}
                     colors={colors}
                   />
@@ -926,6 +1334,35 @@ export default function EnergyCheckInScreen() {
                     <Text style={styles.timerDoneText} maxFontSizeMultiplier={1.2}>
                       Done — {isLastExercise ? 'finish below' : 'next exercise unlocked'}
                     </Text>
+                    {/* Entirely optional and skippable — see
+                        loggedWeightsKg's own comment. Only shown for
+                        exercises that actually take external load
+                        (equipment !== 'none') with a real numeric rep
+                        count (repStructure ranges/null reps can't feed
+                        the Epley 1RM estimate honestly). Prescribed reps,
+                        not a second input asking what was actually
+                        done — one field is the deliberate friction
+                        tradeoff here, matching how little else in this
+                        app asks the user to type numbers in. */}
+                    {exerciseLibrary.getById(currentExercise.id)?.equipment !== 'none' &&
+                    typeof currentExercise.reps === 'number' ? (
+                      <View style={styles.loadInputRow}>
+                        <Text style={styles.loadInputLabel} maxFontSizeMultiplier={1.2}>
+                          Weight used (optional)
+                        </Text>
+                        <TextInput
+                          style={styles.loadInput}
+                          value={loggedWeightsKg[currentExerciseIndex] ?? ''}
+                          onChangeText={(text) =>
+                            setLoggedWeightsKg((prev) => ({ ...prev, [currentExerciseIndex]: text }))
+                          }
+                          placeholder="kg"
+                          placeholderTextColor={colors.textTertiary}
+                          keyboardType="decimal-pad"
+                          maxLength={5}
+                        />
+                      </View>
+                    ) : null}
                   </View>
                 )}
               </ReanimatedAnimated.View>
@@ -936,7 +1373,7 @@ export default function EnergyCheckInScreen() {
               <Text style={styles.exerciseLogHint} maxFontSizeMultiplier={1.3}>
                 One at a time — finish the timer above or skip it, whichever works today
               </Text>
-              {preview.exercises.map((exercise, index) => {
+              {sessionExercises.map((exercise, index) => {
                 const isDone = completedExercises.has(index);
                 const isCurrent = index === currentExerciseIndex && !isDone;
                 const isUpcoming = index > currentExerciseIndex;
@@ -1133,6 +1570,60 @@ export default function EnergyCheckInScreen() {
                 </Pressable>
               </Pressable>
             </Modal>
+
+            <Modal
+              visible={swapModalIndex !== null}
+              transparent
+              animationType="fade"
+              onRequestClose={handleCloseSwap}
+              statusBarTranslucent
+            >
+              <Pressable style={styles.skipConfirmBackdrop} onPress={handleCloseSwap}>
+                <Pressable style={styles.swapModalCard} onPress={() => {}}>
+                  <Text style={styles.skipConfirmTitle} maxFontSizeMultiplier={1.3}>
+                    Swap this exercise
+                  </Text>
+                  {swapModalCandidates.length === 0 ? (
+                    <Text style={styles.skipConfirmBody} maxFontSizeMultiplier={1.4}>
+                      No same-category alternative fits today&apos;s plan right now.
+                    </Text>
+                  ) : (
+                    <ScrollView style={styles.swapModalList} showsVerticalScrollIndicator={false}>
+                      {swapModalCandidates.map((candidate, index) => (
+                        <Pressable
+                          key={candidate.id}
+                          style={[
+                            styles.swapModalRow,
+                            index < swapModalCandidates.length - 1 && styles.swapModalRowDivider,
+                          ]}
+                          onPress={() => handleSelectSwap(candidate)}
+                        >
+                          <Text style={styles.swapModalRowName} maxFontSizeMultiplier={1.3}>
+                            {candidate.name}
+                          </Text>
+                          <Text style={styles.swapModalRowStat} maxFontSizeMultiplier={1.3}>
+                            {formatExerciseStat({
+                              sets: candidate.base_sets,
+                              reps: candidate.base_reps,
+                              durationMin: candidate.base_duration_min,
+                            })}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  )}
+                  <Pressable
+                    style={styles.swapModalCancelHit}
+                    onPress={handleCloseSwap}
+                    hitSlop={8}
+                  >
+                    <Text style={styles.swapModalCancelText} maxFontSizeMultiplier={1.2}>
+                      Cancel
+                    </Text>
+                  </Pressable>
+                </Pressable>
+              </Pressable>
+            </Modal>
           </ReanimatedAnimated.ScrollView>
         ) : (
           <ReanimatedAnimated.ScrollView
@@ -1157,9 +1648,31 @@ export default function EnergyCheckInScreen() {
                 entering={FadeIn.duration(240)}
                 style={styles.milestoneText}
                 maxFontSizeMultiplier={1.2}
+                accessibilityLabel={`${milestoneReached} session${milestoneReached === 1 ? '' : 's'} logged so far`}
               >
                 {milestoneReached} session{milestoneReached === 1 ? '' : 's'} logged so far
               </ReanimatedAnimated.Text>
+            ) : null}
+
+            {/* The milestone moment, not signup, is where a referral ask
+                actually lands — see session-milestones.ts's own MILESTONES
+                list for what counts as one. Reuses doneInsightHit's exact
+                pressable-sentence pattern for visual consistency with the
+                "See Progress" link above/below it, and never appears on a
+                session that isn't a real milestone (no separate nag). */}
+            {milestoneReached ? (
+              <Pressable
+                style={styles.doneInsightHit}
+                onPress={() => {
+                  hapticSelect();
+                  router.push('/referral' as never);
+                }}
+                hitSlop={6}
+              >
+                <Text style={styles.doneInsightText} maxFontSizeMultiplier={1.3}>
+                  Bring a training partner along. <Text style={styles.doneInsightLink}>Invite a friend</Text>
+                </Text>
+              </Pressable>
             ) : null}
             <SuccessCheckmark size={110} />
             <Text style={styles.doneTitle} maxFontSizeMultiplier={1.3}>
@@ -1168,6 +1681,12 @@ export default function EnergyCheckInScreen() {
             <Text style={styles.doneSubtitle} maxFontSizeMultiplier={1.4}>
               {postSessionNote ?? 'Nice work. See you tomorrow.'}
             </Text>
+
+            {estimatedCalories !== null ? (
+              <Text style={styles.calorieEstimateText} maxFontSizeMultiplier={1.3}>
+                ~{estimatedCalories} cal · estimated
+              </Text>
+            ) : null}
 
             {doneInsight ? (
               <Pressable
@@ -1184,16 +1703,80 @@ export default function EnergyCheckInScreen() {
               </Pressable>
             ) : null}
 
+            {pacingTrendNote ? (
+              <ReanimatedAnimated.Text
+                entering={FadeIn.duration(240)}
+                style={styles.milestoneText}
+                maxFontSizeMultiplier={1.2}
+              >
+                {pacingTrendNote}
+              </ReanimatedAnimated.Text>
+            ) : null}
+
+            {/* Plus-gated, same tier as the earned insights below — the
+                Progress tab's own Strength Progress card (which this same
+                logged data also feeds) is gated the same way, so this
+                shouldn't tease it for free right here. */}
+            {isPremium && loadImprovementNote ? (
+              <ReanimatedAnimated.Text
+                entering={FadeIn.duration(240)}
+                style={styles.milestoneText}
+                maxFontSizeMultiplier={1.2}
+              >
+                {loadImprovementNote}
+              </ReanimatedAnimated.Text>
+            ) : null}
+
+            {/* Earned insights are a VerveIn Plus benefit — gated the same
+                way the cooldowns above already gate these notes to "not
+                every session," rather than a locked teaser card. A free
+                user simply doesn't see this note fire this time, matching
+                this app's own "silence is valid" rule for exactly these
+                two functions (coaching-insights.ts, plan-fit.ts) instead of
+                announcing an absence. */}
+            {isPremium && coachingInsightNote ? (
+              <ReanimatedAnimated.Text
+                entering={FadeIn.duration(240)}
+                style={styles.milestoneText}
+                maxFontSizeMultiplier={1.2}
+              >
+                {coachingInsightNote}
+              </ReanimatedAnimated.Text>
+            ) : null}
+
+            {isPremium && planFitNote ? (
+              <ReanimatedAnimated.Text
+                entering={FadeIn.duration(240)}
+                style={styles.milestoneText}
+                maxFontSizeMultiplier={1.2}
+              >
+                {planFitNote}
+              </ReanimatedAnimated.Text>
+            ) : null}
+
             <View style={styles.feedbackSection}>
               <Text style={styles.noteLabel} maxFontSizeMultiplier={1.3}>
                 HOW DID THAT FEEL?
               </Text>
               {feedbackGiven ? (
                 <Text style={styles.feedbackConfirmText} maxFontSizeMultiplier={1.3}>
-                  {FEEDBACK_CONFIRM_TEXT[feedbackGiven]}
+                  {isFirstFeedback
+                    ? "That's your first pacing call — we'll get sharper together."
+                    : FEEDBACK_CONFIRM_TEXT[feedbackGiven]}
                 </Text>
               ) : (
                 <View style={styles.feedbackButtonRow}>
+                  <Pressable
+                    style={styles.feedbackButton}
+                    onPress={() => handleSubmitFeedback('much_too_easy')}
+                    onHoverIn={feedbackMuchTooEasyHover.onHoverIn}
+                    onHoverOut={feedbackMuchTooEasyHover.onHoverOut}
+                    onPressIn={feedbackMuchTooEasyPress.onPressIn}
+                    onPressOut={feedbackMuchTooEasyPress.onPressOut}
+                  >
+                    <PillWash hover={feedbackMuchTooEasyHover} press={feedbackMuchTooEasyPress} radius={8} styles={styles} />
+                    <Text style={styles.feedbackButtonText} maxFontSizeMultiplier={1.2}>Way too easy</Text>
+                  </Pressable>
                   <Pressable
                     style={styles.feedbackButton}
                     onPress={() => handleSubmitFeedback('too_easy')}
@@ -1226,6 +1809,17 @@ export default function EnergyCheckInScreen() {
                   >
                     <PillWash hover={feedbackTooHardHover} press={feedbackTooHardPress} radius={8} styles={styles} />
                     <Text style={styles.feedbackButtonText} maxFontSizeMultiplier={1.2}>Too hard</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.feedbackButton}
+                    onPress={() => handleSubmitFeedback('much_too_hard')}
+                    onHoverIn={feedbackMuchTooHardHover.onHoverIn}
+                    onHoverOut={feedbackMuchTooHardHover.onHoverOut}
+                    onPressIn={feedbackMuchTooHardPress.onPressIn}
+                    onPressOut={feedbackMuchTooHardPress.onPressOut}
+                  >
+                    <PillWash hover={feedbackMuchTooHardHover} press={feedbackMuchTooHardPress} radius={8} styles={styles} />
+                    <Text style={styles.feedbackButtonText} maxFontSizeMultiplier={1.2}>Way too hard</Text>
                   </Pressable>
                 </View>
               )}
@@ -1380,11 +1974,13 @@ function CueContent({ cue, styles }: { cue: ExerciseCue; styles: ReturnType<type
 function ExerciseTimer({
   exercise,
   onComplete,
+  onSwap,
   styles,
   colors,
 }: {
   exercise: PlanExercise;
   onComplete: () => void;
+  onSwap: () => void;
   styles: ReturnType<typeof createStyles>;
   colors: ReturnType<typeof useAppTheme>['colors'];
 }) {
@@ -1455,6 +2051,8 @@ function ExerciseTimer({
   const watchFormPress = useLiquidPress();
   const howToHover = useHoverFade();
   const howToPress = useLiquidPress();
+  const swapHover = useHoverFade();
+  const swapPress = useLiquidPress();
   const startNextHover = useHoverFade();
   const startNextPress = useLiquidPress();
   const pauseHover = useHoverFade();
@@ -1533,6 +2131,8 @@ function ExerciseTimer({
           onHoverOut={watchFormHover.onHoverOut}
           onPressIn={watchFormPress.onPressIn}
           onPressOut={watchFormPress.onPressOut}
+          accessibilityRole="button"
+          accessibilityLabel="Watch form"
         >
           <Animated.View style={[styles.timerWatchFormButton, textDimStyle(watchFormHover, watchFormPress)]}>
             <SymbolView name="play.rectangle" size={12} tintColor={colors.textSecondary} />
@@ -1553,6 +2153,8 @@ function ExerciseTimer({
             onHoverOut={howToHover.onHoverOut}
             onPressIn={howToPress.onPressIn}
             onPressOut={howToPress.onPressOut}
+            accessibilityRole="button"
+            accessibilityLabel="How to"
           >
             <Animated.View style={[styles.timerWatchFormButton, textDimStyle(howToHover, howToPress)]}>
               <SymbolView name={showCue ? 'chevron.up' : 'info.circle'} size={12} tintColor={colors.textSecondary} />
@@ -1562,6 +2164,24 @@ function ExerciseTimer({
             </Animated.View>
           </Pressable>
         ) : null}
+        <Pressable
+          style={styles.timerWatchFormButton}
+          onPress={onSwap}
+          hitSlop={8}
+          onHoverIn={swapHover.onHoverIn}
+          onHoverOut={swapHover.onHoverOut}
+          onPressIn={swapPress.onPressIn}
+          onPressOut={swapPress.onPressOut}
+          accessibilityRole="button"
+          accessibilityLabel="Swap"
+        >
+          <Animated.View style={[styles.timerWatchFormButton, textDimStyle(swapHover, swapPress)]}>
+            <SymbolView name="arrow.triangle.2.circlepath" size={12} tintColor={colors.textSecondary} />
+            <Text style={styles.timerWatchFormText} maxFontSizeMultiplier={1.2}>
+              Swap
+            </Text>
+          </Animated.View>
+        </Pressable>
       </View>
       {cue && showCue ? (
         <ReanimatedAnimated.View
@@ -1670,9 +2290,9 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     // why (a fixed-position logo over scrolling content overlaps it).
     logoMark: {
       position: 'absolute',
-      left: 142.24,
+      left: 145.65,
       top: 68,
-      width: 90.53,
+      width: 83.7,
       height: 75.11,
     },
     // Same box, no position/top/left — a normal flow child, so it scrolls
@@ -1683,7 +2303,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     // logoAccent/logoCheck below and the Graphic width/height props at each
     // call site are scaled the same 0.85 to match.
     logoMarkFlow: {
-      width: 90.53,
+      width: 83.7,
       height: 75.11,
     },
     logoAccent: {
@@ -1693,7 +2313,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     logoCheck: {
       position: 'absolute',
-      left: 47.19,
+      left: 43.13,
       top: 0,
     },
     title: {
@@ -1806,6 +2426,10 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       marginTop: 24,
       width: 325,
     },
+    timeAvailableSection: {
+      marginTop: 20,
+      width: 325,
+    },
     symptomChipRow: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -1831,6 +2455,39 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     symptomChipTextActive: {
       color: '#5FBE84',
       fontFamily: 'Geist-SemiBold',
+    },
+    // A distinct, more solid treatment than the symptom chips above —
+    // selected reads as a real choice made (solid accent fill), not just a
+    // tinted-border acknowledgment. Matches the pill selected-state design
+    // already prototyped and approved before this went into the real app.
+    timePill: {
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      borderRadius: 14,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.pillBorder,
+      backgroundColor: colors.pillBg,
+    },
+    timePillActive: {
+      borderColor: '#5FBE84',
+      backgroundColor: '#5FBE84',
+    },
+    timePillText: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      fontFamily: 'Geist-Medium',
+    },
+    timePillTextActive: {
+      color: '#05130b',
+      fontFamily: 'Geist-SemiBold',
+    },
+    // Standalone, not part of a row like timePill's own siblings — reuses
+    // that pill's visual language (same border/fill/active treatment) since
+    // it's the same "optional, tap to accept" interaction, just a single
+    // choice instead of four.
+    finisherPill: {
+      alignSelf: 'center',
+      marginTop: 12,
     },
     checkinPrimaryButtonHit: {
       marginTop: 28,
@@ -1908,6 +2565,55 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       alignItems: 'center',
     },
     skipConfirmConfirmText: {
+      color: colors.textTertiary,
+      fontSize: 13,
+      fontFamily: 'Geist-Medium',
+      textDecorationLine: 'underline',
+    },
+    // Swap-picker sheet — same backdrop/card language as skipConfirm* above,
+    // but a variable-length list rather than a fixed two-button choice, so
+    // it gets its own card (bounded maxHeight + internal scroll) instead of
+    // reusing skipConfirmCard's fixed-content sizing.
+    swapModalCard: {
+      width: '100%',
+      maxWidth: 340,
+      maxHeight: '72%',
+      borderRadius: 20,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.surfaceBorder,
+      paddingHorizontal: 22,
+      paddingVertical: 22,
+      gap: 8,
+    },
+    swapModalList: {
+      marginTop: 4,
+    },
+    swapModalRow: {
+      paddingVertical: 12,
+    },
+    swapModalRowDivider: {
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.surfaceDivider,
+    },
+    swapModalRowName: {
+      color: colors.text,
+      fontSize: 14,
+      fontFamily: 'Geist-SemiBold',
+    },
+    swapModalRowStat: {
+      marginTop: 2,
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontFamily: 'Geist-Medium',
+    },
+    swapModalCancelHit: {
+      marginTop: 6,
+      paddingVertical: 13,
+      borderRadius: 14,
+      alignItems: 'center',
+    },
+    swapModalCancelText: {
       color: colors.textTertiary,
       fontSize: 13,
       fontFamily: 'Geist-Medium',
@@ -2092,6 +2798,30 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       color: '#5FBE84',
       fontSize: 11.5,
       fontFamily: 'Geist-SemiBold',
+    },
+    loadInputRow: {
+      marginTop: 12,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    loadInputLabel: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      fontFamily: 'Geist-Regular',
+    },
+    loadInput: {
+      width: 60,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.surfaceBorder,
+      backgroundColor: colors.surface,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      color: colors.text,
+      fontSize: 12,
+      fontFamily: 'Geist-SemiBold',
+      textAlign: 'center',
     },
     resolvedExerciseCard: {
       marginTop: 16,
@@ -2323,6 +3053,16 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       textAlign: 'center',
       fontFamily: 'Geist-Regular',
     },
+    // Deliberately quieter than doneSubtitle — an estimate, not the
+    // headline of this screen (see estimateCaloriesBurned's own doc
+    // comment on why this is never presented as measured).
+    calorieEstimateText: {
+      marginTop: 4,
+      color: colors.textTertiary,
+      fontSize: 11,
+      textAlign: 'center',
+      fontFamily: 'Geist-Regular',
+    },
     doneInsightHit: {
       marginTop: 16,
       paddingHorizontal: 40,
@@ -2346,20 +3086,24 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     feedbackButtonRow: {
       flexDirection: 'row',
-      gap: 8,
+      gap: 5,
     },
     feedbackButton: {
       flex: 1,
-      paddingVertical: 10,
+      minHeight: 44,
+      paddingVertical: 6,
+      paddingHorizontal: 2,
       borderRadius: 8,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.surfaceBorder,
       backgroundColor: colors.surface,
       alignItems: 'center',
+      justifyContent: 'center',
     },
     feedbackButtonText: {
       color: colors.text,
-      fontSize: 11.5,
+      fontSize: 10,
+      textAlign: 'center',
       fontFamily: 'Geist-SemiBold',
     },
     feedbackConfirmText: {

@@ -41,3 +41,16 @@ export async function restoreCalibration(calibration: UserCalibration): Promise<
     // Worst case this one field doesn't restore — the rest of the backup still applies independently.
   }
 }
+
+/** DISCLOSED FIX: this store is backed up by buildBackupPayload but had no
+ * clear function at all, so it was silently missing from
+ * clearAllLocalData's "every real local store" clear-list (data-backup.ts) —
+ * a "Delete My Data"/"Delete Account" run left the learned multiplier fully
+ * intact, contradicting the whole point of a full wipe. */
+export async function clearCalibration(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(KEY);
+  } catch {
+    // Best-effort — same as never having submitted any feedback.
+  }
+}

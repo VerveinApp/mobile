@@ -20,6 +20,8 @@ export type SessionHistoryEntry = {
   notes?: string;
   /** The energy score checked in with that day — the real history M16's deload-pattern detection reads (see engine/deload-nudge.ts). Absent for entries logged before this field existed. */
   energy?: EnergyScore;
+  /** Self-reported soreness for a backfilled day, 1 (none) to 5 (very sore) — same scale shape as energy but inverted meaning (higher = worse). Only ever set by recordPastSessionCompletion's optional param; nothing downstream reads it yet, same personal-record-only status as the note field. */
+  soreness?: EnergyScore;
   /** The post-session feedback tapped, if any — M14-lite's record of what already fed into calibration.ts, so reopening a finished session doesn't re-ask. */
   feedback?: FeedbackResponse;
   /** Did they do all / some / none of the workout — the real per-exercise
@@ -52,8 +54,12 @@ export async function recordSessionCompletion(completed: boolean, energy?: Energ
   try {
     const date = localDateStr();
     const entries = await readAll();
+    // Merged, not replaced — a call after notes/feedback were already
+    // attached (saveSessionNote/saveSessionFeedback) must not silently wipe
+    // them; only the fields this function actually owns get overwritten.
+    const existingToday = entries.find((e) => e.date === date);
     const withoutToday = entries.filter((e) => e.date !== date);
-    const next = [...withoutToday, { date, completed, energy, completionStatus }].slice(-MAX_ENTRIES);
+    const next = [...withoutToday, { ...existingToday, date, completed, energy, completionStatus }].slice(-MAX_ENTRIES);
     await AsyncStorage.setItem(KEY, JSON.stringify(next));
   } catch {
     // Worst case the weekly view just reads a little sparse — never a crash.
@@ -76,14 +82,16 @@ export async function recordPastSessionCompletion(
   date: string,
   completed: boolean,
   energy?: EnergyScore,
-  completionStatus?: CompletionStatus
+  completionStatus?: CompletionStatus,
+  soreness?: EnergyScore
 ) {
   try {
     const entries = await readAll();
     const withoutDate = entries.filter((e) => e.date !== date);
-    const next = [...withoutDate, { date, completed, energy, completionStatus, loggedRetroactively: true }].slice(
-      -MAX_ENTRIES
-    );
+    const next = [
+      ...withoutDate,
+      { date, completed, energy, completionStatus, soreness, loggedRetroactively: true },
+    ].slice(-MAX_ENTRIES);
     await AsyncStorage.setItem(KEY, JSON.stringify(next));
   } catch {
     // Worst case the weekly view just reads a little sparse — never a crash.
@@ -169,10 +177,21 @@ export async function getSessionFeedback(date: string): Promise<FeedbackResponse
 
 export type WeekDay = {
   weekday: string;
-  /** null = in the future or no data yet; true/false = scheduled day's real outcome. */
+  /** null = in the future, OR a past scheduled day with no recorded entry at
+   * all (see isFuture below for how to tell those two apart — they used to
+   * be indistinguishable here, which was a real bug: recordSessionCompletion
+   * only ever writes an entry once "Start Session" is tapped, so a day the
+   * user never opened check-in on at all has zero entry, not a `false` one.
+   * That made an already-passed, silently-skipped day render identically to
+   * a genuine future day). true/false = scheduled day's real outcome. */
   completed: boolean | null;
   isToday: boolean;
   isScheduled: boolean;
+  /** Added alongside the fix above — callers must check this before treating
+   * completed:null as "upcoming." false + completed:null means "this day
+   * already happened and nothing was ever logged for it," which reads the
+   * same as a real miss, not as still-pending. */
+  isFuture: boolean;
 };
 
 /**
@@ -208,6 +227,7 @@ export async function getWeekActivity(scheduledDays: string[] | null): Promise<{
       completed: isFuture ? null : (byDate.get(dateStr) ?? null),
       isToday: dateStr === todayStr,
       isScheduled,
+      isFuture,
     };
   });
 
@@ -250,6 +270,7 @@ export async function getRecentWeeks(scheduledDays: string[] | null, weekCount =
         completed: isFuture ? null : (byDate.get(dateStr) ?? null),
         isToday: dateStr === todayStr,
         isScheduled,
+        isFuture,
       };
     });
     weeks.push(days);

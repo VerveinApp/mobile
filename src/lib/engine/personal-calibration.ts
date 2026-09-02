@@ -14,7 +14,23 @@
 
 import type { FeedbackResponse, UserCalibration } from '@/lib/engine/types';
 
-const STEP = 0.08;
+// One "notch" of the 5-point feedback scale. The outer (much_too_*) values
+// are two notches, not a separate invented magnitude — 2 * NOTCH === the
+// single fixed STEP this module used before FeedbackResponse widened to 5
+// values, so someone who always taps the extreme end sees the exact same
+// max correction speed as before; the two new inner-adjacent-to-outer
+// notches are what's actually new, giving a real "a little" vs "a lot"
+// distinction that a flat +/-STEP couldn't express (Vervein addition, not a
+// vault change — M15's own real math, the clamp and dampening below, is
+// untouched).
+const NOTCH = 0.04;
+const DELTA_BY_FEEDBACK: Record<FeedbackResponse, number> = {
+  much_too_easy: NOTCH * 2,
+  too_easy: NOTCH,
+  just_right: 0,
+  too_hard: -NOTCH,
+  much_too_hard: -NOTCH * 2,
+};
 
 export const DEFAULT_CALIBRATION: Omit<UserCalibration, 'userId'> = { multiplier: 1.0, sampleCount: 0 };
 
@@ -23,7 +39,7 @@ function clamp(n: number, min: number, max: number): number {
 }
 
 export function computeUpdatedCalibration(current: UserCalibration, feedback: FeedbackResponse): UserCalibration {
-  const delta = feedback === 'too_easy' ? STEP : feedback === 'too_hard' ? -STEP : 0;
+  const delta = DELTA_BY_FEEDBACK[feedback];
   const dampening = Math.min(1, 5 / (current.sampleCount + 1));
   return {
     userId: current.userId,

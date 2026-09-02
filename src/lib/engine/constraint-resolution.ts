@@ -11,11 +11,16 @@
  * still surface a high-intensity exercise it should have excluded — the gap
  * plan-preview.ts closes by calling this before volume-scaling.ts.
  *
- * SCOPE NOTE, same as elsewhere in this port — standingSymptomTags,
- * movementRestrictions, and conditions are always called with empty arrays
- * (no symptom/condition intake in this app yet), so those branches are dead
- * code today, ported anyway for fidelity to the governed source and to keep
- * the function signature honest about what it actually accepts.
+ * SCOPE NOTE, same as elsewhere in this port — standingSymptomTags and
+ * conditions are always called with empty arrays (conditions is collected at
+ * onboarding but deliberately never wired through pending a real Condition
+ * Constraint Worksheet validation — see lib/conditions.ts's own header
+ * comment; standingSymptomTags has no intake in this app at all), so those
+ * two branches are dead code today, ported anyway for fidelity to the
+ * governed source and to keep the function signature honest about what it
+ * actually accepts. movementRestrictions is NOT in that category — it's
+ * real, self-reported at onboarding, and does apply (onboarding-to-engine.ts
+ * passes profile.movementRestrictions straight through, not an empty array).
  */
 
 import { IMPACT_RANK, INTENSITY_RANK } from '@/lib/engine/exercise-library';

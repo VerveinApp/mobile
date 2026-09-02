@@ -15,13 +15,18 @@
  * trigger until governance picks a rule. Conservative intersection, not a
  * resolution.
  *
- * SCOPE NOTE — the source module reads every check-in row including skips
- * ("M4 records skips as energy 3"). This app's session-history.ts only logs
- * completed sessions — there's no "opened check-in, felt too drained to
- * start" row today — so the caller passes the last three completed
- * sessions' energy scores instead. A real, honest scope difference, not a
- * bug: this pattern can only be detected from sessions the user actually
- * finished.
+ * SCOPE NOTE, corrected — this used to say session-history.ts only logs
+ * completed sessions and so this pattern could only be detected from
+ * finished sessions. That's stale: check-in.tsx's handleStartSession writes
+ * a real 'skipped' entry (with a real energy score) the instant a session
+ * starts, specifically so someone who starts and abandons isn't invisible —
+ * and lib/deload.ts's caller already reads every session-history entry with
+ * a defined energy, not just completed ones. The one case still genuinely
+ * unreadable here (matching the source module's "M4 records skips as energy
+ * 3" for a different reason) is someone who opens check-in and closes the
+ * app without ever picking an energy score at all — there's no button press
+ * to hook a write into for that case, so it's a real, narrower gap, not the
+ * broad one this comment used to describe.
  *
  * ORDERING NOTE — the source module's `lastThree` is oldest-first (index 0
  * is the earliest of the three). This app's session-history.ts naturally

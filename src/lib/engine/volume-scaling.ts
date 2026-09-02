@@ -20,10 +20,12 @@
  *      `stackingTransition: false` and reports the gap explicitly.
  *
  *  (2) Duration rounding to the nearest 5 minutes was written for
- *      session-length durations and silently breaks for short isometric
- *      holds. This implements the documented formula literally — including
- *      the case where it rounds to 0 — and flags every occurrence rather
- *      than guessing at a fix nobody approved.
+ *      session-length durations and silently breaks for any short exercise —
+ *      most visibly isometric holds, but a short discrete exercise can zero
+ *      out the same way at a reduced multiplier. This implements the
+ *      documented formula literally — including the case where it rounds to
+ *      0 — and flags every occurrence, across every rep_structure, rather
+ *      than guessing at a finer rounding increment nobody approved.
  */
 
 import type { Exercise, ScaledExercise, ScaledExerciseList, VolumeStance } from '@/lib/engine/types';
@@ -65,9 +67,31 @@ export function scaleVolume(
     let adapted_duration_min: number | null = null;
     if (ex.base_duration_min !== null) {
       adapted_duration_min = Math.round((ex.base_duration_min * durationMult) / 5) * 5;
-      if (ex.rep_structure !== 'discrete' && adapted_duration_min === 0) {
+      // Widened from `ex.rep_structure !== 'discrete' && ...` (Vervein fix,
+      // not a vault change — the vault's own Implementation Discoveries log
+      // names this exact flagging-scope gap and suggests this as the small,
+      // symmetric fix, distinct from the rounding formula itself which stays
+      // untouched/unspecified above): the original condition meant a
+      // discrete exercise rounding to 0 (a real, reachable case — e.g.
+      // base_duration_min:8 at energy 2 with default calibration:
+      // round((8×0.6)/5)×5=0) was silently unflagged, unlike an isometric
+      // hold hitting the identical zero. Both are the same underlying
+      // rounding-granularity gap; only one of them was ever surfaced.
+      if (adapted_duration_min === 0) {
+        // ENGINEERING SAFETY NET (Vervein fix, not a vault change): floors
+        // to 1 rather than leaving 0 — a 0-minute exercise is a real
+        // user-visible defect ("Plank — 0 min"), not just an internal
+        // logging concern, and workout-assembly.ts sums this value verbatim
+        // into the session's displayed total with no floor of its own. This
+        // does NOT resolve the underlying gap (what the correct, finer
+        // rounding increment should be is still an open governance
+        // question, unchanged from the comment above) — it only guarantees
+        // the unresolved gap never reaches the UI as a nonsensical zero.
+        adapted_duration_min = 1;
         knownGaps.push(
-          `${ex.id} (${ex.name}): adapted_duration_min rounded to 0 — Volume Scaling's own documented gap (5-minute rounding is wrong for short ${ex.rep_structure} exercises; a finer, hold-appropriate increment is specified but not implemented).`
+          ex.rep_structure !== 'discrete'
+            ? `${ex.id} (${ex.name}): adapted_duration_min rounded to 0, floored to 1 — Volume Scaling's own documented gap (5-minute rounding is wrong for short ${ex.rep_structure} exercises; a finer, hold-appropriate increment is specified but not implemented).`
+            : `${ex.id} (${ex.name}): adapted_duration_min rounded to 0, floored to 1 — the same 5-minute-rounding gap noted above, reachable here too since a discrete exercise's base_duration_min can be short enough to zero out at a reduced multiplier.`
         );
       }
     }
