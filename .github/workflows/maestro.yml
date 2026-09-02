@@ -67,13 +67,29 @@ jobs:
           echo "UDID=$UDID" >> "$GITHUB_ENV"
           xcrun simctl bootstatus "$UDID" -b
           open -a Simulator --args -CurrentDeviceUDID "$UDID"
-          # Deliberately NOT passing --device "$UDID" here: expo run:ios
-          # mis-resolved that UDID as a physical device and demanded code
-          # signing certificates ("No code signing certificates are
-          # available to use"). With exactly one simulator booted (the one
-          # just booted above), omitting --device lets it auto-target that
-          # booted simulator instead.
-          npx expo run:ios --configuration Release
+
+          # expo run:ios (both with and without an explicit --device) kept
+          # mis-resolving this as a physical-device build and demanding
+          # code signing certs ("No code signing certificates are available
+          # to use"), even with a simulator confirmed booted. Building
+          # directly via xcodebuild against the booted simulator's UDID
+          # sidesteps that device-resolution path entirely; the app's own
+          # "Bundle React Native code and images" build phase still runs as
+          # part of this, producing the same embedded JS bundle expo
+          # run:ios would have.
+          xcodebuild \
+            -workspace ios/VerveIn.xcworkspace \
+            -scheme VerveIn \
+            -configuration Release \
+            -destination "id=$UDID" \
+            -derivedDataPath ios/build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+          APP_PATH=$(find ios/build/Build/Products -maxdepth 2 -iname "VerveIn.app" | head -1)
+          echo "APP_PATH=$APP_PATH"
+          xcrun simctl install "$UDID" "$APP_PATH"
+          xcrun simctl launch "$UDID" app.vervein
 
       - name: Run Maestro flows
         run: |
