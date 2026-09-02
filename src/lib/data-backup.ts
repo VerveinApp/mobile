@@ -1,4 +1,16 @@
-import { getCalibration, restoreCalibration } from '@/lib/calibration';
+import {
+  clearBodyMeasurements,
+  getBodyMeasurements,
+  restoreBodyMeasurements,
+  type BodyMeasurementEntry,
+} from '@/lib/body-measurements';
+import { clearCalibration, getCalibration, restoreCalibration } from '@/lib/calibration';
+import {
+  clearConditionLog,
+  getConditionLog,
+  restoreConditionLog,
+  type ConditionLogEntry,
+} from '@/lib/condition-log';
 import { clearCheckInHistory, getLastCheckIn, restoreLastCheckIn, type CheckInRecord } from '@/lib/check-in-history';
 import {
   clearDecisionTraceLog,
@@ -7,7 +19,15 @@ import {
   type StoredTrace,
 } from '@/lib/decision-trace-log';
 import type { UserCalibration } from '@/lib/engine/types';
+import {
+  clearExercisePerformance,
+  getAllExercisePerformances,
+  restoreExercisePerformance,
+  type ExercisePerformance,
+} from '@/lib/exercise-performance';
+import { clearNotes, getNotes, restoreNotes, type NoteEntry } from '@/lib/notes';
 import { clearOnboardingCompleted, clearOnboardingDraft } from '@/lib/onboarding-draft';
+import { clearProgressPhotos } from '@/lib/progress-photos';
 import { disableSessionReminders } from '@/lib/session-reminders';
 import {
   clearMilestones,
@@ -41,7 +61,26 @@ import { clearWeightLog, getWeightLog, restoreWeightLog, type WeightLogEntry } f
 // scoped to "today" (getTodaySession discards anything whose date doesn't
 // match locally), so restoring an old one onto a different day would just
 // silently no-op; there's nothing there worth carrying across a restore.
-export const BACKUP_VERSION = 1;
+// BUG FIX: bumped 1 → 2 alongside adding the exercisePerformance field below
+// — this file's own parseBackupPayload doc comment is explicit that only an
+// exact version match is accepted specifically so a payload missing a field
+// a newer build expects gets a clear "different app version" error instead
+// of silently restoring with that field undefined (or crashing on it).
+// Bumped 2 → 3 alongside adding the notes field, same reasoning.
+// Bumped 3 → 4 alongside adding the bodyMeasurements field, same reasoning
+// — this store has no nav entry point yet (see body-measurements.ts's own
+// header comment) but is exported/restored/cleared like every other real
+// store the moment someone has an entry in it, e.g. via a future debug path.
+// Bumped 4 → 5 alongside adding the conditionLog field, same reasoning as
+// bodyMeasurements — no nav entry point yet either.
+//
+// progress-photos.ts is deliberately NOT a field here and never bumped this
+// version — its whole store is actual image files, and this module's
+// contract is a pasteable JSON blob (see parseBackupPayload's own doc
+// comment); base64-inlining photos into that would balloon an ordinary
+// export to megabytes. clearAllLocalData below still wipes it — the
+// export-format gap and the delete-my-data guarantee are separate concerns.
+export const BACKUP_VERSION = 5;
 
 export type BackupPayload = {
   version: number;
@@ -54,21 +93,49 @@ export type BackupPayload = {
   weightLog: WeightLogEntry[];
   decisionTraceLog: StoredTrace[];
   milestones: { count: number; shown: number[] };
+  // BUG FIX: this store (Progress tab's "Strength Progress" — logged
+  // weight/reps/estimated-1RM per exercise) postdated this file's original
+  // field list and was silently missing from export, restore, AND
+  // clearAllLocalData below — the same disclosed gap pattern this file's own
+  // header comment already calls out for workout-log.ts/weight-log.ts/
+  // decision-trace-log.ts. See exercise-performance.ts's own clear/restore
+  // functions for the matching other half of this fix.
+  exercisePerformance: Record<string, ExercisePerformance>;
+  notes: NoteEntry[];
+  bodyMeasurements: BodyMeasurementEntry[];
+  conditionLog: ConditionLogEntry[];
 };
 
 export async function buildBackupPayload(): Promise<BackupPayload> {
-  const [profile, calibration, lastCheckIn, sessionHistory, workoutLog, weightLog, decisionTraceLog, count, shown] =
-    await Promise.all([
-      getProfile(),
-      getCalibration(),
-      getLastCheckIn(),
-      getSessionHistory(),
-      getAllWorkoutLogs(),
-      getWeightLog(),
-      getDecisionTraceLog(),
-      getLifetimeSessionCount(),
-      getShownMilestones(),
-    ]);
+  const [
+    profile,
+    calibration,
+    lastCheckIn,
+    sessionHistory,
+    workoutLog,
+    weightLog,
+    decisionTraceLog,
+    count,
+    shown,
+    exercisePerformance,
+    notes,
+    bodyMeasurements,
+    conditionLog,
+  ] = await Promise.all([
+    getProfile(),
+    getCalibration(),
+    getLastCheckIn(),
+    getSessionHistory(),
+    getAllWorkoutLogs(),
+    getWeightLog(),
+    getDecisionTraceLog(),
+    getLifetimeSessionCount(),
+    getShownMilestones(),
+    getAllExercisePerformances(),
+    getNotes(),
+    getBodyMeasurements(),
+    getConditionLog(),
+  ]);
   return {
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
@@ -80,6 +147,10 @@ export async function buildBackupPayload(): Promise<BackupPayload> {
     weightLog,
     decisionTraceLog,
     milestones: { count, shown },
+    exercisePerformance,
+    notes,
+    bodyMeasurements,
+    conditionLog,
   };
 }
 
@@ -139,6 +210,14 @@ export function parseBackupPayload(raw: string): ParseResult {
   ) {
     return { ok: false, error: 'Backup milestone data is malformed.' };
   }
+  if (!isPlainObject(candidate.exercisePerformance)) {
+    return { ok: false, error: 'Backup strength-progress data is malformed.' };
+  }
+  if (!Array.isArray(candidate.notes)) return { ok: false, error: 'Backup notes are malformed.' };
+  if (!Array.isArray(candidate.bodyMeasurements)) {
+    return { ok: false, error: 'Backup body-measurement data is malformed.' };
+  }
+  if (!Array.isArray(candidate.conditionLog)) return { ok: false, error: 'Backup condition-log data is malformed.' };
   return { ok: true, payload: candidate as unknown as BackupPayload };
 }
 
@@ -161,6 +240,10 @@ export async function restoreBackupPayload(payload: BackupPayload): Promise<void
     restoreWeightLog(payload.weightLog),
     restoreDecisionTraceLog(payload.decisionTraceLog),
     restoreMilestones(payload.milestones.count, payload.milestones.shown),
+    restoreExercisePerformance(payload.exercisePerformance),
+    restoreNotes(payload.notes),
+    restoreBodyMeasurements(payload.bodyMeasurements),
+    restoreConditionLog(payload.conditionLog),
   ]);
 }
 
@@ -189,12 +272,19 @@ export async function restoreBackupPayload(payload: BackupPayload): Promise<void
  * of the now-deleted Supabase account afterward, which this function
  * deliberately does NOT do itself, since "Delete My Data" alone should
  * never sign a still-valid account out as a side effect.
+ *
+ * DISCLOSED FIX: clearCalibration was missing entirely — calibration.ts had
+ * no clear function at all, despite buildBackupPayload treating it as real
+ * user data worth exporting. The learned multiplier survived every prior
+ * "Delete My Data" run, exactly the silent-gap pattern this function's own
+ * header comment warns about.
  */
 export async function clearAllLocalData(): Promise<void> {
   await Promise.all([
     clearOnboardingCompleted(),
     clearOnboardingDraft(),
     clearProfile(),
+    clearCalibration(),
     clearCheckInHistory(),
     clearTodaySession(),
     clearSessionHistory(),
@@ -202,6 +292,11 @@ export async function clearAllLocalData(): Promise<void> {
     clearWeightLog(),
     clearDecisionTraceLog(),
     clearMilestones(),
+    clearExercisePerformance(),
+    clearNotes(),
+    clearBodyMeasurements(),
+    clearConditionLog(),
+    clearProgressPhotos(),
     disableSessionReminders(),
   ]);
 }

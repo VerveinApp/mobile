@@ -30,6 +30,13 @@ const BODY_AREA_LABELS: Record<BodyArea, string> = {
   full: 'Full Body',
 };
 const ENERGY_SCORES: EnergyScore[] = [1, 2, 3, 4, 5];
+const SORENESS_LABELS: Record<EnergyScore, string> = {
+  1: 'None',
+  2: 'Mild',
+  3: 'Moderate',
+  4: 'Sore',
+  5: 'Very Sore',
+};
 
 function wheelLabel(offsetDays: number, date: Date): string {
   if (offsetDays === 1) return 'Yesterday';
@@ -63,6 +70,7 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
   const [dayIndex, setDayIndex] = useState(0); // index into WHEEL_DAY_OFFSETS — 0 = yesterday
   const [selectedAreas, setSelectedAreas] = useState<Set<BodyArea>>(new Set());
   const [energy, setEnergy] = useState<EnergyScore | null>(null);
+  const [soreness, setSoreness] = useState<EnergyScore | null>(null);
   const [note, setNote] = useState('');
   const [existingDates, setExistingDates] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
@@ -95,6 +103,7 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
     setDayIndex(0);
     setSelectedAreas(new Set());
     setEnergy(null);
+    setSoreness(null);
     setNote('');
     (async () => {
       const history = await getSessionHistory();
@@ -131,7 +140,13 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
     });
   };
 
-  const isValid = selectedAreas.size > 0;
+  // Body area is the common case, but not required — a rest day worth
+  // remembering (an energy score, or just a note) is honest information
+  // about a past day too. getCompletionStatus already reads a zero-area
+  // selection as 'skipped' rather than fabricating a session, so widening
+  // this to accept energy/note-only doesn't change what gets recorded, just
+  // stops blocking someone who has nothing to say about training that day.
+  const isValid = selectedAreas.size > 0 || energy !== null || note.trim().length > 0;
 
   const handleSave = async () => {
     if (!isValid || saving) return;
@@ -144,7 +159,7 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
     }));
     const status = getCompletionStatus(exercises);
     await saveRetroactiveWorkoutLog(selectedDateStr, exercises);
-    await recordPastSessionCompletion(selectedDateStr, status !== 'skipped', energy ?? undefined, status);
+    await recordPastSessionCompletion(selectedDateStr, status !== 'skipped', energy ?? undefined, status, soreness ?? undefined);
     const trimmedNote = note.trim();
     if (trimmedNote) await saveSessionNote(selectedDateStr, trimmedNote);
     setSaving(false);
@@ -198,7 +213,7 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>What did you train?</Text>
+          <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>What did you train? (optional)</Text>
           <View style={styles.pillGrid}>
             {BODY_AREA_ORDER.map((area) => {
               const isSelected = selectedAreas.has(area);
@@ -256,6 +271,38 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
           </View>
           {energy !== null ? (
             <Text style={styles.energyReadout} maxFontSizeMultiplier={1.3}>{ENERGY_LABELS[energy]}</Text>
+          ) : null}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>Soreness that day (optional)</Text>
+          <View style={styles.energyRow}>
+            {ENERGY_SCORES.map((score) => {
+              const isSelected = soreness === score;
+              return (
+                <Pressable
+                  key={score}
+                  style={styles.energyPillHit}
+                  onPress={() => {
+                    hapticSelect();
+                    setSoreness((prev) => (prev === score ? null : score));
+                  }}
+                  hitSlop={2}
+                >
+                  <View style={[styles.energyPillVisual, isSelected && styles.energyPillVisualSelected]}>
+                    <Text
+                      style={[styles.energyPillText, isSelected && styles.energyPillTextSelected]}
+                      maxFontSizeMultiplier={1.2}
+                    >
+                      {score}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+          {soreness !== null ? (
+            <Text style={styles.energyReadout} maxFontSizeMultiplier={1.3}>{SORENESS_LABELS[soreness]}</Text>
           ) : null}
         </View>
 

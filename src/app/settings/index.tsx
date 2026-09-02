@@ -13,7 +13,14 @@ import { isAppLockEnabled, setAppLockEnabled } from '@/lib/app-lock';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { buildBackupPayload, clearAllLocalData, parseBackupPayload, restoreBackupPayload, type BackupPayload } from '@/lib/data-backup';
 import { hapticError, hapticImpactLight, hapticSuccess, hapticWarning, isHapticsEnabled, setHapticsEnabled } from '@/lib/haptics';
-import { disconnectHealthKit, hasConnectedHealthKit, isHealthKitAvailable, requestHealthKitAccess } from '@/lib/health-kit';
+import {
+  disconnectHealthKit,
+  getLastRestingHeartRateSyncDate,
+  hasConnectedHealthKit,
+  isHealthKitAvailable,
+  requestHealthKitAccess,
+} from '@/lib/health-kit';
+import { localDateStr } from '@/lib/local-date';
 import {
   disableSessionReminders,
   enableSessionReminders,
@@ -25,7 +32,7 @@ import { useAppTheme } from '@/lib/theme-context';
 import type { ThemePreference } from '@/lib/theme-preference';
 import { getUnitSystem, setUnitSystem, type UnitSystem } from '@/lib/unit-preference';
 import { supabase } from '@/lib/supabase';
-import { getProfile } from '@/lib/user-profile';
+import { getProfile, updateProfile } from '@/lib/user-profile';
 import { AdjustPlanSheet } from '@/components/settings/adjust-plan-sheet';
 import { BiometricsSheet } from '@/components/settings/biometrics-sheet';
 import { ConditionsSheet } from '@/components/settings/conditions-sheet';
@@ -67,6 +74,20 @@ const APPEARANCE_OPTIONS: { id: ThemePreference; label: string }[] = [
  * honestly (an inline error in the confirm modal, distinguishable from a
  * generic failure) rather than pretending the account was deleted.
  */
+/** Settings' own "Last synced" line — see getLastRestingHeartRateSyncDate's
+ * doc comment for why this exists here specifically. UTC-midnight date-diff,
+ * same pattern as check-in.tsx's daysSinceLastCheckIn, to avoid a local-time
+ * DST edge case skewing the day count by one. */
+function formatLastSync(dateStr: string | null): string | null {
+  if (dateStr === null) return 'No recent sync';
+  const days = Math.round(
+    (Date.parse(`${localDateStr()}T00:00:00Z`) - Date.parse(`${dateStr}T00:00:00Z`)) / 86400000
+  );
+  if (days <= 0) return 'Last synced today';
+  if (days === 1) return 'Last synced yesterday';
+  return `Last synced ${days} days ago`;
+}
+
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { colors, resolvedScheme, preference, setPreference } = useAppTheme();
@@ -86,6 +107,10 @@ export default function SettingsScreen() {
   const [remindersSupported, setRemindersSupported] = useState(false);
   const [healthKitOn, setHealthKitOn] = useState(false);
   const [healthKitAvailable, setHealthKitAvailable] = useState(false);
+  // Null covers both "not connected" and "connected but no sample in the
+  // last 10 days" — see getLastRestingHeartRateSyncDate's own doc comment
+  // for why Settings, unlike Home/check-in, answers that gap directly.
+  const [healthKitLastSync, setHealthKitLastSync] = useState<string | null>(null);
   // The real, already-live Supabase session (see onboarding/create-account.tsx
   // and auth/verify.tsx — email OTP sign-in genuinely works today) — null
   // means no session, not "loading," since this only ever gets set after
@@ -93,23 +118,36 @@ export default function SettingsScreen() {
   // reads or gates on this; it exists purely so this row can stop claiming
   // "No account system yet" when a real one already exists underneath.
   const [accountEmail, setAccountEmail] = useState<string | null>(null);
+  const [profileName, setProfileName] = useState<string | null>(null);
+  const [showEditNameModal, setShowEditNameModal] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [savingName, setSavingName] = useState(false);
   // Import flow state — see handleOpenImport/handleValidateImport/
   // handleConfirmImport below. Two-step (paste, then confirm) rather than
   // one tap: restoring genuinely overwrites existing history, so this gets
   // the same "review before an irreversible action" treatment as
-  // check-in.tsx's skip-confirm modal, not a blind one-tap action the way
-  // "Delete My Data" currently is.
+  // check-in.tsx's skip-confirm modal, and Delete My Data below.
   const [showImportModal, setShowImportModal] = useState(false);
   const [importStep, setImportStep] = useState<'paste' | 'confirm'>('paste');
   const [importText, setImportText] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
   const [pendingImport, setPendingImport] = useState<BackupPayload | null>(null);
   const [lastRestoredAt, setLastRestoredAt] = useState<string | null>(null);
+  // Guards handleConfirmImport against a fast double-tap firing two
+  // concurrent restoreBackupPayload calls — same disabled-during-await
+  // pattern the Delete Account modal already uses below.
+  const [restoringImport, setRestoringImport] = useState(false);
   // Delete Account flow state — see handleConfirmDeleteAccount below and
   // account.ts's own doc comment. Genuinely separate from "Delete My Data":
   // that clears local storage only; this also deletes the real Supabase
   // auth user server-side, so it gets its own confirm modal and its own
   // honest failure state (the Edge Function may not be deployed yet).
+  // Delete My Data flow state — see handleOpenDeleteData/handleConfirmDeleteData
+  // below. This used to be a single blind one-tap Pressable with no review
+  // step, inconsistent with Import and Delete Account right next to it; now
+  // gated behind the same confirm-modal pattern as those.
+  const [showDeleteDataModal, setShowDeleteDataModal] = useState(false);
+  const [deletingData, setDeletingData] = useState(false);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
@@ -151,9 +189,11 @@ export default function SettingsScreen() {
         if (remindersEnabled && !stillPermitted) await disableSessionReminders();
         setRemindersOn(stillPermitted);
         setScheduledDaysCount(remindersProfile?.days ? remindersProfile.days.split(',').filter(Boolean).length : 0);
+        setProfileName(remindersProfile?.name ?? null);
         const [hkAvailable, hkConnected] = await Promise.all([isHealthKitAvailable(), hasConnectedHealthKit()]);
         setHealthKitAvailable(hkAvailable);
         setHealthKitOn(hkConnected);
+        if (hkConnected) setHealthKitLastSync(await getLastRestingHeartRateSyncDate());
         const {
           data: { session },
         } = await supabase.auth.getSession();
@@ -172,10 +212,13 @@ export default function SettingsScreen() {
   const privacyHover = useHoverFade();
   const biometricsHover = useHoverFade();
   const weightHistoryHover = useHoverFade();
+  const referralHover = useHoverFade();
   const adjustPlanHover = useHoverFade();
   const conditionsHover = useHoverFade();
   const movementRestrictionsHover = useHoverFade();
   const progressHover = useHoverFade();
+  const logHover = useHoverFade();
+  const nameHover = useHoverFade();
   const imperialInteraction = { hover: useHoverFade(), press: useLiquidPress() };
   const metricInteraction = { hover: useHoverFade(), press: useLiquidPress() };
   const unitInteractions: Record<UnitSystem, typeof imperialInteraction> = {
@@ -264,6 +307,7 @@ export default function SettingsScreen() {
       // rather than a fake one: it's tracking "does Vervein use this data,"
       // not "does iOS still permit it."
       setHealthKitOn(false);
+      setHealthKitLastSync(null);
       await disconnectHealthKit();
       hapticImpactLight();
       return;
@@ -271,6 +315,7 @@ export default function SettingsScreen() {
     const granted = await requestHealthKitAccess();
     if (granted) {
       setHealthKitOn(true);
+      setHealthKitLastSync(await getLastRestingHeartRateSyncDate());
       hapticImpactLight();
     } else {
       hapticError();
@@ -283,10 +328,42 @@ export default function SettingsScreen() {
   // touched by this row and the two onboarding auth screens), so signing
   // out can't strand the user or lose anything — it's trivially reversible
   // by signing back in with the same email.
+  //
+  // Navigates to create-account.tsx (the email-entry screen) with no
+  // onboarding params — previously this left the user sitting on Settings
+  // with no visible "you're signed out" moment at all. verify.tsx's own
+  // hasCompletedOnboarding() check is what makes this safe: since this
+  // device's local profile is untouched by sign-out, re-verifying routes
+  // straight back to the main app instead of re-running onboarding or
+  // overwriting the real profile with the empty params this path carries.
   const handleSignOut = async () => {
     hapticImpactLight();
     await supabase.auth.signOut();
     setAccountEmail(null);
+    router.replace('/onboarding/create-account' as never);
+  };
+
+  const handleOpenEditName = () => {
+    hapticImpactLight();
+    setNameDraft(profileName ?? '');
+    setShowEditNameModal(true);
+  };
+
+  const handleCancelEditName = () => {
+    if (savingName) return;
+    hapticImpactLight();
+    setShowEditNameModal(false);
+  };
+
+  const handleSaveName = async () => {
+    const trimmed = nameDraft.trim();
+    if (!trimmed || savingName) return;
+    setSavingName(true);
+    await updateProfile({ name: trimmed });
+    setProfileName(trimmed);
+    setSavingName(false);
+    setShowEditNameModal(false);
+    hapticSuccess();
   };
 
   // Real backup payload (see data-backup.ts) — the same shape
@@ -313,6 +390,7 @@ export default function SettingsScreen() {
   };
 
   const handleCancelImport = () => {
+    if (restoringImport) return;
     hapticImpactLight();
     setShowImportModal(false);
   };
@@ -337,16 +415,32 @@ export default function SettingsScreen() {
   // after the explicit confirm step above, matching this app's standing
   // "confirm before an irreversible action" rule.
   const handleConfirmImport = async () => {
-    if (!pendingImport) return;
+    if (!pendingImport || restoringImport) return;
+    setRestoringImport(true);
     await restoreBackupPayload(pendingImport);
+    setRestoringImport(false);
     hapticSuccess();
     setShowImportModal(false);
     setLastRestoredAt(new Date().toLocaleDateString());
   };
 
-  const handleDeleteData = async () => {
+  const handleOpenDeleteData = () => {
+    hapticWarning();
+    setShowDeleteDataModal(true);
+  };
+
+  const handleCancelDeleteData = () => {
+    if (deletingData) return;
+    hapticImpactLight();
+    setShowDeleteDataModal(false);
+  };
+
+  const handleConfirmDeleteData = async () => {
+    if (deletingData) return;
+    setDeletingData(true);
     hapticWarning();
     await clearAllLocalData();
+    setDeletingData(false);
     router.replace('/onboarding/welcome' as never);
   };
 
@@ -410,6 +504,15 @@ export default function SettingsScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <Section styles={styles} title="PROFILE">
           <View style={styles.card}>
+            <NavRow
+              styles={styles}
+              colors={colors}
+              icon="person.text.rectangle.fill"
+              label="Name"
+              subtitle={profileName ?? undefined}
+              onPress={handleOpenEditName}
+              hover={nameHover}
+            />
             <NavRow
               styles={styles}
               colors={colors}
@@ -482,6 +585,15 @@ export default function SettingsScreen() {
             <NavRow
               styles={styles}
               colors={colors}
+              icon="square.and.pencil"
+              label="Log"
+              subtitle="Backfill a past session or weigh-in"
+              onPress={() => router.push('/log' as never)}
+              hover={logHover}
+            />
+            <NavRow
+              styles={styles}
+              colors={colors}
               icon="chart.bar.xaxis"
               label="Progress & History"
               onPress={() => router.push('/settings/progress-history' as never)}
@@ -526,6 +638,21 @@ export default function SettingsScreen() {
               onValueChange={handleToggleHealthKit}
               trackOffColor={hapticsTrackOff}
               unavailableSubtitle="Not available on this device"
+              connectedSubtitle={formatLastSync(healthKitLastSync)}
+              last
+            />
+          </View>
+        </Section>
+
+        <Section styles={styles} title="VERVEIN PLUS">
+          <View style={styles.card}>
+            <NavRow
+              styles={styles}
+              colors={colors}
+              icon="person.2.fill"
+              label="Bring a Training Partner"
+              onPress={() => router.push('/referral' as never)}
+              hover={referralHover}
               last
             />
           </View>
@@ -674,11 +801,19 @@ export default function SettingsScreen() {
                         style={styles.importCancelHit}
                         onPress={() => setImportStep('paste')}
                         hitSlop={8}
+                        disabled={restoringImport}
                       >
                         <Text style={styles.importCancelText} maxFontSizeMultiplier={1.2}>Back</Text>
                       </Pressable>
-                      <Pressable style={styles.importDestructiveHit} onPress={handleConfirmImport} hitSlop={8}>
-                        <Text style={styles.importDestructiveHitText} maxFontSizeMultiplier={1.2}>Replace Data</Text>
+                      <Pressable
+                        style={[styles.importDestructiveHit, restoringImport && styles.importConfirmHitDisabled]}
+                        onPress={handleConfirmImport}
+                        hitSlop={8}
+                        disabled={restoringImport}
+                      >
+                        <Text style={styles.importDestructiveHitText} maxFontSizeMultiplier={1.2}>
+                          {restoringImport ? 'Replacing…' : 'Replace Data'}
+                        </Text>
                       </Pressable>
                     </View>
                   </>
@@ -688,7 +823,7 @@ export default function SettingsScreen() {
           </Modal>
 
           <Pressable
-            onPress={handleDeleteData}
+            onPress={handleOpenDeleteData}
             onHoverIn={deleteHover.onHoverIn}
             onHoverOut={deleteHover.onHoverOut}
             onPressIn={deletePress.onPressIn}
@@ -698,6 +833,45 @@ export default function SettingsScreen() {
               <Text style={styles.destructiveText} maxFontSizeMultiplier={1.2}>Delete My Data</Text>
             </View>
           </Pressable>
+
+          <Modal
+            visible={showDeleteDataModal}
+            transparent
+            animationType="fade"
+            onRequestClose={handleCancelDeleteData}
+            statusBarTranslucent
+          >
+            <Pressable style={styles.importBackdrop} onPress={handleCancelDeleteData}>
+              <Pressable style={styles.importCard} onPress={() => {}}>
+                <Text style={styles.importTitle} maxFontSizeMultiplier={1.3}>Delete all your data?</Text>
+                <Text style={styles.importBody} maxFontSizeMultiplier={1.4}>
+                  This permanently clears your on-device profile, session history, workout logs, and
+                  calibration — it can&apos;t be undone.
+                </Text>
+                <View style={styles.importActions}>
+                  <Pressable
+                    style={styles.importCancelHit}
+                    onPress={handleCancelDeleteData}
+                    hitSlop={8}
+                    disabled={deletingData}
+                  >
+                    <Text style={styles.importCancelText} maxFontSizeMultiplier={1.2}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.importDestructiveHit, deletingData && styles.importConfirmHitDisabled]}
+                    onPress={handleConfirmDeleteData}
+                    hitSlop={8}
+                    disabled={deletingData}
+                  >
+                    <Text style={styles.importDestructiveHitText} maxFontSizeMultiplier={1.2}>
+                      {deletingData ? 'Deleting…' : 'Delete My Data'}
+                    </Text>
+                  </Pressable>
+                </View>
+              </Pressable>
+            </Pressable>
+          </Modal>
+
           <View style={styles.card}>
             {accountEmail ? (
               <>
@@ -762,6 +936,50 @@ export default function SettingsScreen() {
               </Pressable>
             </Pressable>
           </Modal>
+
+          <Modal
+            visible={showEditNameModal}
+            transparent
+            animationType="fade"
+            onRequestClose={handleCancelEditName}
+            statusBarTranslucent
+          >
+            <Pressable style={styles.importBackdrop} onPress={handleCancelEditName}>
+              <Pressable style={styles.importCard} onPress={() => {}}>
+                <Text style={styles.importTitle} maxFontSizeMultiplier={1.3}>Edit your name</Text>
+                <TextInput
+                  style={styles.importInput}
+                  value={nameDraft}
+                  onChangeText={setNameDraft}
+                  placeholder="Your name"
+                  placeholderTextColor={colors.textTertiary}
+                  autoCapitalize="words"
+                  autoCorrect={false}
+                  maxFontSizeMultiplier={1.3}
+                />
+                <View style={styles.importActions}>
+                  <Pressable
+                    style={styles.importCancelHit}
+                    onPress={handleCancelEditName}
+                    hitSlop={8}
+                    disabled={savingName}
+                  >
+                    <Text style={styles.importCancelText} maxFontSizeMultiplier={1.2}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.importConfirmHit, (!nameDraft.trim() || savingName) && styles.importConfirmHitDisabled]}
+                    onPress={handleSaveName}
+                    hitSlop={8}
+                    disabled={!nameDraft.trim() || savingName}
+                  >
+                    <Text style={styles.importConfirmHitText} maxFontSizeMultiplier={1.2}>
+                      {savingName ? 'Saving…' : 'Save'}
+                    </Text>
+                  </Pressable>
+                </View>
+              </Pressable>
+            </Pressable>
+          </Modal>
         </Section>
 
         <Section styles={styles} title="SUPPORT">
@@ -819,6 +1037,7 @@ function NavRow({
   colors,
   icon,
   label,
+  subtitle,
   onPress,
   hover,
   last = false,
@@ -827,6 +1046,8 @@ function NavRow({
   colors: Record<string, string>;
   icon: SFSymbol;
   label: string;
+  /** Shown under the label, e.g. the current value for a row that just opens an editor. */
+  subtitle?: string;
   onPress: () => void;
   hover: ReturnType<typeof useHoverFade>;
   last?: boolean;
@@ -840,10 +1061,17 @@ function NavRow({
       }}
       onHoverIn={hover.onHoverIn}
       onHoverOut={hover.onHoverOut}
+      accessibilityRole="button"
+      accessibilityLabel={subtitle ? `${label}. ${subtitle}` : label}
     >
       <View style={styles.switchRowLeft}>
         <SymbolView name={icon} size={15} tintColor="#5FBE84" style={styles.rowIcon} />
-        <Text style={styles.rowLabel} maxFontSizeMultiplier={1.3}>{label}</Text>
+        <View>
+          <Text style={styles.rowLabel} maxFontSizeMultiplier={1.3}>{label}</Text>
+          {subtitle ? (
+            <Text style={styles.comingSoonSubtitle} maxFontSizeMultiplier={1.3}>{subtitle}</Text>
+          ) : null}
+        </View>
       </View>
       <SymbolView name="chevron.right" size={12} tintColor={colors.iconFaint} />
     </Pressable>
@@ -860,6 +1088,7 @@ function AppLockRow({
   onValueChange,
   trackOffColor,
   unavailableSubtitle = 'Not set up on this device',
+  connectedSubtitle,
   last = false,
 }: {
   styles: ReturnType<typeof createStyles>;
@@ -871,6 +1100,9 @@ function AppLockRow({
   onValueChange: (value: boolean) => void;
   trackOffColor: string;
   unavailableSubtitle?: string;
+  /** Shown only when available && value — see getLastRestingHeartRateSyncDate's
+   * doc comment. Optional: rows with nothing to report (App Lock) just omit it. */
+  connectedSubtitle?: string | null;
   last?: boolean;
 }) {
   return (
@@ -881,6 +1113,8 @@ function AppLockRow({
           <Text style={styles.rowLabel} maxFontSizeMultiplier={1.3}>{label}</Text>
           {!available ? (
             <Text style={styles.comingSoonSubtitle} maxFontSizeMultiplier={1.3}>{unavailableSubtitle}</Text>
+          ) : available && value && connectedSubtitle ? (
+            <Text style={styles.comingSoonSubtitle} maxFontSizeMultiplier={1.3}>{connectedSubtitle}</Text>
           ) : null}
         </View>
       </View>

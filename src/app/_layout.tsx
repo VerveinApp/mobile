@@ -2,11 +2,17 @@ import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { useFonts } from 'expo-font';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { View } from 'react-native';
+import { AppState, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
+import { useEffect } from 'react';
+
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
+import { ErrorBoundary } from '@/components/error-boundary';
+import { OfflineBanner } from '@/components/offline-banner';
 import { AppLockGate } from '@/components/security/app-lock-gate';
+import { initPurchases } from '@/lib/purchases';
+import { refreshSessionReminders } from '@/lib/session-reminders';
 import { AppThemeProvider, useAppTheme } from '@/lib/theme-context';
 
 SplashScreen.preventAutoHideAsync();
@@ -24,6 +30,32 @@ export default function RootLayout() {
     'Geist-Black': require('../assets/fonts/Geist-Black.ttf'),
   });
 
+  // Fire-and-forget, same as every other optional-integration init in this
+  // app (health-kit.ts has no equivalent call — it inits lazily per-call
+  // instead — but RevenueCat's own SDK requires one explicit configure()
+  // before any other method works, so this has to run once, early, unlike
+  // that pattern). Safe this early: initPurchases no-ops without throwing if
+  // the API key or platform isn't right, per its own doc comment.
+  useEffect(() => {
+    initPurchases();
+  }, []);
+
+  // Smart-reminder foreground refresh (Vervein addition — see session-
+  // reminders.ts's own header comment for why this has to run here, at the
+  // app root, rather than in a background task: local-notification content
+  // is frozen at scheduling time, so the only reliable way to keep it
+  // reasonably fresh is to recompute it every time the app is actually
+  // opened. refreshSessionReminders no-ops immediately if reminders are
+  // off and throttles itself to once per real day, so this is cheap to
+  // call on every cold start and every return to foreground.
+  useEffect(() => {
+    refreshSessionReminders();
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshSessionReminders();
+    });
+    return () => subscription.remove();
+  }, []);
+
   if (!fontsLoaded) return null;
 
   return (
@@ -32,11 +64,16 @@ export default function RootLayout() {
     // separate from whatever the Stack navigator handles internally for its
     // own swipe-back gesture.
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <AppThemeProvider>
-        <BottomSheetModalProvider>
-          <RootNavigator />
-        </BottomSheetModalProvider>
-      </AppThemeProvider>
+      {/* Wraps everything below, including AppThemeProvider itself — a
+          fallback that depended on app theme/state would never catch an
+          error IN that state (see error-boundary.tsx's own doc comment). */}
+      <ErrorBoundary>
+        <AppThemeProvider>
+          <BottomSheetModalProvider>
+            <RootNavigator />
+          </BottomSheetModalProvider>
+        </AppThemeProvider>
+      </ErrorBoundary>
     </GestureHandlerRootView>
   );
 }
@@ -80,10 +117,24 @@ function RootNavigator() {
           <Stack.Screen name="settings/index" />
           <Stack.Screen name="settings/progress-history" />
           <Stack.Screen name="settings/weight-history" />
+          <Stack.Screen name="settings/body-measurements" />
+          <Stack.Screen name="settings/condition-log" />
+          <Stack.Screen name="settings/progress-photos" />
+          <Stack.Screen name="log" />
+          <Stack.Screen name="notes/index" />
+          <Stack.Screen name="notes/[id]" />
+          <Stack.Screen name="referral" />
           <Stack.Screen name="legal/terms" />
           <Stack.Screen name="legal/privacy" />
+          {/* A real interruption (either the third-check-in trigger or a
+              manual Settings visit), not a forward step in any flow — modal
+              presentation + slide-from-bottom reads as "something popped up
+              on top," distinct from the rest of the app's slide_from_right
+              push navigation. */}
+          <Stack.Screen name="paywall" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
         </Stack>
         <AppLockGate />
+        <OfflineBanner />
       </View>
     </ThemeProvider>
   );
