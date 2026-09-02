@@ -40,6 +40,18 @@ export default function OnboardingWelcomeScreen() {
     router.push('/onboarding' as never);
   };
 
+  // Reuses the exact same safe path handleSignOut (settings/index.tsx) sends
+  // people through: create-account.tsx with no onboarding params, so
+  // verify.tsx's hasCompletedOnboarding() check decides what happens next —
+  // straight to the main app if this device already has a local profile
+  // (unlikely here, since this screen only shows without one, but still
+  // correct if it somehow does), onboarding otherwise. Covers a fresh
+  // install where someone already has an account from another device.
+  const handleSignIn = () => {
+    hapticImpactLight();
+    router.push('/onboarding/create-account' as never);
+  };
+
   return (
     <View style={styles.root}>
       <View style={[styles.canvas, { transform: [{ scale }] }]}>
@@ -67,8 +79,8 @@ export default function OnboardingWelcomeScreen() {
         </Text>
 
         <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>
-          {'Your training adapts to you,\n'}
-          not the other way around.
+          {'Pacing is a skill.\n'}
+          We&apos;re the coach for it.
         </Text>
 
         <Text style={styles.teaser} maxFontSizeMultiplier={1.4}>See your plan adapt to how you feel — before you sign up.</Text>
@@ -105,6 +117,13 @@ export default function OnboardingWelcomeScreen() {
               <ArrowUpIconGraphic size={24} />
             </View>
           </Animated.View>
+        </Pressable>
+
+        <Pressable style={styles.signInHit} onPress={handleSignIn} hitSlop={8}>
+          <Text style={styles.signInText} maxFontSizeMultiplier={1.3}>
+            {'Already have an account? '}
+            <Text style={styles.signInTextBold}>Sign in</Text>
+          </Text>
         </Pressable>
       </ReanimatedAnimated.View>
       </View>
@@ -146,9 +165,18 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       justifyContent: 'center',
       alignItems: 'flex-end',
     },
+    // marginBottom compensates for WordmarkTextGraphic being a real <Text>,
+    // not a tightly-cropped SVG: its box height is the full font lineHeight
+    // (~37.3pt for this cap-height), so ~10.29pt of it is invisible descender
+    // space below the actual baseline. Bottom-aligning raw boxes (flex-end)
+    // was dragging the icon's V-point 10.29pt below where the letters sit —
+    // this margin makes flex-end align the V to the true baseline instead,
+    // matching create-account.tsx's fixed-position lockup (which already
+    // gets this right by coincidence of its hand-tuned numbers).
     iconWrap: {
       width: 56.45,
       height: 50.79,
+      marginBottom: 10.29,
     },
     brandAccent: {
       position: 'absolute',
@@ -160,11 +188,19 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       left: 29.18,
       top: 0,
     },
-    // Negative margin pulls the wordmark back under the icon's tail (56.45
-    // - 41.03 from the original lockup's overlap) so the letterforms
-    // interlock with the "V" the same way the old absolute positions did.
+    // Box-position math against Figma's CSS dump said -15.42 was correct,
+    // but that assumed the wordmark SVG's left-bearing matches Figma's live
+    // text layer. It doesn't — pixel-diffing a real Figma render against a
+    // live simulator screenshot showed -15.42 fuses the icon into the "e"
+    // with zero gap, while Figma keeps a small visible gap. Tuned against
+    // that ground truth instead of the box math.
+    //
+    // Follow-up: a true nearest-point pixel measurement (not a column scan)
+    // showed -11 still left a ~9.16pt gap on device — more than double
+    // Figma's real ~4.0pt gap between the same two shapes. -16.16 closes it
+    // to match.
     brandWordmark: {
-      marginLeft: -15.42,
+      marginLeft: -16.16,
     },
     kicker: {
       position: 'absolute',
@@ -224,6 +260,23 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       top: 656,
       width: 285,
       height: 38,
+    },
+    signInHit: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      top: 706,
+      alignItems: 'center',
+    },
+    signInText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontFamily: 'Geist-Medium',
+    },
+    signInTextBold: {
+      color: colors.text,
+      fontFamily: 'Geist-Bold',
+      textDecorationLine: 'underline',
     },
     primaryButtonVisual: {
       width: '100%',
