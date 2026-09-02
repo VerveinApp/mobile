@@ -1,0 +1,20 @@
+appId: app.vervein
+---
+- stopApp
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      text: "Good .*|Welcome|Continue|Go home"
+    timeout: 15000
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+- runFlow:
+    when:
+      visible: "Go home"
+    commands:
+      - tapOn: "Go home"
+- takeScreenshot: smoke-launch

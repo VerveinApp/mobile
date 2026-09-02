@@ -8,7 +8,12 @@ export function useColorScheme() {
   const [hasHydrated, setHasHydrated] = useState(false);
 
   useEffect(() => {
-    setHasHydrated(true);
+    // queueMicrotask: react-hooks/set-state-in-effect flags a same-tick
+    // setState-in-effect (can cascade an extra render) — deferring by a
+    // microtask still hydrates on the same frame in practice.
+    queueMicrotask(() => {
+      setHasHydrated(true);
+    });
   }, []);
 
   const colorScheme = useRNColorScheme();

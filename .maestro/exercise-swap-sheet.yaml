@@ -1,0 +1,90 @@
+appId: app.vervein
+# Two DISTINCT accessibility gaps were found and bisected in home/check-in.tsx:
+#
+# 1. FIXED: Pressable buttons that pair a native SymbolView icon with a
+#    sibling <Text> (inside an Animated.View) never got an implicit
+#    accessibility label — RN's automatic label derivation breaks on the
+#    icon sibling. Fixed with explicit accessibilityRole="button" +
+#    accessibilityLabel on "Watch form", "How to", and "Swap". These are now
+#    real, working text selectors (see the "Swap" step below).
+#
+# 2. STILL BROKEN, not fixed (no safe narrow fix found): content gated
+#    behind a conditional that flips from false→true shortly AFTER initial
+#    mount (not present in the first commit) never registers in the iOS
+#    accessibility tree, even though it renders and responds to touch
+#    normally. This affects the Rest Day heading/"Check in anyway" link
+#    (showRestDay flips true once the async profile load resolves) and the
+#    "Swap this exercise" Modal's own title/body text (gated by
+#    swapModalIndex, set after the Swap tap). This looks like a genuine
+#    Fabric/iOS accessibility-tree timing gap, not an app bug with an
+#    obvious fix — forcing one (remount tricks, native re-scan triggers)
+#    risked breaking the real fade animations, so it was left alone.
+#    Coordinate taps (point:) remain the working fallback for these two spots.
+---
+- stopApp
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      text: "Good .*|Welcome|Continue|Go home"
+    timeout: 15000
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+- runFlow:
+    when:
+      visible: "Go home"
+    commands:
+      - tapOn: "Go home"
+
+- tapOn: "Train"
+- tapOn: "Check in anyway"
+# Second "Check in anyway" (Rest Day full-screen state) — gap #2 above.
+- tapOn:
+    point: "50%,40%"
+- takeScreenshot: swap-flow-01-gauge
+# The dial is now a horizontal 5-segment bar (redesigned from the original
+# dome), 5 equal segments left-to-right Empty→Great. This point lands on the
+# rightmost segment (Great/5) — chosen specifically because Energy 5 never
+# grows the "Symptom tracking"/paywall card Energy 1 does, so "Start
+# session" stays on-screen without needing a scroll. A short settle before
+# this tap avoids a race with the rest-day dismissal's own transition still
+# finishing.
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    point: "78%,40%"
+- waitForAnimationToEnd:
+    timeout: 1500
+- takeScreenshot: swap-flow-01b-energy-selected
+# Real, observed non-determinism: selecting the segment sometimes lands
+# directly on the workout screen already, sometimes still needs "Start
+# session" tapped explicitly (a layout-timing race in the app itself, not
+# this flow). Handled both ways instead of assuming either one.
+- runFlow:
+    when:
+      notVisible: "Exercise 1 of .*"
+    commands:
+      - runFlow:
+          when:
+            visible: "Start session"
+          commands:
+            - tapOn: "Start session"
+- extendedWaitUntil:
+    visible:
+      text: "Exercise 1 of .*"
+    timeout: 10000
+- takeScreenshot: swap-flow-02-workout
+- tapOn: "Swap"
+- waitForAnimationToEnd:
+    timeout: 1000
+- takeScreenshot: swap-flow-03-sheet-open
+# "Cancel" on the swap sheet — the Modal's own content is gap #2 above, so
+# this verifies via screenshot rather than a text assertion.
+- tapOn:
+    point: "50%,54%"
+- waitForAnimationToEnd:
+    timeout: 1000
+- takeScreenshot: swap-flow-04-sheet-closed

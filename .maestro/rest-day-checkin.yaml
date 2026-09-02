@@ -1,0 +1,45 @@
+appId: app.vervein
+# Regression guard for the rest-day path specifically — content that first
+# appears only after the async profile load resolves (never on the initial
+# render). This is the exact case documented in home/check-in.tsx's own
+# header comment as having a known, unresolved iOS accessibility-tree gap:
+# VoiceOver and Maestro's own tapOn-by-accessibility-label can't reliably
+# rediscover "Check in anyway" after it renders, despite it displaying and
+# responding to touch normally. This flow only asserts the content is
+# VISIBLE — it deliberately does not assert a tapOn: "Check in anyway" by
+# label, since that's the documented, still-open broken interaction (see
+# check-in.tsx for the full investigation history and what's already been
+# tried and ruled out).
+#
+# Whether today lands on a rest day or a real training day depends on the
+# signed-in profile's own scheduled days, which this flow doesn't control —
+# it only asserts the rest-day content when that's what actually renders.
+---
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      text: "Good .*|Continue|Go home"
+    timeout: 15000
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+- runFlow:
+    when:
+      visible: "Go home"
+    commands:
+      - tapOn: "Go home"
+- tapOn: "Train"
+- extendedWaitUntil:
+    visible:
+      text: "Rest day|Exercise 1 of .*|Check in & start|Strength Session"
+    timeout: 8000
+- runFlow:
+    when:
+      visible: "Rest day"
+    commands:
+      - assertVisible: "Rest day"
+      - assertVisible: "Check in anyway"
+      - takeScreenshot: rest-day-reachable

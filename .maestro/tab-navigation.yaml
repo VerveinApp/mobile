@@ -1,0 +1,44 @@
+appId: app.vervein
+---
+- stopApp
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      text: "Good .*|Welcome|Continue|Go home"
+    timeout: 15000
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+- runFlow:
+    when:
+      visible: "Go home"
+    commands:
+      - tapOn: "Go home"
+
+- assertVisible: "Summary"
+- takeScreenshot: tab-summary
+
+- tapOn: "Train"
+- extendedWaitUntil:
+    visible:
+      text: ".*"
+    timeout: 5000
+- takeScreenshot: tab-train
+
+- tapOn: "Progress"
+- assertVisible: "STRENGTH PROGRESS"
+- takeScreenshot: tab-progress
+
+- tapOn: "Profile"
+- extendedWaitUntil:
+    visible:
+      text: ".*"
+    timeout: 5000
+- takeScreenshot: tab-profile
+
+- tapOn: "Summary"
+- assertVisible: "Good .*"
+- takeScreenshot: tab-back-to-summary

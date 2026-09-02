@@ -1,0 +1,30 @@
+appId: app.vervein
+# Verifies the Progress Photos screen and its Take Photo / Choose from
+# Library choices are reachable and correctly labeled — a regression guard
+# for the icon-sibling accessibility-label bug already found and fixed once
+# in this exact screen (see settings/progress-photos.tsx's own choiceRow
+# Pressables).
+#
+# DELIBERATELY STOPS HERE. Actually tapping either choice opens the real
+# system camera/photo-library picker — on a simulator signed into a real
+# iCloud account (not a synthetic test profile), that surfaces real, live
+# personal photos, not placeholder data. This was confirmed directly during
+# this flow's own development. Never extend this flow to tap past this
+# point in an automated or CI context — do that interactively, by hand,
+# only on a device/simulator you know isn't carrying a real photo library.
+#
+# Also note: settings/progress-photos.tsx has no nav entry point yet (see
+# lib/progress-photos.ts's own header comment) — reachable only via the
+# vervein://settings/progress-photos deep link used below.
+---
+- launchApp:
+    clearState: false
+- openLink: "vervein://settings/progress-photos"
+- extendedWaitUntil:
+    visible:
+      text: "Progress Photos"
+    timeout: 8000
+- tapOn: "Add a progress photo"
+- assertVisible: "Take Photo"
+- assertVisible: "Choose from Library"
+- takeScreenshot: photo-add-choices-reachable
