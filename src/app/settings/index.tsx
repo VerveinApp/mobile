@@ -217,7 +217,6 @@ export default function SettingsScreen() {
   const conditionsHover = useHoverFade();
   const movementRestrictionsHover = useHoverFade();
   const progressHover = useHoverFade();
-  const logHover = useHoverFade();
   const nameHover = useHoverFade();
   const imperialInteraction = { hover: useHoverFade(), press: useLiquidPress() };
   const metricInteraction = { hover: useHoverFade(), press: useLiquidPress() };
@@ -582,15 +581,6 @@ export default function SettingsScreen() {
 
         <Section styles={styles} title="DATA">
           <View style={styles.card}>
-            <NavRow
-              styles={styles}
-              colors={colors}
-              icon="square.and.pencil"
-              label="Log"
-              subtitle="Backfill a past session or weigh-in"
-              onPress={() => router.push('/log' as never)}
-              hover={logHover}
-            />
             <NavRow
               styles={styles}
               colors={colors}

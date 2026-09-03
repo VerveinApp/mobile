@@ -20,20 +20,36 @@ import { WheelPicker } from '@/components/onboarding/wheel-picker';
 // onboarding/step-5.tsx.
 const WEIGHT_LB_ITEMS = Array.from({ length: 281 }, (_, i) => `${i + 80} lb`);
 const WEIGHT_KG_ITEMS = Array.from({ length: 146 }, (_, i) => `${i + 35} kg`);
+// A second, narrow wheel for tenths — this log previously only stored whole
+// kg/lb, which was coarse enough to hide several days of genuine progress
+// between one whole-unit tick and the next.
+const DECIMAL_ITEMS = Array.from({ length: 10 }, (_, i) => `.${i}`);
 const DEFAULT_WEIGHT_KG = 73;
 
-function kgToLbIndex(kg: number): number {
-  return Math.min(WEIGHT_LB_ITEMS.length - 1, Math.max(0, Math.round(kg / 0.453592) - 80));
+function roundTo1(n: number): number {
+  return Math.round(n * 10) / 10;
 }
-function lbToKg(lbIndex: number): number {
-  return Math.round((lbIndex + 80) * 0.453592);
+function kgToLbWholeIndex(kg: number): number {
+  return Math.min(WEIGHT_LB_ITEMS.length - 1, Math.max(0, Math.floor(kg / 0.453592) - 80));
 }
-function kgToKgIndex(kg: number): number {
-  return Math.min(WEIGHT_KG_ITEMS.length - 1, Math.max(0, kg - 35));
+function kgToLbDecimalIndex(kg: number): number {
+  return Math.round((kg / 0.453592) % 1 * 10) % 10;
+}
+function lbPartsToKg(lbWholeIndex: number, decimalIndex: number): number {
+  return roundTo1((lbWholeIndex + 80 + decimalIndex / 10) * 0.453592);
+}
+function kgToKgWholeIndex(kg: number): number {
+  return Math.min(WEIGHT_KG_ITEMS.length - 1, Math.max(0, Math.floor(kg) - 35));
+}
+function kgToKgDecimalIndex(kg: number): number {
+  return Math.round((kg % 1) * 10) % 10;
+}
+function kgPartsToKg(kgWholeIndex: number, decimalIndex: number): number {
+  return kgWholeIndex + 35 + decimalIndex / 10;
 }
 
 function formatWeight(weightKg: number, unit: UnitSystem): string {
-  return unit === 'metric' ? `${weightKg} kg` : `${Math.round(weightKg / 0.453592)} lb`;
+  return unit === 'metric' ? `${roundTo1(weightKg)} kg` : `${roundTo1(weightKg / 0.453592)} lb`;
 }
 
 function formatEntryDate(dateStr: string): string {
@@ -104,8 +120,10 @@ export default function WeightHistoryScreen() {
     }
   };
 
-  const lbIndex = kgToLbIndex(draftWeightKg);
-  const kgIndex = kgToKgIndex(draftWeightKg);
+  const lbWholeIndex = kgToLbWholeIndex(draftWeightKg);
+  const lbDecimalIndex = kgToLbDecimalIndex(draftWeightKg);
+  const kgWholeIndex = kgToKgWholeIndex(draftWeightKg);
+  const kgDecimalIndex = kgToKgDecimalIndex(draftWeightKg);
 
   return (
     <View style={styles.root}>
@@ -146,19 +164,35 @@ export default function WeightHistoryScreen() {
               <View style={styles.addCard}>
                 <View style={styles.wheelRow}>
                   {unit === 'imperial' ? (
-                    <WheelPicker
-                      items={WEIGHT_LB_ITEMS}
-                      selectedIndex={lbIndex}
-                      onChange={(index) => setDraftWeightKg(lbToKg(index))}
-                      width={110}
-                    />
+                    <>
+                      <WheelPicker
+                        items={WEIGHT_LB_ITEMS}
+                        selectedIndex={lbWholeIndex}
+                        onChange={(index) => setDraftWeightKg(lbPartsToKg(index, lbDecimalIndex))}
+                        width={110}
+                      />
+                      <WheelPicker
+                        items={DECIMAL_ITEMS}
+                        selectedIndex={lbDecimalIndex}
+                        onChange={(index) => setDraftWeightKg(lbPartsToKg(lbWholeIndex, index))}
+                        width={50}
+                      />
+                    </>
                   ) : (
-                    <WheelPicker
-                      items={WEIGHT_KG_ITEMS}
-                      selectedIndex={kgIndex}
-                      onChange={(index) => setDraftWeightKg(index + 35)}
-                      width={110}
-                    />
+                    <>
+                      <WheelPicker
+                        items={WEIGHT_KG_ITEMS}
+                        selectedIndex={kgWholeIndex}
+                        onChange={(index) => setDraftWeightKg(kgPartsToKg(index, kgDecimalIndex))}
+                        width={110}
+                      />
+                      <WheelPicker
+                        items={DECIMAL_ITEMS}
+                        selectedIndex={kgDecimalIndex}
+                        onChange={(index) => setDraftWeightKg(kgPartsToKg(kgWholeIndex, index))}
+                        width={50}
+                      />
+                    </>
                   )}
                 </View>
                 <Pressable
