@@ -1,11 +1,17 @@
 appId: app.vervein
+# "Get started" is the real first-launch state on a device with no cached
+# session/profile at all -- the only state CI can ever start from, and the
+# one every other flow's assertion never accounted for (they were all
+# written and tested against a simulator already carrying local dev state).
+# See maestro.yml's own comment on why the other 4 flows require that
+# already-onboarded state and aren't run in CI yet.
 ---
 - stopApp
 - launchApp:
     clearState: false
 - extendedWaitUntil:
     visible:
-      text: "Good .*|Welcome|Continue|Go home"
+      text: "Good .*|Welcome|Continue|Go home|Get started"
     timeout: 15000
 - runFlow:
     when:

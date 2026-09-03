@@ -1,4 +1,7 @@
 appId: app.vervein
+# Not run in CI yet (see maestro.yml's own comment) -- assumes an
+# already-onboarded, signed-in profile, which a genuinely fresh CI install
+# never has. Local-dev-only until a test-account-seeding mechanism exists.
 ---
 - stopApp
 - launchApp:

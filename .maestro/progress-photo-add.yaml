@@ -16,6 +16,10 @@ appId: app.vervein
 # Also note: settings/progress-photos.tsx has no nav entry point yet (see
 # lib/progress-photos.ts's own header comment) — reachable only via the
 # vervein://settings/progress-photos deep link used below.
+#
+# Not run in CI yet (see maestro.yml's own comment) -- assumes an
+# already-onboarded, signed-in profile, which a genuinely fresh CI install
+# never has. Local-dev-only until a test-account-seeding mechanism exists.
 ---
 - launchApp:
     clearState: false

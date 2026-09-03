@@ -14,6 +14,10 @@ appId: app.vervein
 # Whether today lands on a rest day or a real training day depends on the
 # signed-in profile's own scheduled days, which this flow doesn't control —
 # it only asserts the rest-day content when that's what actually renders.
+#
+# Not run in CI yet (see maestro.yml's own comment) -- assumes an
+# already-onboarded, signed-in profile, which a genuinely fresh CI install
+# never has. Local-dev-only until a test-account-seeding mechanism exists.
 ---
 - launchApp:
     clearState: false

@@ -20,6 +20,10 @@ appId: app.vervein
 #    obvious fix — forcing one (remount tricks, native re-scan triggers)
 #    risked breaking the real fade animations, so it was left alone.
 #    Coordinate taps (point:) remain the working fallback for these two spots.
+#
+# Not run in CI yet (see maestro.yml's own comment) -- assumes an
+# already-onboarded, signed-in profile, which a genuinely fresh CI install
+# never has. Local-dev-only until a test-account-seeding mechanism exists.
 ---
 - stopApp
 - launchApp:
