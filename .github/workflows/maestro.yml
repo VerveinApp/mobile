@@ -102,8 +102,25 @@ jobs:
       # -derivedDataPath) since a dependency-version miss still benefits
       # from not re-fetching pod sources over the network even when none of
       # the actual compiled objects can be reused.
-      - name: Cache CocoaPods sources and Xcode DerivedData
-        uses: actions/cache@v4
+      #
+      # actions/cache (the combined restore+save action) was tried first and
+      # confirmed broken for this job's actual shape: its save step is a
+      # POST hook that's skipped by default whenever ANY later step in the
+      # job fails (`save-always`, off by default) — including "Run Maestro
+      # flows", which has nothing to do with whether the build that produced
+      # this cache succeeded. Run 33803132132 hit exactly this: a genuine
+      # cache miss, a successful build, then a Maestro flow failure, and the
+      # save silently never happened (confirmed via the Post step's own log
+      # being completely empty, not even a header — the engine never
+      # invoked it). GitHub's own README for `save-always` says it "does not
+      # work as intended and will be removed" and to use the separate
+      # restore/save actions instead, which is what this does: restore here
+      # (before the build), save right after "Boot simulator and build"
+      # succeeds — so the cache reflects whether the expensive compile
+      # step worked, never whether the unrelated E2E flows afterward did.
+      - name: Restore CocoaPods sources and Xcode DerivedData
+        id: pods-derived-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/Library/Caches/CocoaPods
@@ -182,6 +199,21 @@ jobs:
           fi
           echo "APP_PATH=$APP_PATH"
           xcrun simctl install "$UDID" "$APP_PATH"
+
+      # Saved here, right after the build that actually produces this
+      # content succeeds — not left to a POST hook at the end of the job,
+      # which is what silently skipped this save in run 33803132132 (see
+      # the restore step's own comment above for why). Skips entirely on an
+      # exact cache hit (nothing new to write) via the restore step's own
+      # output, matching actions/cache's combined-action behavior.
+      - name: Save CocoaPods sources and Xcode DerivedData
+        if: steps.pods-derived-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/Library/Caches/CocoaPods
+            ios/build
+          key: ${{ steps.pods-derived-cache.outputs.cache-primary-key }}
 
       - name: Run Maestro flows
         run: |
