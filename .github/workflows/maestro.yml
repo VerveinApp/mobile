@@ -121,17 +121,19 @@ jobs:
           # part of this, producing the same embedded JS bundle expo
           # run:ios would have.
           #
-          # Debug, not Release: a Release build + the Test Store sandbox key
-          # in EXPO_PUBLIC_REVENUECAT_API_KEY_IOS trips RevenueCat's own
-          # "Wrong API Key" guard, which closes the app immediately to
-          # protect test purchases -- exactly what run 9 hit. E2E flows here
-          # don't need a production-signed build, so Debug sidesteps that
-          # guard entirely and keeps this workflow decoupled from whatever
-          # real App Store Connect / RevenueCat key ends up configured.
+          # Release, not Debug: run 10 tried Debug specifically to dodge
+          # RevenueCat's "Wrong API Key" guard, but this project has
+          # expo-dev-client installed, so a Debug build boots the dev-client
+          # launcher shell ("Searching for development servers...") instead
+          # of the real app -- it needs a live Metro server that doesn't
+          # exist in CI, so all 5 flows failed. Release is the only
+          # configuration that produces a standalone, embedded-bundle app;
+          # EXPO_PUBLIC_REVENUECAT_API_KEY_IOS is now the real production
+          # key (see .env.local), which doesn't trip that guard.
           xcodebuild \
             -workspace ios/VerveIn.xcworkspace \
             -scheme VerveIn \
-            -configuration Debug \
+            -configuration Release \
             -destination "id=$UDID" \
             -derivedDataPath ios/build \
             CODE_SIGNING_ALLOWED=NO \
