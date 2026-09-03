@@ -28,6 +28,7 @@ import ReanimatedAnimated, {
 } from 'react-native-reanimated';
 import { SymbolView } from 'expo-symbols';
 import { openBrowserAsync } from 'expo-web-browser';
+import { postAccessibilityScreenChanged } from 'expo-accessibility-rescan';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { getCalibration, submitSessionFeedback } from '@/lib/calibration';
@@ -582,42 +583,72 @@ export default function EnergyCheckInScreen() {
   // showRestDay flips true only after the async profile load resolves —
   // never on the very first render — and content that arrives that way
   // doesn't get picked up by iOS's accessibility tree on its own (same real,
-  // narrow platform gap as handleOpenSwap's announcement below). Confirmed
-  // ruled out against a clean app install, each a genuinely different
-  // mechanism: (1) a key-forced remount of the rest-day subtree; (2)
-  // AccessibilityInfo.setAccessibilityFocus + findNodeHandle, called
-  // synchronously in this effect; (3) the Fabric-correct replacement for
-  // that same call — sendAccessibilityEvent(ref.current, 'focus') (the
-  // host-component ref directly, not a findNodeHandle() numeric tag, which
-  // is the old-architecture calling convention setAccessibilityFocus still
-  // uses under the hood) — deferred two animation frames past the mount to
-  // rule out a component-view-registry timing race. All three post the
-  // identical native UIAccessibilityLayoutChangedNotification
-  // (RCTMountingManager.mm's synchronouslyDispatchAccessbilityEventOnUIThread
-  // does this for both the legacy and modern JS APIs), so the fact that even
-  // the timing-corrected, architecture-correct version had no durable effect
-  // — Maestro's own tapOn-by-label intermittently found the element but the
-  // underlying onPress didn't reliably fire — points at something below
-  // this notification working as intended, plausibly Reanimated's
-  // FadeIn/FadeOut wrapping the whole subject interfering with how the OS
-  // tree treats the wrapped hierarchy, not a timing or API-choice problem.
-  // This announcement remains the one piece that's a real, if partial,
-  // improvement: it does get spoken, even though discovering "Check in
-  // anyway" by swiping afterward still doesn't work. Latched via a ref so
-  // this only fires on the actual false→true transition, not on every
-  // render where showRestDay happens to already be true.
+  // narrow platform gap as handleOpenSwap's announcement below).
   //
-  // ATTEMPT 4 (screenReaderEnabled, declared above) removed the
-  // FadeIn/FadeOut wrapper entirely for screen-reader users instead of
-  // forcing a re-scan around it — confirmed, via live testing, NOT to fix
-  // this gap either. See that declaration's own comment for what was
-  // actually tested and why it's kept regardless.
+  // Six different mechanisms have been tried and confirmed ineffective
+  // against a clean app install / a real seeded rest-day state: (1) a
+  // key-forced remount of the rest-day subtree; (2)
+  // AccessibilityInfo.setAccessibilityFocus + findNodeHandle; (3) the
+  // Fabric-correct sendAccessibilityEvent(ref.current, 'focus'), deferred two
+  // animation frames past mount; (4) removing the Reanimated FadeIn/FadeOut
+  // wrapper entirely (screenReaderEnabled, declared above — kept regardless,
+  // see its own comment, since it's a real improvement independent of this
+  // bug); (5) postAccessibilityScreenChanged (modules/expo-accessibility-
+  // rescan, called from the effect below) — attempts 1–3 all route through
+  // UIAccessibilityLayoutChangedNotification under the hood (confirmed by
+  // reading RCTMountingManager.mm), which Apple documents as being for
+  // content that MOVED or CHANGED on an already-known screen, not a node
+  // newly ENTERING the tree; attempt 5 posts
+  // UIAccessibilityScreenChangedNotification instead, Apple's own
+  // notification for "re-derive this screen's hierarchy from scratch," and
+  // is deferred two animation frames past the state flip on the theory that
+  // Fabric's JS-side commit and the native mounting manager's actual
+  // application of the new prop values are two distinct phases — kept since
+  // it's a real, if partial, improvement (verified: the native call
+  // executes, no thrown error) and independently justified by Apple's own
+  // documented notification semantics, but confirmed via live Maestro
+  // testing NOT to close the gap, with or without the defer; (6) the
+  // structural fix that seemed most likely to actually work — mounting the
+  // title/subtitle/link unconditionally from the very first render (hidden
+  // via opacity/pointerEvents/importantForAccessibility) instead of only
+  // inserting them into the tree once showRestDay flips true, so the state
+  // flip only ever changes PROPS on an already-mounted node rather than
+  // inserting a new one late. Tested live, combined with attempt 5's
+  // notification (both fire on the same transition): identical symptom,
+  // "Check in anyway" still not found. This was reverted rather than kept —
+  // unlike attempt 4's screen-reader gating, it has no independent benefit
+  // to justify the added structural complexity once it's confirmed not to
+  // close the gap. Its full code is preserved in this issue's own comment
+  // history if a future attempt wants to build on it. That every one of
+  // late-insertion, notification-choice, and mount-timing theories has now
+  // been tried and ruled out suggests the real mechanism is something else
+  // entirely — plausibly related to this screen's fixed-canvas
+  // `transform: [{ scale }]` wrapper (see the render below), untested by any
+  // attempt so far, though other elements on the same transformed canvas
+  // (onboarding's own identical convention) are reachable by Maestro fine,
+  // so it isn't simply "anything under this transform is unreachable" either.
+  // Genuinely needs Xcode's Accessibility Inspector attached to a real
+  // device to make further progress from here, not more guesses from the JS
+  // side.
   const wasRestDayRef = useRef(showRestDay);
   useEffect(() => {
     if (showRestDay && !wasRestDayRef.current) {
       AccessibilityInfo.announceForAccessibility(
         'Rest day. No session scheduled today — recovery is part of the plan.'
       );
+      // Deferred two animation frames past the state flip — same technique
+      // ATTEMPT 3 used for the identical reason: Fabric's JS-side commit and
+      // the native mounting manager's actual insertion of the new rest-day
+      // subtree are two distinct phases connected by an async queue, so
+      // posting the rescan notification in the same tick as the state
+      // change risks racing ahead of the native insertion it's supposed to
+      // be telling VoiceOver to notice. (Tested both ways — undeferred and
+      // deferred — neither closed the gap; see the comment above showRestDay.)
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          postAccessibilityScreenChanged();
+        });
+      });
     }
     wasRestDayRef.current = showRestDay;
   }, [showRestDay]);
@@ -898,6 +929,11 @@ export default function EnergyCheckInScreen() {
     // animationType="none" for screen-reader users on the chance iOS's
     // native modal-presentation animation is its own, separate
     // interference, but treat this as unverified, not a known fix.
+    //
+    // ATTEMPT 5 (postAccessibilityScreenChanged): same fix as showRestDay's
+    // own ATTEMPT 5 above, for the same reason — see that comment. Posted
+    // before the announcement so the tree is rebuilt first.
+    postAccessibilityScreenChanged();
     AccessibilityInfo.announceForAccessibility('Swap this exercise');
   };
 

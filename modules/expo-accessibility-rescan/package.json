@@ -1,0 +1,7 @@
+{
+  "name": "expo-accessibility-rescan",
+  "version": "1.0.0",
+  "description": "Posts UIAccessibilityScreenChangedNotification (not .layoutChanged) so VoiceOver/XCUITest re-derive the accessible hierarchy after content that mounts post-initial-render.",
+  "main": "index.ts",
+  "types": "index.ts"
+}
