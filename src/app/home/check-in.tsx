@@ -509,6 +509,32 @@ export default function EnergyCheckInScreen() {
 
   const entering = useFadeInEntering();
   const reducedMotion = useReducedMotion();
+  // Fourth attempt at the post-mount-reveal accessibility gap documented
+  // below (showRestDay's own comment) — the first three (key-forced
+  // remount, setAccessibilityFocus, sendAccessibilityEvent) all posted the
+  // right native notification but had no durable effect, pointing at
+  // Reanimated's FadeIn/FadeOut itself interfering with how iOS's
+  // accessibility tree treats the wrapped hierarchy. This hypothesis was
+  // tested directly this session by forcing screenReaderEnabled true and
+  // removing the FadeIn/FadeOut wrapper below (see the rest-day
+  // ReanimatedAnimated.View) — CONFIRMED INEFFECTIVE: Maestro's own
+  // accessibility-tree query still can't find "Check in anyway" even with
+  // the wrapper gone, an identical symptom to the original bug (visibly
+  // rendered, absent from the queryable tree), reproduced live against a
+  // real seeded rest-day state. So Reanimated's FadeIn/FadeOut is NOT the
+  // actual cause, at least not on its own — the real mechanism is still
+  // unknown. Kept anyway, gating on screenReaderEnabled: independent of
+  // whether it closes this bug, skipping entrance/exit animation for actual
+  // screen-reader users is a legitimate improvement on its own (animated
+  // transitions can be disorienting when navigating by VoiceOver swipe),
+  // and it has zero effect on sighted users. The underlying "Check in
+  // anyway" tree-registration gap remains genuinely open.
+  const [screenReaderEnabled, setScreenReaderEnabled] = useState(false);
+  useEffect(() => {
+    AccessibilityInfo.isScreenReaderEnabled().then(setScreenReaderEnabled);
+    const subscription = AccessibilityInfo.addEventListener('screenReaderChanged', setScreenReaderEnabled);
+    return () => subscription.remove();
+  }, []);
   const ctaHover = useHoverFade();
   const ctaPress = useLiquidPress();
   const finishHover = useHoverFade();
@@ -580,6 +606,12 @@ export default function EnergyCheckInScreen() {
   // anyway" by swiping afterward still doesn't work. Latched via a ref so
   // this only fires on the actual false→true transition, not on every
   // render where showRestDay happens to already be true.
+  //
+  // ATTEMPT 4 (screenReaderEnabled, declared above) removed the
+  // FadeIn/FadeOut wrapper entirely for screen-reader users instead of
+  // forcing a re-scan around it — confirmed, via live testing, NOT to fix
+  // this gap either. See that declaration's own comment for what was
+  // actually tested and why it's kept regardless.
   const wasRestDayRef = useRef(showRestDay);
   useEffect(() => {
     if (showRestDay && !wasRestDayRef.current) {
@@ -855,6 +887,17 @@ export default function EnergyCheckInScreen() {
     // and a key-forced remount were both tried there and ruled out against a
     // clean app install, so this announcement is left as the one real, if
     // partial, improvement rather than repeating disproven attempts here).
+    //
+    // This Modal uses React Native's own animationType, not Reanimated.
+    // showRestDay's parallel attempt at removing its Reanimated
+    // FadeIn/FadeOut wrapper for screen-reader users was tested live this
+    // session and confirmed NOT to fix that gap — Reanimated's animation
+    // wrapper isn't actually the cause there, which weakens (without fully
+    // ruling out, since this is a genuinely different mechanism) the same
+    // theory applied here: the Modal's own JSX below still switches to
+    // animationType="none" for screen-reader users on the chance iOS's
+    // native modal-presentation animation is its own, separate
+    // interference, but treat this as unverified, not a known fix.
     AccessibilityInfo.announceForAccessibility('Swap this exercise');
   };
 
@@ -1046,8 +1089,8 @@ export default function EnergyCheckInScreen() {
         {showRestDay ? (
           <ReanimatedAnimated.View
             key="rest-day"
-            entering={FadeIn.duration(CROSS_FADE_MS)}
-            exiting={FadeOut.duration(CROSS_FADE_MS)}
+            entering={screenReaderEnabled ? undefined : FadeIn.duration(CROSS_FADE_MS)}
+            exiting={screenReaderEnabled ? undefined : FadeOut.duration(CROSS_FADE_MS)}
           >
             <Text style={styles.title} maxFontSizeMultiplier={1.3}>Rest day</Text>
             <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>
@@ -1574,7 +1617,7 @@ export default function EnergyCheckInScreen() {
             <Modal
               visible={swapModalIndex !== null}
               transparent
-              animationType="fade"
+              animationType={screenReaderEnabled ? 'none' : 'fade'}
               onRequestClose={handleCloseSwap}
               statusBarTranslucent
             >
