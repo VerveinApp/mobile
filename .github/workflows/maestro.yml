@@ -71,15 +71,21 @@ jobs:
         run: |
           # The coordinate-based taps in exercise-swap-sheet.yaml/
           # rest-day-checkin.yaml were tuned against an "iPhone 11 Pro Max"
-          # locally, but GitHub's macOS runner images don't carry that model
-          # (confirmed: their available list only goes down to the 16
-          # family / SE 3rd gen). Anchored on "iPhone 16 (" specifically
-          # (not "iPhone 16 Pro"/"Plus"/"16e") so the match is exact, and
-          # take the last (newest iOS runtime) match. If the flows'
-          # percentage-based taps land wrong on this device's different
-          # aspect ratio, that's the next thing to debug.
+          # locally -- not available on any GitHub runner image. The
+          # macos-15 runner had "iPhone 16" but not "iPhone 17"; the
+          # macos-26 runner has the reverse (its catalog dropped plain
+          # "iPhone 16" entirely once 17-series simulators showed up).
+          # Try a priority list instead of one hardcoded model so this
+          # survives the next runner image's device-catalog churn too.
           xcrun simctl list devices available
-          UDID=$(xcrun simctl list devices available | grep -E '^ *iPhone 16 \(' | tail -1 | grep -oE '[0-9A-F-]{36}')
+          UDID=""
+          for MODEL in "iPhone 17" "iPhone 16" "iPhone 17 Pro" "iPhone Air" "iPhone 16e"; do
+            UDID=$(xcrun simctl list devices available | grep -E "^ *${MODEL} \(" | tail -1 | grep -oE '[0-9A-F-]{36}')
+            if [ -n "$UDID" ]; then
+              echo "Matched model: $MODEL"
+              break
+            fi
+          done
           echo "Selected UDID: $UDID"
           echo "UDID=$UDID" >> "$GITHUB_ENV"
           xcrun simctl bootstatus "$UDID" -b
