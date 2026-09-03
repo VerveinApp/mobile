@@ -8,6 +8,18 @@ appId: app.vervein
 - launchApp:
     clearState: false
 - openLink: "vervein://e2e-seed"
+# A fresh simulator that's never been asked before shows a real system
+# "Open in 'VerveIn'?" confirmation before actually following a custom URL
+# scheme link -- doesn't reproduce once a given simulator has been asked
+# and answered once (which is why this never showed up in local testing on
+# an already-used dev simulator), but a genuinely fresh CI simulator hits
+# it every time. Guarded, not required, since dismissed-once devices skip
+# straight past it.
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
 - extendedWaitUntil:
     visible:
       text: "Good .*|Welcome|Continue|Go home"

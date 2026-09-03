@@ -25,6 +25,14 @@ appId: app.vervein
 - launchApp:
     clearState: false
 - openLink: "vervein://e2e-seed"
+# A fresh simulator that's never been asked before shows a real system
+# "Open in 'VerveIn'?" confirmation before actually following a custom URL
+# scheme link -- see tab-navigation.yaml's own comment on this.
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
 - extendedWaitUntil:
     visible:
       text: "Good .*|Continue|Go home"

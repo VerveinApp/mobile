@@ -13,9 +13,9 @@ appId: app.vervein
 # point in an automated or CI context — do that interactively, by hand,
 # only on a device/simulator you know isn't carrying a real photo library.
 #
-# Also note: settings/progress-photos.tsx has no nav entry point yet (see
-# lib/progress-photos.ts's own header comment) — reachable only via the
-# vervein://settings/progress-photos deep link used below.
+# Reached via a direct deep link below rather than tapping through Settings'
+# own DATA section nav row, so this flow doesn't depend on that row's own
+# position/label staying exactly the same.
 #
 # Needs an already-onboarded, signed-in profile, which a genuinely fresh CI
 # install never has -- the first openLink below seeds one via
@@ -26,7 +26,22 @@ appId: app.vervein
 - launchApp:
     clearState: false
 - openLink: "vervein://e2e-seed"
+# A fresh simulator that's never been asked before shows a real system
+# "Open in 'VerveIn'?" confirmation before actually following a custom URL
+# scheme link -- see tab-navigation.yaml's own comment on this. Guarding
+# both openLink calls below since it's cheap either way and it's untested
+# whether answering once suppresses it for the rest of this same run.
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
 - openLink: "vervein://settings/progress-photos"
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
 - extendedWaitUntil:
     visible:
       text: "Progress Photos"
