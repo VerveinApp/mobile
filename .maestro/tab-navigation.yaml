@@ -20,10 +20,20 @@ appId: app.vervein
       visible: "Open"
     commands:
       - tapOn: "Open"
+# 15000ms was tight specifically here: this is the first flow in the whole
+# suite to actually trigger the system "Open in 'VerveIn'?" dialog (smoke-
+# launch never calls openLink at all), and CI runs 33793568696 and
+# 33803132132 both showed this exact assertion failing here — dismissing
+# that dialog alone ate ~8s of the budget in the log, leaving too little
+# for the app to also finish relaunching and routing after it, especially
+# under this runner's occasional software-rendered-GPU slowdowns (logged as
+# "GL pipe is running in software mode"). Every later flow in the same
+# simulator session never hits that dialog again once it's been dismissed
+# once, which is exactly why they didn't show the same failure.
 - extendedWaitUntil:
     visible:
       text: "Good .*|Welcome|Continue|Go home"
-    timeout: 15000
+    timeout: 30000
 - runFlow:
     when:
       visible: "Continue"
