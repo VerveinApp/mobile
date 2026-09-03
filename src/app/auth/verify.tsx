@@ -15,12 +15,13 @@ import ReanimatedAnimated, { FadeIn } from 'react-native-reanimated';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight, hapticSuccess } from '@/lib/haptics';
-import { hasCompletedOnboarding } from '@/lib/onboarding-draft';
+import { hasCompletedOnboarding, markOnboardingComplete } from '@/lib/onboarding-draft';
 import { goBack } from '@/lib/onboarding-nav';
+import { pullProfileFromRemote } from '@/lib/profile-sync';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { supabase } from '@/lib/supabase';
 import { useAppColors, useAppTheme } from '@/lib/theme-context';
-import { finishOnboarding } from '@/lib/user-profile';
+import { finishOnboarding, saveProfile } from '@/lib/user-profile';
 import {
   ArrowUpIconGraphic,
   LogoMarkAccentGraphic,
@@ -175,16 +176,28 @@ export default function VerifyEmailScreen() {
     }
     if (!params.name) {
       // No local profile AND no real onboarding data was ever collected in
-      // this session — the welcome.tsx Sign In path. Nothing about the
-      // account restores a profile (no data syncs to it — see account.ts's
-      // own doc comment), so there's nothing to save; route into the real
-      // questionnaire instead of permanently marking onboarding "complete"
-      // with garbage. This email is already verified, though — carry it
-      // forward as an ordinary route param (onboarding/index.tsx forwards
-      // it step by step, same as `name`) so create-account.tsx's second
-      // visit at the end of the questionnaire can skip re-sending and
-      // re-entering another OTP code for an email this device just proved
-      // ownership of. A route param, not a global AsyncStorage flag — see
+      // this session — the welcome.tsx Sign In path, most commonly a
+      // returning user on a new device or after a reinstall. Before
+      // assuming there's nothing to restore, check whether this account has
+      // a synced profile from another device (see lib/profile-sync.ts) —
+      // sign-in should mean something for a real returning account, not
+      // force the entire questionnaire again just because this specific
+      // device has never seen it.
+      const remoteProfile = await pullProfileFromRemote();
+      if (remoteProfile) {
+        await saveProfile(remoteProfile);
+        await markOnboardingComplete();
+        router.replace('/(tabs)' as never);
+        return;
+      }
+      // Genuinely nothing to restore — route into the real questionnaire
+      // instead of permanently marking onboarding "complete" with garbage.
+      // This email is already verified, though — carry it forward as an
+      // ordinary route param (onboarding/index.tsx forwards it step by
+      // step, same as `name`) so create-account.tsx's second visit at the
+      // end of the questionnaire can skip re-sending and re-entering
+      // another OTP code for an email this device just proved ownership
+      // of. A route param, not a global AsyncStorage flag — see
       // onboarding/index.tsx's own doc comment for why that distinction is
       // what actually keeps an unrelated, later "Get Started" attempt on
       // the same device from ever picking this up by accident.

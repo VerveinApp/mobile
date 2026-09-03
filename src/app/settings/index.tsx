@@ -61,12 +61,13 @@ const APPEARANCE_OPTIONS: { id: ThemePreference; label: string }[] = [
  * a real backend (Supabase; see lib/supabase.ts) with working email-OTP
  * sign-in already wired at onboarding (create-account.tsx / auth/verify.tsx)
  * — this row just shows the real signed-in session and a real sign-out
- * instead of a stale "no account system yet" placeholder. What's still
- * genuinely absent: none of this app's actual data (profile, session
- * history, workout logs, calibration) syncs to that account anywhere —
- * every store stays local-only (AsyncStorage) regardless of auth state,
- * so nothing in the app currently gates on or reads the Supabase session
- * except this row and the two onboarding auth screens. Delete Account (see
+ * instead of a stale "no account system yet" placeholder. The profile
+ * itself now syncs too (see lib/profile-sync.ts) — every local save
+ * best-effort mirrors to a real per-account row, and sign-in restores it on
+ * a device with no local profile instead of forcing onboarding again. What
+ * remains genuinely local-only: session history, workout logs, and
+ * calibration — none of that syncs to the account anywhere yet, so a new
+ * device gets a real profile back but starts that history fresh. Delete Account (see
  * account.ts) is real client code calling a real, written Edge Function
  * (supabase/functions/delete-account) — but that function may not be
  * deployed to this project yet, since deploying requires the developer's

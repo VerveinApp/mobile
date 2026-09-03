@@ -1,14 +1,19 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { markOnboardingComplete } from '@/lib/onboarding-draft';
+import { pushProfileToRemote } from '@/lib/profile-sync';
 
 const PROFILE_KEY = 'vervein.profile.v1';
 
 /**
  * The subset of onboarding answers that still matter after onboarding is
- * done — there's no backend/account profile yet, so this is what "the app
- * remembers about you" once the draft (which only exists during onboarding
- * itself) is cleared. Saved once, at the moment onboarding completes.
+ * done — this is what "the app remembers about you" once the draft (which
+ * only exists during onboarding itself) is cleared. Saved once, at the
+ * moment onboarding completes. AsyncStorage remains the source of truth
+ * this app actually reads from everywhere; saveProfile below also
+ * best-effort mirrors it to a real account-scoped row (see
+ * lib/profile-sync.ts) so sign-in on a new device can restore it instead
+ * of forcing onboarding again.
  */
 export type UserProfile = {
   name?: string;
@@ -45,6 +50,11 @@ export async function saveProfile(profile: UserProfile) {
   } catch {
     // Worst case Home falls back to generic defaults — same as a first-time user.
   }
+  // Not awaited: the local save above is what every caller actually depends
+  // on, and already succeeded (or didn't) by this point. The remote push is
+  // a best-effort mirror on top, never a reason to slow down or fail a
+  // local save that's already done.
+  void pushProfileToRemote(profile);
 }
 
 export async function getProfile(): Promise<UserProfile | null> {
