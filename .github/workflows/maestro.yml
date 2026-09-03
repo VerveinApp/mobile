@@ -11,7 +11,12 @@ on:
 jobs:
   e2e:
     runs-on: macos-26
-    timeout-minutes: 45
+    # Run 11 was still mid-build at the 45-minute mark and got cancelled by
+    # the job timeout, not a real failure -- a cold Release build with full
+    # optimization across this dependency tree (RevenueCat, HealthKit,
+    # GoogleSignIn, Reanimated, etc.) is much slower than the Debug build
+    # that finished around 11 minutes. No caching yet, so budget generously.
+    timeout-minutes: 90
     # An unspecified shell defaults to `bash -e {0}` with pipefail OFF, so a
     # failure partway through a pipeline (e.g. `curl ... | bash`, or a grep
     # that legitimately finds nothing) can be silently swallowed by whatever
