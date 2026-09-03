@@ -17,12 +17,15 @@ appId: app.vervein
 # lib/progress-photos.ts's own header comment) — reachable only via the
 # vervein://settings/progress-photos deep link used below.
 #
-# Not run in CI yet (see maestro.yml's own comment) -- assumes an
-# already-onboarded, signed-in profile, which a genuinely fresh CI install
-# never has. Local-dev-only until a test-account-seeding mechanism exists.
+# Needs an already-onboarded, signed-in profile, which a genuinely fresh CI
+# install never has -- the first openLink below seeds one via
+# app/e2e-seed.tsx (a no-op everywhere EXPO_PUBLIC_E2E_SEED_ENABLED isn't
+# explicitly set, i.e. everywhere except maestro.yml's own CI run and an
+# opted-in local dev env).
 ---
 - launchApp:
     clearState: false
+- openLink: "vervein://e2e-seed"
 - openLink: "vervein://settings/progress-photos"
 - extendedWaitUntil:
     visible:

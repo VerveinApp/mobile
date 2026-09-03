@@ -1,0 +1,13 @@
+-- referral_codes needs explicit table-level GRANTs for the authenticated
+-- role in addition to its RLS policies from 20260829000000_referral_system.sql
+-- — RLS policies only decide which ROWS a role can see once it already has
+-- table-level access; Postgres denies access at an earlier stage without
+-- this, independent of RLS. Confirmed via a real
+-- "permission denied for table referral_codes" (Postgres 42501) from
+-- PostgREST when querying with a role that has no GRANT.
+--
+-- referral_redemptions needs no equivalent grant: every access to it goes
+-- through the redeem-referral Edge Function's service_role client, which
+-- bypasses both RLS and table grants entirely (see that migration's own
+-- comment on why the table has no RLS policies either).
+grant select, insert on referral_codes to authenticated;

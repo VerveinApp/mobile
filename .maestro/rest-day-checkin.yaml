@@ -15,12 +15,16 @@ appId: app.vervein
 # signed-in profile's own scheduled days, which this flow doesn't control —
 # it only asserts the rest-day content when that's what actually renders.
 #
-# Not run in CI yet (see maestro.yml's own comment) -- assumes an
-# already-onboarded, signed-in profile, which a genuinely fresh CI install
-# never has. Local-dev-only until a test-account-seeding mechanism exists.
+# Needs an already-onboarded, signed-in profile, which a genuinely fresh CI
+# install never has -- openLink below seeds one via app/e2e-seed.tsx (a
+# no-op everywhere EXPO_PUBLIC_E2E_SEED_ENABLED isn't explicitly set, i.e.
+# everywhere except maestro.yml's own CI run and an opted-in local dev env).
+# The seeded profile's own scheduled days (monday/wednesday/friday) still
+# decide rest-day vs. training-day the same way any real profile would.
 ---
 - launchApp:
     clearState: false
+- openLink: "vervein://e2e-seed"
 - extendedWaitUntil:
     visible:
       text: "Good .*|Continue|Go home"

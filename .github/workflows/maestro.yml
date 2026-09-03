@@ -71,6 +71,7 @@ jobs:
           EXPO_PUBLIC_REVENUECAT_API_KEY_IOS=${{ vars.EXPO_PUBLIC_REVENUECAT_API_KEY_IOS }}
           EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=${{ vars.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
           EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+          EXPO_PUBLIC_E2E_SEED_ENABLED=1
           EOF
 
       - name: Set up Java (Maestro requirement)
@@ -157,19 +158,17 @@ jobs:
 
       - name: Run Maestro flows
         run: |
-          # Only smoke-launch for now. Runs 9/10/12 all revealed the same
-          # root cause: tab-navigation, rest-day-checkin, exercise-swap-sheet,
-          # and progress-photo-add all assume an already-onboarded, signed-in
-          # profile -- true of every simulator used for local dev this
-          # session, never true of a genuinely fresh CI install (no cached
-          # AsyncStorage, no cached Supabase session). smoke-launch's own
-          # assertion was widened to accept "Get started", the real
-          # first-launch screen; the other 4 need a real signed-in fixture
-          # to reach anything past it, which doesn't exist yet -- see the
-          # tracking work to add a test-only account-seeding mechanism.
-          # Re-add them here once that lands.
+          # Runs 9/10/12 all revealed the same root cause: tab-navigation,
+          # rest-day-checkin, exercise-swap-sheet, and progress-photo-add all
+          # assume an already-onboarded, signed-in profile -- true of every
+          # simulator used for local dev this session, never true of a
+          # genuinely fresh CI install. Each of those 4 now opens
+          # vervein://e2e-seed as its own first step (see app/e2e-seed.tsx)
+          # to seed that state before doing anything else; smoke-launch
+          # deliberately does NOT, since verifying the real first-launch
+          # screen is its whole point.
           FAILED=0
-          for flow in smoke-launch; do
+          for flow in smoke-launch tab-navigation rest-day-checkin exercise-swap-sheet progress-photo-add; do
             # `if ! ...` (not a bare command) so one flow failing doesn't
             # abort the loop under -e -- every flow should get a chance to
             # run and report, not just whichever one happens to be first.

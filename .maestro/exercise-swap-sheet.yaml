@@ -21,13 +21,21 @@ appId: app.vervein
 #    risked breaking the real fade animations, so it was left alone.
 #    Coordinate taps (point:) remain the working fallback for these two spots.
 #
-# Not run in CI yet (see maestro.yml's own comment) -- assumes an
-# already-onboarded, signed-in profile, which a genuinely fresh CI install
-# never has. Local-dev-only until a test-account-seeding mechanism exists.
+# Needs an already-onboarded, signed-in profile, which a genuinely fresh CI
+# install never has -- openLink below seeds one via app/e2e-seed.tsx (a
+# no-op everywhere EXPO_PUBLIC_E2E_SEED_ENABLED isn't explicitly set, i.e.
+# everywhere except maestro.yml's own CI run and an opted-in local dev env).
+#
+# NOTE: the point: taps below were calibrated against an iPhone 11 Pro Max
+# locally, not any device available on a GitHub runner (see maestro.yml's
+# own device-selection comment). They're percentage-based so should scale
+# reasonably, but haven't been verified against the actual CI device yet --
+# the next real CI run against this flow is the first real signal on that.
 ---
 - stopApp
 - launchApp:
     clearState: false
+- openLink: "vervein://e2e-seed"
 - extendedWaitUntil:
     visible:
       text: "Good .*|Welcome|Continue|Go home"
