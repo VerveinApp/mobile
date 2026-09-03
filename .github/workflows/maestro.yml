@@ -15,6 +15,20 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Run 5 failed with "package 'apple' is using Swift tools version
+      # 6.2.0 but the installed version is 6.1.0" -- the runner's default
+      # Xcode (16.4) only ships Swift 6.1. The simulator list from earlier
+      # runs showed iOS 26.2 runtimes available, meaning a newer Xcode is
+      # installed alongside 16.4 and just isn't the active one. Select the
+      # newest available Xcode before anything else touches the toolchain.
+      - name: Select latest available Xcode
+        run: |
+          ls /Applications | grep -i xcode
+          LATEST_XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          echo "Selecting $LATEST_XCODE"
+          sudo xcode-select -s "$LATEST_XCODE"
+          xcodebuild -version
+
       - uses: actions/setup-node@v5
         with:
           node-version: '24'
