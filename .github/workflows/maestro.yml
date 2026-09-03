@@ -12,6 +12,14 @@ jobs:
   e2e:
     runs-on: macos-26
     timeout-minutes: 45
+    # An unspecified shell defaults to `bash -e {0}` with pipefail OFF, so a
+    # failure partway through a pipeline (e.g. `curl ... | bash`, or a grep
+    # that legitimately finds nothing) can be silently swallowed by whatever
+    # runs last in the pipe. Explicit `shell: bash` switches GitHub Actions
+    # to `bash --noprofile --norc -eo pipefail {0}` for every run step.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v5
 
@@ -26,8 +34,12 @@ jobs:
       # macos-26 runner label on the theory it carries a newer Xcode set.
       - name: Select latest available Xcode
         run: |
-          ls /Applications | grep -i xcode
+          ls /Applications | grep -i xcode || true
           LATEST_XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$LATEST_XCODE" ]; then
+            echo "::error::No /Applications/Xcode_*.app found -- runner image naming convention may have changed"
+            exit 1
+          fi
           echo "Selecting $LATEST_XCODE"
           sudo xcode-select -s "$LATEST_XCODE"
           xcodebuild -version
@@ -61,7 +73,7 @@ jobs:
 
       - name: Install Maestro
         run: |
-          curl -Ls "https://get.maestro.mobile.dev" | bash
+          curl -Lfs "https://get.maestro.mobile.dev" | bash
           echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
 
       - name: Prebuild native iOS project
@@ -80,14 +92,22 @@ jobs:
           xcrun simctl list devices available
           UDID=""
           for MODEL in "iPhone 17" "iPhone 16" "iPhone 17 Pro" "iPhone Air" "iPhone 16e"; do
-            UDID=$(xcrun simctl list devices available | grep -E "^ *${MODEL} \(" | tail -1 | grep -oE '[0-9A-F-]{36}')
+            # `|| true`: under this job's `-eo pipefail`, a MODEL that isn't
+            # present makes this whole pipeline (and the bare assignment
+            # that captures it) exit non-zero -- which would otherwise kill
+            # the entire step on the very first non-match, never trying the
+            # rest of the priority list.
+            UDID=$(xcrun simctl list devices available | grep -E "^ *${MODEL} \(" | tail -1 | grep -oE '[0-9A-F-]{36}') || true
             if [ -n "$UDID" ]; then
               echo "Matched model: $MODEL"
               break
             fi
           done
+          if [ -z "$UDID" ]; then
+            echo "::error::None of the candidate simulator models were found on this runner"
+            exit 1
+          fi
           echo "Selected UDID: $UDID"
-          echo "UDID=$UDID" >> "$GITHUB_ENV"
           xcrun simctl bootstatus "$UDID" -b
           open -a Simulator --args -CurrentDeviceUDID "$UDID"
 
@@ -110,15 +130,26 @@ jobs:
             build
 
           APP_PATH=$(find ios/build/Build/Products -maxdepth 2 -iname "VerveIn.app" | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::Built VerveIn.app not found under ios/build/Build/Products"
+            exit 1
+          fi
           echo "APP_PATH=$APP_PATH"
           xcrun simctl install "$UDID" "$APP_PATH"
-          xcrun simctl launch "$UDID" app.vervein
 
       - name: Run Maestro flows
         run: |
+          FAILED=0
           for flow in smoke-launch tab-navigation rest-day-checkin exercise-swap-sheet progress-photo-add; do
-            maestro test ".maestro/$flow.yaml"
+            # `if ! ...` (not a bare command) so one flow failing doesn't
+            # abort the loop under -e -- every flow should get a chance to
+            # run and report, not just whichever one happens to be first.
+            if ! maestro test ".maestro/$flow.yaml"; then
+              echo "::error::Flow failed: $flow"
+              FAILED=1
+            fi
           done
+          exit $FAILED
 
       - name: Upload Maestro artifacts on failure
         if: failure()
