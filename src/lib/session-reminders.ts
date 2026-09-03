@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 import { getMostNeglectedBodyArea } from '@/lib/engine/training-state';
 import { localDateStr } from '@/lib/local-date';
 import { BODY_AREA_PRIORITY_LABEL } from '@/lib/plan-preview';
+import { getSessionHistory } from '@/lib/session-history';
 import { getTrainingState } from '@/lib/training-state';
 import { getProfile } from '@/lib/user-profile';
 
@@ -17,8 +18,40 @@ const LAST_RESCHEDULED_KEY = 'vervein.remindersLastRescheduled.v1';
 const ID_PREFIX = 'vervein-session-reminder-';
 
 const WEEKDAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-const REMINDER_HOUR = 8;
+// Fallback only — see getPersonalizedReminderHour below, which this constant
+// backs off to until there's enough real check-in history to trust instead.
+const DEFAULT_REMINDER_HOUR = 8;
 const REMINDER_MINUTE = 0;
+// Below this many real, live check-ins (see SessionHistoryEntry's own
+// checkedInAtHour doc comment), a "personalized" hour would just be fitting
+// noise from 1–2 data points — same "don't invent precision the evidence
+// doesn't support" rule this engine already applies everywhere else.
+const MIN_SAMPLES_FOR_PERSONALIZED_HOUR = 3;
+// How many of the most recent real check-ins to consider — recent enough to
+// reflect a real schedule change (a new job, a new routine) within a couple
+// weeks, not locked to a pattern from months ago.
+const PERSONALIZED_HOUR_SAMPLE_SIZE = 10;
+
+/**
+ * The median local hour across the most recent real, live check-ins — median
+ * rather than mean so one outlier (a single late-night catch-up session)
+ * doesn't drag an otherwise-consistent morning pattern toward the middle of
+ * the day. Falls back to DEFAULT_REMINDER_HOUR honestly whenever there isn't
+ * enough real evidence yet, rather than computing a "personalized" hour from
+ * a sample too small to mean anything.
+ */
+async function getPersonalizedReminderHour(): Promise<number> {
+  // getSessionHistory() sorts newest-first, so the first N here (not the
+  // last N) are the most recent real check-ins.
+  const history = await getSessionHistory();
+  const hours = history
+    .map((entry) => entry.checkedInAtHour)
+    .filter((hour): hour is number => hour !== undefined)
+    .slice(0, PERSONALIZED_HOUR_SAMPLE_SIZE);
+  if (hours.length < MIN_SAMPLES_FOR_PERSONALIZED_HOUR) return DEFAULT_REMINDER_HOUR;
+  const sorted = [...hours].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
 // BUG-FIX CONTEXT (Vervein addition, replacing the old fixed-copy design):
 // a scheduled local notification's title/body is frozen the moment it's
 // scheduled — there's no server here to compute fresh content right before
@@ -148,9 +181,13 @@ async function buildReminderContent(): Promise<{ title: string; body: string }> 
  * Cancels every existing reminder and schedules a fresh rolling window of
  * single-fire DATE triggers, one per real scheduled training day over the
  * next RESCHEDULE_WINDOW_DAYS, all carrying the SAME content computed once
- * here — a real, current read, not stale content frozen days ago. Today's
- * own slot is skipped once its 8am trigger time has already passed, so
- * this can never schedule a notification that would fire immediately.
+ * here — a real, current read, not stale content frozen days ago. The fire
+ * hour is personalized per getPersonalizedReminderHour (falling back to
+ * DEFAULT_REMINDER_HOUR without enough history), computed once per
+ * reschedule rather than per day — a mid-window schedule change would be a
+ * strange, inconsistent experience within the same rolling window. Today's
+ * own slot is skipped once that hour has already passed, so this can never
+ * schedule a notification that would fire immediately.
  */
 async function scheduleRollingWindow(
   Notifications: typeof import('expo-notifications'),
@@ -161,6 +198,7 @@ async function scheduleRollingWindow(
   if (scheduledSet.size === 0) return;
 
   const content = await buildReminderContent();
+  const reminderHour = await getPersonalizedReminderHour();
   const now = new Date();
   const scheduleOps: Promise<unknown>[] = [];
   for (let offset = 0; offset < RESCHEDULE_WINDOW_DAYS; offset++) {
@@ -170,8 +208,8 @@ async function scheduleRollingWindow(
     if (!scheduledSet.has(weekday)) continue;
 
     const fireDate = new Date(day);
-    fireDate.setHours(REMINDER_HOUR, REMINDER_MINUTE, 0, 0);
-    if (fireDate.getTime() <= now.getTime()) continue; // today's own slot already passed 8am — never fire immediately
+    fireDate.setHours(reminderHour, REMINDER_MINUTE, 0, 0);
+    if (fireDate.getTime() <= now.getTime()) continue; // today's own slot already passed — never fire immediately
 
     scheduleOps.push(
       Notifications.scheduleNotificationAsync({

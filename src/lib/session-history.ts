@@ -36,6 +36,16 @@ export type SessionHistoryEntry = {
    * itself writes, so this stays an honest "was this backfilled," not a
    * guess for old entries logged before the flag existed. */
   loggedRetroactively?: boolean;
+  /** Local hour (0–23) recordSessionCompletion was first called for this
+   * date — i.e. when a real, live check-in actually started, not when it
+   * finished (which could be 30–90+ minutes later depending on session
+   * length, a much noisier signal for "when does this person show up").
+   * Never set by recordPastSessionCompletion — a backfilled day reflects
+   * whenever it was reconstructed from memory, not a real arrival time, so
+   * it stays absent rather than recording a misleading hour. Read by
+   * session-reminders.ts to personalize reminder timing once enough real
+   * samples exist; absent for entries logged before this field existed. */
+  checkedInAtHour?: number;
 };
 
 const WEEKDAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
@@ -59,7 +69,14 @@ export async function recordSessionCompletion(completed: boolean, energy?: Energ
     // them; only the fields this function actually owns get overwritten.
     const existingToday = entries.find((e) => e.date === date);
     const withoutToday = entries.filter((e) => e.date !== date);
-    const next = [...withoutToday, { ...existingToday, date, completed, energy, completionStatus }].slice(-MAX_ENTRIES);
+    // Keeps whichever hour was already recorded for today (the start-of-
+    // check-in call) rather than letting the later finish-of-session call
+    // overwrite it with a much noisier "when did they finish" hour — see
+    // checkedInAtHour's own doc comment.
+    const checkedInAtHour = existingToday?.checkedInAtHour ?? new Date().getHours();
+    const next = [...withoutToday, { ...existingToday, date, completed, energy, completionStatus, checkedInAtHour }].slice(
+      -MAX_ENTRIES
+    );
     await AsyncStorage.setItem(KEY, JSON.stringify(next));
   } catch {
     // Worst case the weekly view just reads a little sparse — never a crash.
