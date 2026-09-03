@@ -603,7 +603,7 @@ export default function SettingsScreen() {
             <NavRow
               styles={styles}
               colors={colors}
-              icon="heart.text.square"
+              icon="list.bullet.clipboard"
               label="Condition Log"
               onPress={() => router.push('/settings/condition-log' as never)}
               hover={conditionLogHover}
