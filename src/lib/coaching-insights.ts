@@ -12,6 +12,14 @@ const MIN_OCCURRENCES = 3;
 // An occasional aside, not a repeating nag — once surfaced, it stays quiet
 // for a real stretch even if the pattern keeps being true.
 const COOLDOWN_DAYS = 14;
+// A real, deliberately generous bar: this app's own 5-point scale gives
+// genuinely different real answers ("much too easy" vs "too easy") more
+// room to actually converge on "just right" and stay there for a while
+// completely honestly — a well-calibrated week or two of real "just right"
+// answers is the SYSTEM WORKING, not a red flag. This only fires on a
+// streak long enough that habitual, unread tapping becomes a real
+// possibility worth a gentle check, not the first sign of a stable plan.
+const CONSECUTIVE_JUST_RIGHT_THRESHOLD = 10;
 
 function addDays(dateStr: string, days: number): string {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -59,16 +67,53 @@ function countUnderselledEnergyOccurrences(entries: SessionHistoryEntry[]): numb
 }
 
 /**
- * The one earned aside this app currently surfaces about a detected
- * pattern, not a stats dashboard — general and retrospective (never tied to
- * "is today the day after," which would risk nudging someone toward
- * over-reporting energy live at check-in, undermining the honesty of the
- * self-report that feeds calibration in the first place). Silent whenever
- * the pattern isn't real yet, or was already shown within COOLDOWN_DAYS —
- * same "silence is a valid state" rule as every other note in momentum.ts.
+ * Detects a long unbroken run of "just_right" feedback — this app's whole
+ * adaptive loop depends on honest, varied feedback (see personal-
+ * calibration.ts's own DELTA_BY_FEEDBACK), and it has no way to tell
+ * "genuinely well-calibrated for weeks" apart from "tapping the easiest box
+ * without reading it" from the rating alone. Doesn't try to guess which —
+ * that's not this function's call to make — just surfaces the honest
+ * observation once the streak is long enough to be worth a check. Only
+ * counts real, live feedback: a skipped day (no feedback given at all)
+ * breaks the streak rather than extending it, and backfilled entries
+ * (loggedRetroactively) don't count toward it either — reconstructed-
+ * from-memory feedback isn't the same live signal this is watching for.
+ */
+function countConsecutiveJustRightStreak(entries: SessionHistoryEntry[]): number {
+  // getSessionHistory() already returns newest-first; this only reasons
+  // about relative order, so it works the same whether or not this
+  // particular list happens to be pre-sorted that way already.
+  const sorted = [...entries].sort((a, b) => (a.date < b.date ? 1 : -1));
+  let streak = 0;
+  for (const entry of sorted) {
+    if (entry.loggedRetroactively) continue;
+    if (entry.feedback === undefined) break;
+    if (entry.feedback !== 'just_right') break;
+    streak += 1;
+  }
+  return streak;
+}
+
+/**
+ * The earned asides this app surfaces about a detected pattern, not a stats
+ * dashboard — general and retrospective (never tied to "is today the day
+ * after," which would risk nudging someone toward over-reporting energy
+ * live at check-in, undermining the honesty of the self-report that feeds
+ * calibration in the first place). Silent whenever no pattern is real yet,
+ * or one was already shown within COOLDOWN_DAYS — same "silence is a valid
+ * state" rule as every other note in momentum.ts. Checked in a fixed order;
+ * only ever returns one note per call even if more than one pattern is
+ * real, since this is meant to be an occasional aside, not a checklist.
  */
 export async function getCoachingInsightNote(entries: SessionHistoryEntry[]): Promise<string | null> {
-  if (countUnderselledEnergyOccurrences(entries) < MIN_OCCURRENCES) return null;
+  let note: string | null = null;
+  if (countUnderselledEnergyOccurrences(entries) >= MIN_OCCURRENCES) {
+    note = 'You tend to undersell your energy the day after a rough one — worth remembering next time one hits.';
+  } else if (countConsecutiveJustRightStreak(entries) >= CONSECUTIVE_JUST_RIGHT_THRESHOLD) {
+    note =
+      "You've said “just right” for a while now — if that's genuinely true, the plan's doing its job. If tapping through feels automatic, it can only adjust to what you actually tell it.";
+  }
+  if (!note) return null;
   try {
     const lastShown = await AsyncStorage.getItem(LAST_SHOWN_KEY);
     if (lastShown) {
@@ -79,5 +124,5 @@ export async function getCoachingInsightNote(entries: SessionHistoryEntry[]): Pr
   } catch {
     return null;
   }
-  return 'You tend to undersell your energy the day after a rough one — worth remembering next time one hits.';
+  return note;
 }
