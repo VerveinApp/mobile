@@ -120,10 +120,18 @@ jobs:
           # "Bundle React Native code and images" build phase still runs as
           # part of this, producing the same embedded JS bundle expo
           # run:ios would have.
+          #
+          # Debug, not Release: a Release build + the Test Store sandbox key
+          # in EXPO_PUBLIC_REVENUECAT_API_KEY_IOS trips RevenueCat's own
+          # "Wrong API Key" guard, which closes the app immediately to
+          # protect test purchases -- exactly what run 9 hit. E2E flows here
+          # don't need a production-signed build, so Debug sidesteps that
+          # guard entirely and keeps this workflow decoupled from whatever
+          # real App Store Connect / RevenueCat key ends up configured.
           xcodebuild \
             -workspace ios/VerveIn.xcworkspace \
             -scheme VerveIn \
-            -configuration Release \
+            -configuration Debug \
             -destination "id=$UDID" \
             -derivedDataPath ios/build \
             CODE_SIGNING_ALLOWED=NO \
