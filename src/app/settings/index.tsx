@@ -217,6 +217,9 @@ export default function SettingsScreen() {
   const conditionsHover = useHoverFade();
   const movementRestrictionsHover = useHoverFade();
   const progressHover = useHoverFade();
+  const bodyMeasurementsHover = useHoverFade();
+  const conditionLogHover = useHoverFade();
+  const progressPhotosHover = useHoverFade();
   const nameHover = useHoverFade();
   const imperialInteraction = { hover: useHoverFade(), press: useLiquidPress() };
   const metricInteraction = { hover: useHoverFade(), press: useLiquidPress() };
@@ -588,6 +591,30 @@ export default function SettingsScreen() {
               label="Progress & History"
               onPress={() => router.push('/settings/progress-history' as never)}
               hover={progressHover}
+            />
+            <NavRow
+              styles={styles}
+              colors={colors}
+              icon="ruler"
+              label="Body Measurements"
+              onPress={() => router.push('/settings/body-measurements' as never)}
+              hover={bodyMeasurementsHover}
+            />
+            <NavRow
+              styles={styles}
+              colors={colors}
+              icon="heart.text.square"
+              label="Condition Log"
+              onPress={() => router.push('/settings/condition-log' as never)}
+              hover={conditionLogHover}
+            />
+            <NavRow
+              styles={styles}
+              colors={colors}
+              icon="photo.on.rectangle"
+              label="Progress Photos"
+              onPress={() => router.push('/settings/progress-photos' as never)}
+              hover={progressPhotosHover}
             />
             <View style={[styles.unitRow, styles.rowDivider]}>
               <Text style={styles.rowLabel} maxFontSizeMultiplier={1.3}>Units</Text>

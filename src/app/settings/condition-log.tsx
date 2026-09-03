@@ -18,6 +18,8 @@ import {
 import { hapticError, hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { localDateStr } from '@/lib/local-date';
 import { useAppColors } from '@/lib/theme-context';
+import { getProfile } from '@/lib/user-profile';
+import { HealthConsentGate } from '@/components/settings/health-consent-gate';
 
 // 0 = today, since a flare-up (unlike a training session) can honestly be
 // logged the same day it's happening — unlike log-past-session-sheet.tsx's
@@ -37,8 +39,8 @@ function formatEntryDate(dateStr: string): string {
 }
 
 /**
- * NOT YET LINKED from anywhere (no Log or Settings row points here) — see
- * lib/condition-log.ts's own header comment for why.
+ * Reached from Settings' DATA section. Gated on healthConsent, same as the
+ * onboarding fields this data extends — see HealthConsentGate's own comment.
  */
 export default function ConditionLogScreen() {
   const insets = useSafeAreaInsets();
@@ -50,6 +52,7 @@ export default function ConditionLogScreen() {
 
   const [entries, setEntries] = useState<ConditionLogEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [hasConsent, setHasConsent] = useState(false);
   const [adding, setAdding] = useState(false);
   const [dayIndex, setDayIndex] = useState(0);
   const [selectedCondition, setSelectedCondition] = useState<Condition | null>(null);
@@ -57,7 +60,9 @@ export default function ConditionLogScreen() {
 
   const reload = useCallback(() => {
     (async () => {
-      setEntries(await getConditionLog());
+      const [log, profile] = await Promise.all([getConditionLog(), getProfile()]);
+      setEntries(log);
+      setHasConsent(profile?.healthConsent === 'true');
       setLoaded(true);
     })();
   }, []);
@@ -124,7 +129,9 @@ export default function ConditionLogScreen() {
         <View style={styles.backButton} />
       </View>
 
-      {!loaded ? null : (
+      {!loaded ? null : !hasConsent ? (
+        <HealthConsentGate />
+      ) : (
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.section}>
             <Pressable

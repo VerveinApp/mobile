@@ -17,6 +17,8 @@ import { hapticError, hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { localDateStr } from '@/lib/local-date';
 import { useAppColors } from '@/lib/theme-context';
 import { getUnitSystem, type UnitSystem } from '@/lib/unit-preference';
+import { getProfile } from '@/lib/user-profile';
+import { HealthConsentGate } from '@/components/settings/health-consent-gate';
 
 const FIELDS: { key: BodyMeasurementField; label: string }[] = [
   { key: 'waistCm', label: 'Waist' },
@@ -47,9 +49,8 @@ function formatEntryDate(dateStr: string): string {
 }
 
 /**
- * NOT YET LINKED from anywhere (no Log or Settings row points here) — see
- * lib/body-measurements.ts's own header comment for why. Reachable only by
- * direct navigation until that's resolved.
+ * Reached from Settings' DATA section. Gated on healthConsent, same as the
+ * onboarding fields this data extends — see HealthConsentGate's own comment.
  */
 export default function BodyMeasurementsScreen() {
   const insets = useSafeAreaInsets();
@@ -62,6 +63,7 @@ export default function BodyMeasurementsScreen() {
   const [entries, setEntries] = useState<BodyMeasurementEntry[]>([]);
   const [unit, setUnit] = useState<UnitSystem>('imperial');
   const [loaded, setLoaded] = useState(false);
+  const [hasConsent, setHasConsent] = useState(false);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState<Record<BodyMeasurementField, string>>({
     waistCm: '',
@@ -73,9 +75,10 @@ export default function BodyMeasurementsScreen() {
 
   const reload = useCallback(() => {
     (async () => {
-      const [log, globalUnit] = await Promise.all([getBodyMeasurements(), getUnitSystem()]);
+      const [log, globalUnit, profile] = await Promise.all([getBodyMeasurements(), getUnitSystem(), getProfile()]);
       setEntries(log);
       setUnit(globalUnit);
+      setHasConsent(profile?.healthConsent === 'true');
       setLoaded(true);
     })();
   }, []);
@@ -133,7 +136,9 @@ export default function BodyMeasurementsScreen() {
         <View style={styles.backButton} />
       </View>
 
-      {!loaded ? null : (
+      {!loaded ? null : !hasConsent ? (
+        <HealthConsentGate />
+      ) : (
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.section}>
             <Pressable

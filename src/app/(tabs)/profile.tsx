@@ -121,18 +121,6 @@ export default function ProfileScreen() {
       >
         <View style={styles.header}>
           <Pressable
-            onPress={() => router.push('/log' as never)}
-            onHoverIn={logHover.onHoverIn}
-            onHoverOut={logHover.onHoverOut}
-            hitSlop={10}
-            style={styles.logButton}
-            accessibilityRole="button"
-            accessibilityLabel="Open log"
-          >
-            <SymbolView name="square.and.pencil" size={17} tintColor={colors.iconMuted} />
-          </Pressable>
-
-          <Pressable
             onPress={() => router.push('/settings' as never)}
             onHoverIn={settingsHover.onHoverIn}
             onHoverOut={settingsHover.onHoverOut}
@@ -156,6 +144,7 @@ export default function ProfileScreen() {
             accessibilityRole="button"
             accessibilityLabel="Edit your name"
           >
+            <View style={styles.namePencilSpacer} pointerEvents="none" />
             <Text style={styles.name} maxFontSizeMultiplier={1.3}>{profile?.name?.trim() || 'Your Profile'}</Text>
             <SymbolView name="pencil" size={13} tintColor={colors.textTertiary} style={styles.namePencil} />
           </Pressable>
@@ -184,6 +173,7 @@ export default function ProfileScreen() {
                 onChangeText={setNameDraft}
                 placeholder="Your name"
                 placeholderTextColor={colors.textTertiary}
+                maxLength={25}
                 autoCapitalize="words"
                 autoCorrect={false}
                 autoFocus
@@ -219,6 +209,30 @@ export default function ProfileScreen() {
             <PlanRow styles={styles} icon="calendar" label="Training Days" value={formatDays(profile?.days)} />
             <PlanRow styles={styles} icon="flame.fill" label="Commitment" value={commitmentName} last />
           </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>LOG</Text>
+          <Pressable
+            style={styles.card}
+            onPress={() => router.push('/log' as never)}
+            onHoverIn={logHover.onHoverIn}
+            onHoverOut={logHover.onHoverOut}
+            accessibilityRole="button"
+            accessibilityLabel="Log. Backfill a past session or weigh-in"
+          >
+            <View pointerEvents="none" style={styles.cardSheen} />
+            <View style={styles.logRow}>
+              <View style={styles.planRowLeft}>
+                <SymbolView name="square.and.pencil" size={15} tintColor="#5FBE84" style={styles.planRowIcon} />
+                <View>
+                  <Text style={styles.planRowLabel} maxFontSizeMultiplier={1.3}>Log</Text>
+                  <Text style={styles.logRowSubtitle} maxFontSizeMultiplier={1.3}>Backfill a past session or weigh-in</Text>
+                </View>
+              </View>
+              <SymbolView name="chevron.right" size={12} tintColor={colors.iconFaint} />
+            </View>
+          </Pressable>
         </View>
       </ScrollView>
       </ReanimatedAnimated.View>
@@ -280,19 +294,6 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       alignItems: 'center',
       justifyContent: 'center',
     },
-    logButton: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.glassBorder,
-      backgroundColor: colors.glassBg,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
     avatarVisual: {
       width: 72,
       height: 72,
@@ -322,6 +323,13 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     namePencil: {
       marginTop: 2,
+    },
+    // Mirrors the pencil icon's width on the other side of the name so the
+    // name text itself sits centered on screen — without this, the row's
+    // combined (name + icon) width centers instead, visibly shifting the
+    // name left of center.
+    namePencilSpacer: {
+      width: 13,
     },
     email: {
       marginTop: 2,
@@ -398,6 +406,18 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       color: colors.text,
       fontSize: 13,
       fontFamily: 'Geist-SemiBold',
+    },
+    logRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 14,
+    },
+    logRowSubtitle: {
+      marginTop: 2,
+      color: colors.textTertiary,
+      fontSize: 10.5,
+      fontFamily: 'Geist-Medium',
     },
     editNameBackdrop: {
       flex: 1,

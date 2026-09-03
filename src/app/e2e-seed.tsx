@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useEffect } from 'react';
 
 import { markOnboardingComplete } from '@/lib/onboarding-draft';
-import { saveProfile } from '@/lib/user-profile';
+import { saveProfile, withHealthConsent } from '@/lib/user-profile';
 
 /**
  * E2E-test-only backdoor: seeds a complete, valid local profile and marks
@@ -36,6 +36,10 @@ export default function E2ESeedScreen() {
         duration: '45-60',
         commitmentLevel: '4',
         days: 'monday,wednesday,friday',
+        // progress-photo-add.yaml reaches a healthConsent-gated screen
+        // (settings/progress-photos.tsx) — without this the seeded account
+        // would hit HealthConsentGate instead of the real screen content.
+        ...withHealthConsent('true'),
       });
       await markOnboardingComplete();
       router.replace('/(tabs)');

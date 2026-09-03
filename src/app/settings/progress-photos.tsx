@@ -18,6 +18,8 @@ import {
   type ProgressPhotoEntry,
 } from '@/lib/progress-photos';
 import { useAppColors } from '@/lib/theme-context';
+import { getProfile } from '@/lib/user-profile';
+import { HealthConsentGate } from '@/components/settings/health-consent-gate';
 
 function formatEntryDate(dateStr: string): string {
   const [year, month, day] = dateStr.split('-').map(Number);
@@ -26,10 +28,12 @@ function formatEntryDate(dateStr: string): string {
 }
 
 /**
- * NOT YET LINKED from anywhere (no Log or Settings row points here) — see
- * lib/progress-photos.ts's own header comment for why. The most sensitive
- * of everything Log added this session, so this one gets the most cautious
- * treatment: code complete, reachable only by direct navigation.
+ * Reached from Settings' DATA section. Gated on healthConsent, same as the
+ * onboarding fields this data extends — see HealthConsentGate's own comment.
+ * The most sensitive of everything Log added this session (real photos, not
+ * a number or a self-reported tag), so this one still gets the extra
+ * caution of an explicit consent gate rather than assuming reachability
+ * implies consent.
  *
  * Deliberately just a chronological grid + a full-screen single-photo
  * viewer for this first pass, not a dedicated side-by-side compare screen —
@@ -47,13 +51,16 @@ export default function ProgressPhotosScreen() {
 
   const [photos, setPhotos] = useState<ProgressPhotoEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [hasConsent, setHasConsent] = useState(false);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
   const [viewing, setViewing] = useState<ProgressPhotoEntry | null>(null);
 
   const reload = useCallback(() => {
     (async () => {
-      setPhotos(await getProgressPhotos());
+      const [entries, profile] = await Promise.all([getProgressPhotos(), getProfile()]);
+      setPhotos(entries);
+      setHasConsent(profile?.healthConsent === 'true');
       setLoaded(true);
     })();
   }, []);
@@ -123,7 +130,9 @@ export default function ProgressPhotosScreen() {
         <View style={styles.headerButton} />
       </View>
 
-      {!loaded ? null : (
+      {!loaded ? null : !hasConsent ? (
+        <HealthConsentGate />
+      ) : (
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.section}>
             <Pressable

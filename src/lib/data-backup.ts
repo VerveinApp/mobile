@@ -67,12 +67,8 @@ import { clearWeightLog, getWeightLog, restoreWeightLog, type WeightLogEntry } f
 // a newer build expects gets a clear "different app version" error instead
 // of silently restoring with that field undefined (or crashing on it).
 // Bumped 2 → 3 alongside adding the notes field, same reasoning.
-// Bumped 3 → 4 alongside adding the bodyMeasurements field, same reasoning
-// — this store has no nav entry point yet (see body-measurements.ts's own
-// header comment) but is exported/restored/cleared like every other real
-// store the moment someone has an entry in it, e.g. via a future debug path.
-// Bumped 4 → 5 alongside adding the conditionLog field, same reasoning as
-// bodyMeasurements — no nav entry point yet either.
+// Bumped 3 → 4 alongside adding the bodyMeasurements field, same reasoning.
+// Bumped 4 → 5 alongside adding the conditionLog field, same reasoning.
 //
 // progress-photos.ts is deliberately NOT a field here and never bumped this
 // version — its whole store is actual image files, and this module's
