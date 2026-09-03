@@ -85,6 +85,33 @@ jobs:
           curl -Lfs "https://get.maestro.mobile.dev" | bash
           echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
 
+      # The cold Release build (RevenueCat, HealthKit, GoogleSignIn,
+      # Reanimated, this app's own local expo-accessibility-rescan module,
+      # etc.) is the real cost of this whole job, not the JS build — every
+      # run this session so far has recompiled that entire dependency tree
+      # from nothing. Keyed on package-lock.json + app.json since those two
+      # together determine every native dependency version and every Expo
+      # config plugin that feeds the generated Podfile — unrelated to which
+      # JS/TS files changed, so an ordinary app-code commit gets a real
+      # cache hit. restore-keys falls back to the most recent cache on a
+      # miss (a dependency bump) so a partial, still-useful DerivedData
+      # cache is better than none; a hard miss just degrades to the same
+      # cold build this job already tolerates today, not a broken one — pod
+      # source downloads (~/Library/Caches/CocoaPods) are cached separately
+      # from Xcode's own build products (ios/build, this job's own
+      # -derivedDataPath) since a dependency-version miss still benefits
+      # from not re-fetching pod sources over the network even when none of
+      # the actual compiled objects can be reused.
+      - name: Cache CocoaPods sources and Xcode DerivedData
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/CocoaPods
+            ios/build
+          key: ${{ runner.os }}-pods-derived-${{ hashFiles('package-lock.json', 'app.json') }}
+          restore-keys: |
+            ${{ runner.os }}-pods-derived-
+
       - name: Prebuild native iOS project
         run: npx expo prebuild --platform ios
 
