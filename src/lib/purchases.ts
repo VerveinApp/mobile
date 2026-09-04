@@ -8,6 +8,7 @@ import Purchases, {
   type PurchasesPackage,
 } from 'react-native-purchases';
 
+import { getDevPremiumOverride } from '@/lib/dev-premium-override';
 import { supabase } from '@/lib/supabase';
 
 // iOS-only for now, same scoping as health-kit.ts — this app doesn't ship
@@ -96,8 +97,14 @@ export async function getCurrentOffering(): Promise<PurchasesOffering | null> {
  * wouldn't. False (not an error) when not configured — an unconfigured
  * (e.g. non-iOS) build should read as "no Premium," not crash every gated
  * screen.
+ *
+ * ⚠️ TEMPORARY: checks dev-premium-override.ts's local, client-side-only
+ * override FIRST — see that file's own header comment for what this is and
+ * why it must be removed before the real App Store submission. Never
+ * touches RevenueCat itself, so it can't fake or grant a real purchase.
  */
 export async function hasPremiumEntitlement(): Promise<boolean> {
+  if (await getDevPremiumOverride()) return true;
   if (!configured) return false;
   try {
     const info = await Purchases.getCustomerInfo();

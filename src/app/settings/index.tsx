@@ -12,6 +12,13 @@ import { deleteAccount } from '@/lib/account';
 import { isAppLockEnabled, setAppLockEnabled } from '@/lib/app-lock';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { buildBackupPayload, clearAllLocalData, parseBackupPayload, restoreBackupPayload, type BackupPayload } from '@/lib/data-backup';
+import {
+  checkDevPremiumUnlockKey,
+  getDevPremiumOverride,
+  isDevPremiumUnlocked,
+  setDevPremiumOverride,
+  setDevPremiumUnlocked,
+} from '@/lib/dev-premium-override';
 import { hapticError, hapticImpactLight, hapticSuccess, hapticWarning, isHapticsEnabled, setHapticsEnabled } from '@/lib/haptics';
 import {
   disconnectHealthKit,
@@ -152,6 +159,11 @@ export default function SettingsScreen() {
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
+  // ⚠️ TEMPORARY — see dev-premium-override.ts's own header comment for why
+  // this must be removed before the real App Store submission.
+  const [devKeyInput, setDevKeyInput] = useState('');
+  const [devUnlocked, setDevUnlocked] = useState(false);
+  const [devOverrideOn, setDevOverrideOn] = useState(false);
   const biometricsSheetRef = useRef<BottomSheetModal>(null);
   const adjustPlanSheetRef = useRef<BottomSheetModal>(null);
   const conditionsSheetRef = useRef<BottomSheetModal>(null);
@@ -199,6 +211,8 @@ export default function SettingsScreen() {
           data: { session },
         } = await supabase.auth.getSession();
         setAccountEmail(session?.user?.email ?? null);
+        setDevUnlocked(await isDevPremiumUnlocked());
+        setDevOverrideOn(await getDevPremiumOverride());
         setLoaded(true);
       })();
     }, [])
@@ -480,6 +494,22 @@ export default function SettingsScreen() {
     setDeletingAccount(false);
     hapticWarning();
     router.replace('/onboarding/welcome' as never);
+  };
+
+  // ⚠️ TEMPORARY — see dev-premium-override.ts's own header comment.
+  const handleDevKeyChange = (text: string) => {
+    setDevKeyInput(text);
+    if (checkDevPremiumUnlockKey(text)) {
+      hapticSuccess();
+      setDevUnlocked(true);
+      setDevKeyInput('');
+      void setDevPremiumUnlocked();
+    }
+  };
+  const handleToggleDevOverride = (value: boolean) => {
+    hapticImpactLight();
+    setDevOverrideOn(value);
+    void setDevPremiumOverride(value);
   };
 
   if (!loaded) {
@@ -1031,6 +1061,35 @@ export default function SettingsScreen() {
         </Section>
 
         <Text style={styles.footer} maxFontSizeMultiplier={1.3}>VerveIn v{appConfig.expo?.version ?? '1.0.0'}</Text>
+
+        {/* ⚠️ TEMPORARY — remove this whole Section before the real App
+            Store submission, same reminder as the privacy policy check (see
+            dev-premium-override.ts's own header comment). Deliberately kept
+            all the way at the bottom, past everything a real user would
+            ever need to scroll through. */}
+        <Section styles={styles} title="DEVELOPER">
+          <View style={styles.card}>
+            {devUnlocked ? (
+              <View style={styles.aboutRow}>
+                <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>VerveIn Plus (Dev Override)</Text>
+                <Switch value={devOverrideOn} onValueChange={handleToggleDevOverride} />
+              </View>
+            ) : (
+              <View style={styles.aboutRow}>
+                <TextInput
+                  style={styles.devKeyInput}
+                  value={devKeyInput}
+                  onChangeText={handleDevKeyChange}
+                  placeholder="Unlock key"
+                  placeholderTextColor={colors.textTertiary}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+            )}
+          </View>
+        </Section>
       </ScrollView>
 
       <BiometricsSheet ref={biometricsSheetRef} />
@@ -1477,6 +1536,13 @@ function createStyles(colors: Record<string, string>) {
       color: colors.text,
       fontSize: 13,
       fontFamily: 'Geist-Medium',
+    },
+    devKeyInput: {
+      flex: 1,
+      color: colors.text,
+      fontSize: 13,
+      fontFamily: 'Geist-Medium',
+      paddingVertical: 4,
     },
     footer: {
       textAlign: 'center',
