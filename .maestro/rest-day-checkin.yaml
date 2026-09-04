@@ -12,15 +12,23 @@ appId: app.vervein
 # tried and ruled out).
 #
 # Whether today lands on a rest day or a real training day depends on the
-# signed-in profile's own scheduled days, which this flow doesn't control —
-# it only asserts the rest-day content when that's what actually renders.
+# signed-in profile's own scheduled days — this flow only asserts the
+# rest-day content when that's what actually renders, rather than assuming
+# it unconditionally, so it stays correct either way.
 #
 # Needs an already-onboarded, signed-in profile, which a genuinely fresh CI
 # install never has -- openLink below seeds one via app/e2e-seed.tsx (a
 # no-op everywhere EXPO_PUBLIC_E2E_SEED_ENABLED isn't explicitly set, i.e.
 # everywhere except maestro.yml's own CI run and an opted-in local dev env).
-# The seeded profile's own scheduled days (monday/wednesday/friday) still
-# decide rest-day vs. training-day the same way any real profile would.
+# That seed used to hardcode 'monday,wednesday,friday' as the scheduled
+# days, which made today land on Rest Day only 4 of 7 real calendar days —
+# CI run 33822805317 (a real Friday) hit the other 3 and broke
+# exercise-swap-sheet.yaml's own deliberate rest-day-override path, which
+# does assume Rest Day unconditionally (see that flow's own comment).
+# e2e-seed.tsx now computes scheduled days relative to whenever it actually
+# runs, guaranteeing today is never one of them — this flow's own
+# conditional branch means that change doesn't affect it either way, but
+# it's what the exercise-swap-sheet.yaml flow actually depends on.
 ---
 - launchApp:
     clearState: false

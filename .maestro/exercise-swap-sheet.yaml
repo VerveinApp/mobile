@@ -61,16 +61,25 @@ appId: app.vervein
 
 - tapOn: "Train"
 # Waits for the tab's own content to actually render before tapping into it
-# — a bare tapOn right after a tab switch has no such guard and races the
-# transition under load (run 33816593733 failed exactly here on a visibly
-# slower-than-usual runner). rest-day-checkin.yaml already waits the same
+# — a bare tapOn right after a tab switch has no such guard and could race
+# the transition under load. rest-day-checkin.yaml already waits the same
 # way after its own identical "Train" tap; this just matches that.
 - extendedWaitUntil:
     visible:
       text: "Rest day|Exercise 1 of .*|Check in & start|Strength Session"
     timeout: 10000
-- tapOn: "Check in anyway"
 # Second "Check in anyway" (Rest Day full-screen state) — gap #2 above.
+# Only exists when today lands on Rest Day for the seeded profile — CI run
+# 33822805317 failed exactly here (misdiagnosed at the time as the same
+# transition race the wait above guards against): it ran on 2026-09-04, a
+# real Friday, and app/e2e-seed.tsx used to seed a fixed
+# 'monday,wednesday,friday' schedule, so a real scheduled training day was
+# shown instead of Rest Day — no "Check in anyway" link exists there at
+# all, the tap failed for a reason with nothing to do with timing. Fixed at
+# the source: e2e-seed.tsx now computes training days relative to whatever
+# day it actually runs on, so they can never include today, and this flow
+# genuinely depends on that guarantee rather than being restated here.
+- tapOn: "Check in anyway"
 - tapOn:
     point: "50%,40%"
 - takeScreenshot: swap-flow-01-gauge
