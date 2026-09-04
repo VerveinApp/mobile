@@ -45,7 +45,8 @@ import { getCoachingInsightNote } from '@/lib/coaching-insights';
 import { getPlanFitNote } from '@/lib/plan-fit';
 import { recordCheckInAndShouldShowPaywall } from '@/lib/paywall-trigger';
 import { getLoadImprovementNote, getPacingTrendNote, getPostSessionNote } from '@/lib/momentum';
-import { recordPerformance } from '@/lib/exercise-performance';
+import { getLastPerformance, recordPerformance, type ExercisePerformance } from '@/lib/exercise-performance';
+import { calculatePlates, formatKg, formatPlateBreakdown } from '@/lib/plate-calculator';
 import { recordSessionForMilestones } from '@/lib/session-milestones';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { estimateCaloriesBurned } from '@/lib/calorie-estimate';
@@ -294,6 +295,21 @@ export default function EnergyCheckInScreen() {
   // in-progress "12" vs "120" keystroke never gets coerced mid-typing.
   const [loggedWeightsKg, setLoggedWeightsKg] = useState<Record<number, string>>({});
   const [loadImprovementNote, setLoadImprovementNote] = useState<string | null>(null);
+  // Keyed by exercise NAME (matching exercise-performance.ts's own store),
+  // not index — a swap mid-session shouldn't carry the old exercise's last
+  // weight into the new exercise's slot. Purely informational: this is what
+  // was actually logged last time, not a computed "recommended" number —
+  // inventing a progression formula (add X% because reps were hit) is
+  // exactly the kind of new engine number the vault's own governance would
+  // need to define, not something to freelance in a UI label. Populated
+  // below, once sessionExercises is known.
+  const [lastPerformanceByName, setLastPerformanceByName] = useState<Record<string, ExercisePerformance | null>>({});
+  // Shows the plate breakdown for whatever's currently typed (or last
+  // time's weight, if nothing's typed yet) — collapsed by default so this
+  // stays out of the way for the majority of exercises/people who never
+  // touch it. Keyed by exercise index, same as loggedWeightsKg, since it's
+  // about "is this particular row's breakdown open," not persisted state.
+  const [plateBreakdownOpenIndex, setPlateBreakdownOpenIndex] = useState<number | null>(null);
   // Mid-workout exercise swap (Vervein addition — see exercise-swap.ts's own
   // doc comment for scope). Keyed by index into preview.exercises, same
   // indexing as completedExercises/loggedWeightsKg — a same-session-only
@@ -809,6 +825,19 @@ export default function EnergyCheckInScreen() {
     [preview, swappedExercises]
   );
   const currentExercise = sessionExercises[currentExerciseIndex] ?? null;
+  // Batch-fetched once per session-exercises set (a handful of cheap
+  // AsyncStorage reads, not worth deferring per-exercise) — see
+  // lastPerformanceByName's own declaration above for why this is
+  // informational only, never a computed suggestion.
+  useEffect(() => {
+    if (sessionExercises.length === 0) return;
+    (async () => {
+      const entries = await Promise.all(
+        sessionExercises.map(async (ex) => [ex.name, await getLastPerformance(ex.name)] as const)
+      );
+      setLastPerformanceByName(Object.fromEntries(entries));
+    })();
+  }, [sessionExercises]);
   const isLastExercise = preview ? currentExerciseIndex >= preview.exercises.length - 1 : false;
   // Derived, not separately tracked — completedExercises is already the
   // real source of truth for "is this one done," so there's no second copy
@@ -1425,21 +1454,65 @@ export default function EnergyCheckInScreen() {
                         app asks the user to type numbers in. */}
                     {exerciseLibrary.getById(currentExercise.id)?.equipment !== 'none' &&
                     typeof currentExercise.reps === 'number' ? (
-                      <View style={styles.loadInputRow}>
-                        <Text style={styles.loadInputLabel} maxFontSizeMultiplier={1.2}>
-                          Weight used (optional)
-                        </Text>
-                        <TextInput
-                          style={styles.loadInput}
-                          value={loggedWeightsKg[currentExerciseIndex] ?? ''}
-                          onChangeText={(text) =>
-                            setLoggedWeightsKg((prev) => ({ ...prev, [currentExerciseIndex]: text }))
-                          }
-                          placeholder="kg"
-                          placeholderTextColor={colors.textTertiary}
-                          keyboardType="decimal-pad"
-                          maxLength={5}
-                        />
+                      <View>
+                        {/* Purely informational — see lastPerformanceByName's
+                            own comment above for why this isn't a computed
+                            "try heavier" suggestion, just what actually
+                            happened last time. */}
+                        {lastPerformanceByName[currentExercise.name] ? (
+                          <Text style={styles.lastPerformanceHint} maxFontSizeMultiplier={1.2}>
+                            {`Last time: ${formatKg(lastPerformanceByName[currentExercise.name]!.weightKg)}kg × ${
+                              lastPerformanceByName[currentExercise.name]!.reps
+                            }`}
+                          </Text>
+                        ) : null}
+                        <View style={styles.loadInputRow}>
+                          <Text style={styles.loadInputLabel} maxFontSizeMultiplier={1.2}>
+                            Weight used (optional)
+                          </Text>
+                          <TextInput
+                            style={styles.loadInput}
+                            value={loggedWeightsKg[currentExerciseIndex] ?? ''}
+                            onChangeText={(text) =>
+                              setLoggedWeightsKg((prev) => ({ ...prev, [currentExerciseIndex]: text }))
+                            }
+                            placeholder="kg"
+                            placeholderTextColor={colors.textTertiary}
+                            keyboardType="decimal-pad"
+                            maxLength={5}
+                          />
+                          <Pressable
+                            onPress={() => {
+                              hapticSelect();
+                              setPlateBreakdownOpenIndex((prev) =>
+                                prev === currentExerciseIndex ? null : currentExerciseIndex
+                              );
+                            }}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel="Show plate breakdown"
+                          >
+                            <Text style={styles.plateToggleText} maxFontSizeMultiplier={1.2}>
+                              Plates
+                            </Text>
+                          </Pressable>
+                        </View>
+                        {plateBreakdownOpenIndex === currentExerciseIndex ? (
+                          <Text style={styles.plateBreakdownText} maxFontSizeMultiplier={1.2}>
+                            {formatPlateBreakdown(
+                              calculatePlates(
+                                // Whatever's actually typed wins; falls back to
+                                // last time's weight only when the field is
+                                // still empty, so this always reflects intent
+                                // rather than a stale number once someone
+                                // starts typing a different target.
+                                Number(loggedWeightsKg[currentExerciseIndex]) > 0
+                                  ? Number(loggedWeightsKg[currentExerciseIndex])
+                                  : (lastPerformanceByName[currentExercise.name]?.weightKg ?? 0)
+                              )
+                            )}
+                          </Text>
+                        ) : null}
                       </View>
                     ) : null}
                   </View>
@@ -2878,6 +2951,12 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       fontSize: 11.5,
       fontFamily: 'Geist-SemiBold',
     },
+    lastPerformanceHint: {
+      marginTop: 10,
+      color: colors.textTertiary,
+      fontSize: 10.5,
+      fontFamily: 'Geist-Regular',
+    },
     loadInputRow: {
       marginTop: 12,
       flexDirection: 'row',
@@ -2901,6 +2980,18 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       fontSize: 12,
       fontFamily: 'Geist-SemiBold',
       textAlign: 'center',
+    },
+    plateToggleText: {
+      color: '#438C63',
+      fontSize: 11,
+      fontFamily: 'Geist-SemiBold',
+      textDecorationLine: 'underline',
+    },
+    plateBreakdownText: {
+      marginTop: 6,
+      color: colors.textSecondary,
+      fontSize: 11,
+      fontFamily: 'Geist-Medium',
     },
     resolvedExerciseCard: {
       marginTop: 16,
