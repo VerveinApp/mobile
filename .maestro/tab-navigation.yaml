@@ -29,11 +29,18 @@ appId: app.vervein
 # under this runner's occasional software-rendered-GPU slowdowns (logged as
 # "GL pipe is running in software mode"). Every later flow in the same
 # simulator session never hits that dialog again once it's been dismissed
-# once, which is exactly why they didn't show the same failure.
+# once, which is exactly why they didn't show the same failure. Bumped to
+# 30000 first — passed cleanly in run 33810527766, but then missed by
+# ~1.3s in run 33816593733, a run whose own build step also ran ~10
+# minutes slower than usual end to end (58m30s vs. the ~49min baseline) —
+# consistent with a temporarily slower shared runner instance, not a
+# structural shortfall in the 30s figure itself. Bumped again for real
+# margin against that kind of variance rather than chasing the exact
+# figure a single slow run needed.
 - extendedWaitUntil:
     visible:
       text: "Good .*|Welcome|Continue|Go home"
-    timeout: 30000
+    timeout: 45000
 - runFlow:
     when:
       visible: "Continue"

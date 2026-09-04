@@ -85,23 +85,24 @@ jobs:
           curl -Lfs "https://get.maestro.mobile.dev" | bash
           echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
 
-      # The cold Release build (RevenueCat, HealthKit, GoogleSignIn,
-      # Reanimated, this app's own local expo-accessibility-rescan module,
-      # etc.) is the real cost of this whole job, not the JS build — every
-      # run this session so far has recompiled that entire dependency tree
-      # from nothing. Keyed on package-lock.json + app.json since those two
-      # together determine every native dependency version and every Expo
-      # config plugin that feeds the generated Podfile — unrelated to which
-      # JS/TS files changed, so an ordinary app-code commit gets a real
-      # cache hit. restore-keys falls back to the most recent cache on a
-      # miss (a dependency bump) so a partial, still-useful DerivedData
-      # cache is better than none; a hard miss just degrades to the same
-      # cold build this job already tolerates today, not a broken one — pod
-      # source downloads (~/Library/Caches/CocoaPods) are cached separately
-      # from Xcode's own build products (ios/build, this job's own
-      # -derivedDataPath) since a dependency-version miss still benefits
-      # from not re-fetching pod sources over the network even when none of
-      # the actual compiled objects can be reused.
+      # Pod SOURCE downloads only — NOT Xcode's own build products
+      # (ios/build, this job's -derivedDataPath). That was tried too (run
+      # 33816593733): a genuine cache hit restored correctly end-to-end, but
+      # the build still took 58m30s, no faster than the ~49min uncached
+      # baseline (run 33731920118). Xcode's incremental-build determination
+      # leans on file mtimes, and extracting a cache archive resets them,
+      # so it can't tell restored objects apart from stale ones and just
+      # recompiles anyway — a known limitation of caching DerivedData
+      # specifically, not a config mistake here. Removed rather than kept
+      # as dead weight: it added real restore/save time (the restore alone
+      # took 74s) for zero measured benefit. Pod sources are a smaller but
+      # real win — at minimum this avoids re-fetching them over the network
+      # on a dependency-version miss, and a genuine hit skips that step
+      # cleanly, with none of the DerivedData mtime problem since CocoaPods
+      # itself (not Xcode's own incremental build) decides what to do with
+      # them. Keyed on package-lock.json + app.json since those two
+      # determine every native dependency version and Expo config plugin
+      # that feeds the generated Podfile.
       #
       # actions/cache (the combined restore+save action) was tried first and
       # confirmed broken for this job's actual shape: its save step is a
@@ -115,22 +116,28 @@ jobs:
       # invoked it). GitHub's own README for `save-always` says it "does not
       # work as intended and will be removed" and to use the separate
       # restore/save actions instead, which is what this does: restore here
-      # (before the build), save right after "Boot simulator and build"
-      # succeeds — so the cache reflects whether the expensive compile
-      # step worked, never whether the unrelated E2E flows afterward did.
-      - name: Restore CocoaPods sources and Xcode DerivedData
-        id: pods-derived-cache
+      # (before prebuild's own `pod install`), save right after prebuild
+      # succeeds — pod sources are fully resolved at that point, so this
+      # doesn't need to wait on the Xcode build too (a compiler failure
+      # there shouldn't cost the next run its pod-source cache).
+      - name: Restore CocoaPods sources cache
+        id: pods-cache
         uses: actions/cache/restore@v4
         with:
-          path: |
-            ~/Library/Caches/CocoaPods
-            ios/build
-          key: ${{ runner.os }}-pods-derived-${{ hashFiles('package-lock.json', 'app.json') }}
+          path: ~/Library/Caches/CocoaPods
+          key: ${{ runner.os }}-pods-${{ hashFiles('package-lock.json', 'app.json') }}
           restore-keys: |
-            ${{ runner.os }}-pods-derived-
+            ${{ runner.os }}-pods-
 
       - name: Prebuild native iOS project
         run: npx expo prebuild --platform ios
+
+      - name: Save CocoaPods sources cache
+        if: steps.pods-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: ${{ steps.pods-cache.outputs.cache-primary-key }}
 
       - name: Boot simulator and build + install the app
         run: |
@@ -199,21 +206,6 @@ jobs:
           fi
           echo "APP_PATH=$APP_PATH"
           xcrun simctl install "$UDID" "$APP_PATH"
-
-      # Saved here, right after the build that actually produces this
-      # content succeeds — not left to a POST hook at the end of the job,
-      # which is what silently skipped this save in run 33803132132 (see
-      # the restore step's own comment above for why). Skips entirely on an
-      # exact cache hit (nothing new to write) via the restore step's own
-      # output, matching actions/cache's combined-action behavior.
-      - name: Save CocoaPods sources and Xcode DerivedData
-        if: steps.pods-derived-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ~/Library/Caches/CocoaPods
-            ios/build
-          key: ${{ steps.pods-derived-cache.outputs.cache-primary-key }}
 
       - name: Run Maestro flows
         run: |

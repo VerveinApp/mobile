@@ -60,6 +60,15 @@ appId: app.vervein
       - tapOn: "Go home"
 
 - tapOn: "Train"
+# Waits for the tab's own content to actually render before tapping into it
+# — a bare tapOn right after a tab switch has no such guard and races the
+# transition under load (run 33816593733 failed exactly here on a visibly
+# slower-than-usual runner). rest-day-checkin.yaml already waits the same
+# way after its own identical "Train" tap; this just matches that.
+- extendedWaitUntil:
+    visible:
+      text: "Rest day|Exercise 1 of .*|Check in & start|Strength Session"
+    timeout: 10000
 - tapOn: "Check in anyway"
 # Second "Check in anyway" (Rest Day full-screen state) — gap #2 above.
 - tapOn:
