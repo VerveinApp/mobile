@@ -3,7 +3,7 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 
@@ -19,6 +19,7 @@ import {
 } from '@/lib/progress-photos';
 import { useAppColors } from '@/lib/theme-context';
 import { getProfile } from '@/lib/user-profile';
+import { BeforeAfterSlider } from '@/components/settings/before-after-slider';
 import { HealthConsentGate } from '@/components/settings/health-consent-gate';
 
 function formatEntryDate(dateStr: string): string {
@@ -35,19 +36,22 @@ function formatEntryDate(dateStr: string): string {
  * caution of an explicit consent gate rather than assuming reachability
  * implies consent.
  *
- * Deliberately just a chronological grid + a full-screen single-photo
- * viewer for this first pass, not a dedicated side-by-side compare screen —
- * flipping between two full views in the grid already delivers the
- * self-referential "how do I look now vs. then" comparison this app's own
- * philosophy favors (compare against your own past, never anyone else's),
- * a dedicated compare UI is a real but separable follow-up.
+ * A chronological grid + a full-screen single-photo viewer, plus a
+ * drag-to-reveal before/after slider (BeforeAfterSlider) once there are at
+ * least two photos to compare — the follow-up this file's own comment used
+ * to defer. Always compares against your own past self, never anyone
+ * else's (no upload, no sharing) — the same self-referential framing the
+ * grid already had, just a more direct way to see it than flipping between
+ * two full-screen views.
  */
 export default function ProgressPhotosScreen() {
   const insets = useSafeAreaInsets();
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const { width: windowWidth } = useWindowDimensions();
   const backHover = useHoverFade();
   const addHover = useHoverFade();
+  const compareHover = useHoverFade();
 
   const [photos, setPhotos] = useState<ProgressPhotoEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -55,6 +59,14 @@ export default function ProgressPhotosScreen() {
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
   const [viewing, setViewing] = useState<ProgressPhotoEntry | null>(null);
+  // Indices into `photos` (newest-first, per getProgressPhotos' own sort).
+  // Defaults set on opening the sheet (see handleOpenCompare) rather than
+  // here, since they depend on `photos.length` at that moment — oldest vs.
+  // newest is the most honest starting comparison (the longest real
+  // stretch of time on file), not two arbitrary/adjacent photos.
+  const [comparing, setComparing] = useState(false);
+  const [beforeIndex, setBeforeIndex] = useState(0);
+  const [afterIndex, setAfterIndex] = useState(0);
 
   const reload = useCallback(() => {
     (async () => {
@@ -111,6 +123,20 @@ export default function ProgressPhotosScreen() {
       setPhotos(previous);
     }
   };
+
+  const handleOpenCompare = () => {
+    hapticImpactLight();
+    setBeforeIndex(photos.length - 1);
+    setAfterIndex(0);
+    setComparing(true);
+  };
+
+  // Clamped, not wrapped — stepping past either end just stops there rather
+  // than cycling back around, since "before" and "after" are meant to read
+  // as a real chronological range, not an arbitrary pair.
+  const stepBefore = (delta: number) =>
+    setBeforeIndex((i) => Math.min(photos.length - 1, Math.max(0, i + delta)));
+  const stepAfter = (delta: number) => setAfterIndex((i) => Math.min(photos.length - 1, Math.max(0, i + delta)));
 
   return (
     <View style={styles.root}>
@@ -178,6 +204,22 @@ export default function ProgressPhotosScreen() {
             ) : null}
           </View>
 
+          {photos.length >= 2 ? (
+            <View style={styles.section}>
+              <Pressable
+                style={styles.addRow}
+                onPress={handleOpenCompare}
+                onHoverIn={compareHover.onHoverIn}
+                onHoverOut={compareHover.onHoverOut}
+                accessibilityRole="button"
+                accessibilityLabel="Compare two photos"
+              >
+                <SymbolView name="rectangle.split.2x1" size={13} tintColor="#5FBE84" />
+                <Text style={styles.addRowText} maxFontSizeMultiplier={1.2}>Compare before/after</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
           <View style={styles.section}>
             <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>PHOTOS</Text>
             {photos.length === 0 ? (
@@ -234,6 +276,99 @@ export default function ProgressPhotosScreen() {
           </View>
           {viewing ? (
             <Image source={{ uri: progressPhotoUri(viewing) }} style={styles.viewerImage} contentFit="contain" />
+          ) : null}
+        </View>
+      </Modal>
+
+      <Modal visible={comparing} animationType="fade" transparent onRequestClose={() => setComparing(false)}>
+        <View style={styles.viewerRoot}>
+          <View style={[styles.viewerHeader, { paddingTop: insets.top + 8 }]}>
+            <Pressable
+              onPress={() => setComparing(false)}
+              hitSlop={10}
+              style={styles.headerButton}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+            >
+              <SymbolView name="xmark" size={16} tintColor="#ffffff" />
+            </Pressable>
+            <Text style={styles.viewerDate} maxFontSizeMultiplier={1.2}>Compare</Text>
+            <View style={styles.headerButton} />
+          </View>
+
+          {photos[beforeIndex] && photos[afterIndex] ? (
+            <View style={styles.compareBody}>
+              {/* Remounts the slider (via `key`) whenever either side
+                  changes, rather than threading new URIs into an already-
+                  dragged divider position — a fresh comparison should start
+                  at the midpoint again, not wherever the last pair's
+                  divider happened to be left. */}
+              <BeforeAfterSlider
+                key={`${photos[beforeIndex].id}-${photos[afterIndex].id}`}
+                beforeUri={progressPhotoUri(photos[beforeIndex])}
+                afterUri={progressPhotoUri(photos[afterIndex])}
+                width={windowWidth - 40}
+                height={((windowWidth - 40) * 4) / 3}
+              />
+
+              <View style={styles.compareRow}>
+                <Text style={styles.compareLabel} maxFontSizeMultiplier={1.2}>BEFORE</Text>
+                <Pressable
+                  onPress={() => stepBefore(1)}
+                  disabled={beforeIndex >= photos.length - 1}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Show an older before photo"
+                >
+                  <SymbolView
+                    name="chevron.left"
+                    size={13}
+                    tintColor={beforeIndex >= photos.length - 1 ? colors.textTertiary : '#ffffff'}
+                  />
+                </Pressable>
+                <Text style={styles.compareDate} maxFontSizeMultiplier={1.2}>
+                  {formatEntryDate(photos[beforeIndex].date)}
+                </Text>
+                <Pressable
+                  onPress={() => stepBefore(-1)}
+                  disabled={beforeIndex <= 0}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Show a newer before photo"
+                >
+                  <SymbolView name="chevron.right" size={13} tintColor={beforeIndex <= 0 ? colors.textTertiary : '#ffffff'} />
+                </Pressable>
+              </View>
+
+              <View style={styles.compareRow}>
+                <Text style={styles.compareLabel} maxFontSizeMultiplier={1.2}>AFTER</Text>
+                <Pressable
+                  onPress={() => stepAfter(1)}
+                  disabled={afterIndex >= photos.length - 1}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Show an older after photo"
+                >
+                  <SymbolView
+                    name="chevron.left"
+                    size={13}
+                    tintColor={afterIndex >= photos.length - 1 ? colors.textTertiary : '#ffffff'}
+                  />
+                </Pressable>
+                <Text style={styles.compareDate} maxFontSizeMultiplier={1.2}>
+                  {formatEntryDate(photos[afterIndex].date)}
+                </Text>
+                <Pressable
+                  onPress={() => stepAfter(-1)}
+                  disabled={afterIndex <= 0}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Show a newer after photo"
+                >
+                  <SymbolView name="chevron.right" size={13} tintColor={afterIndex <= 0 ? colors.textTertiary : '#ffffff'} />
+                </Pressable>
+              </View>
+            </View>
           ) : null}
         </View>
       </Modal>
@@ -382,6 +517,34 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     viewerImage: {
       flex: 1,
+    },
+    compareBody: {
+      flex: 1,
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      gap: 18,
+    },
+    compareRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 14,
+      width: '100%',
+    },
+    compareLabel: {
+      position: 'absolute',
+      left: 0,
+      color: 'rgba(255,255,255,0.5)',
+      fontSize: 10,
+      letterSpacing: 1,
+      fontFamily: 'Geist-SemiBold',
+    },
+    compareDate: {
+      color: '#ffffff',
+      fontSize: 13,
+      fontFamily: 'Geist-Medium',
+      minWidth: 90,
+      textAlign: 'center',
     },
   });
 }
