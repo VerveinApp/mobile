@@ -146,6 +146,25 @@ describe('buildSwapReplacement', () => {
     expect(buildSwapReplacement(candidate, original, originalFull).durationMin).toBe(10);
   });
 
+  it('never produces a 0-minute duration, even at a steep reduction ratio', () => {
+    const candidate = makeExercise({ base_duration_min: 5 });
+    const original: PlanExercise = {
+      name: 'Original',
+      sets: null,
+      reps: null,
+      durationMin: 2, // adapted from a base of 8 -> ratio 0.25
+      bodyArea: 'upper',
+      repStructure: 'isometric_hold',
+      intensity: 'medium',
+      isCompound: null,
+      id: 'orig',
+    };
+    const originalFull = makeExercise({ id: 'orig', base_sets: null, base_duration_min: 8 });
+    // 5 * 0.25 = 1.25 -> round(1.25/5)*5 = 0, floored to 1 — the exact
+    // "Candidate — 0 min" defect volume-scaling.ts already floors for.
+    expect(buildSwapReplacement(candidate, original, originalFull).durationMin).toBe(1);
+  });
+
   it('falls back to a 1x ratio when the original had no real sets/duration to compare against', () => {
     const candidate = makeExercise({ base_sets: 3 });
     const original: PlanExercise = {

@@ -4,9 +4,11 @@ import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import ReanimatedAnimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView } from '@/components/ui/app-symbol';
 
+import { Type } from '@/constants/theme';
 import { useHoverFade } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight } from '@/lib/haptics';
 import { localDateStr } from '@/lib/local-date';
@@ -17,10 +19,12 @@ import {
   progressPhotoUri,
   type ProgressPhotoEntry,
 } from '@/lib/progress-photos';
+import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { getProfile } from '@/lib/user-profile';
 import { BeforeAfterSlider } from '@/components/settings/before-after-slider';
 import { HealthConsentGate } from '@/components/settings/health-consent-gate';
+import { SkeletonBlock } from '@/components/ui/skeleton';
 
 function formatEntryDate(dateStr: string): string {
   const [year, month, day] = dateStr.split('-').map(Number);
@@ -52,6 +56,7 @@ export default function ProgressPhotosScreen() {
   const backHover = useHoverFade();
   const addHover = useHoverFade();
   const compareHover = useHoverFade();
+  const entering = useFadeInEntering();
 
   const [photos, setPhotos] = useState<ProgressPhotoEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -59,6 +64,13 @@ export default function ProgressPhotosScreen() {
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
   const [viewing, setViewing] = useState<ProgressPhotoEntry | null>(null);
+  // Long-press reveals a delete badge on that one thumbnail rather than
+  // deleting outright — same "reveal, then a real second tap commits it"
+  // shape as every swipe-to-delete list elsewhere in the app (Notes, Weight
+  // History, …), just using long-press as the reveal gesture since a grid
+  // has no natural swipe direction to reserve for it. Tapping anywhere else
+  // in the grid clears it, same as tapping away from a revealed swipe action.
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   // Indices into `photos` (newest-first, per getProgressPhotos' own sort).
   // Defaults set on opening the sheet (see handleOpenCompare) rather than
   // here, since they depend on `photos.length` at that moment — oldest vs.
@@ -91,7 +103,16 @@ export default function ProgressPhotosScreen() {
     setSaving(false);
     setAdding(false);
     if (entry) {
-      setPhotos((prev) => [entry, ...prev.filter((p) => p.date !== entry.date || p.id === entry.id)]);
+      // BUG FIX: was filtering out every OTHER photo sharing the new one's
+      // date — a pattern borrowed from Weight/Sleep/Nutrition Log, where
+      // saveWeightEntry-style functions really do overwrite the day's one
+      // value. addProgressPhoto never overwrites (it always appends, see
+      // its own doc comment) — this app supports multiple photos per day,
+      // so adding a second photo today was making every earlier photo from
+      // today vanish from the list, even though they were still safely on
+      // disk the whole time (a reload would have brought them right back —
+      // still a real, confusing bug, just not actual data loss).
+      setPhotos((prev) => [entry, ...prev]);
     } else {
       hapticError();
     }
@@ -156,9 +177,22 @@ export default function ProgressPhotosScreen() {
         <View style={styles.headerButton} />
       </View>
 
-      {!loaded ? null : !hasConsent ? (
+      {!loaded ? (
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <SkeletonBlock width={130} height={44} borderRadius={14} />
+          <View style={styles.section}>
+            <SkeletonBlock width={60} height={11} borderRadius={4} />
+            <View style={styles.grid}>
+              {[0, 1, 2].map((i) => (
+                <SkeletonBlock key={i} width="31.5%" height={150} borderRadius={10} />
+              ))}
+            </View>
+          </View>
+        </ScrollView>
+      ) : !hasConsent ? (
         <HealthConsentGate />
       ) : (
+        <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.section}>
             <Pressable
@@ -231,22 +265,52 @@ export default function ProgressPhotosScreen() {
               </View>
             ) : (
               <View style={styles.grid}>
-                {photos.map((photo) => (
-                  <Pressable
-                    key={photo.id}
-                    style={styles.gridCell}
-                    onPress={() => setViewing(photo)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Photo from ${formatEntryDate(photo.date)}`}
-                  >
-                    <Image source={{ uri: progressPhotoUri(photo) }} style={styles.gridImage} contentFit="cover" />
-                    <Text style={styles.gridDate} maxFontSizeMultiplier={1.2}>{formatEntryDate(photo.date)}</Text>
-                  </Pressable>
-                ))}
+                {photos.map((photo) => {
+                  const isDeleteTarget = deleteTargetId === photo.id;
+                  return (
+                    <Pressable
+                      key={photo.id}
+                      style={styles.gridCell}
+                      onPress={() => {
+                        if (deleteTargetId) {
+                          setDeleteTargetId(null);
+                          return;
+                        }
+                        setViewing(photo);
+                      }}
+                      onLongPress={() => {
+                        hapticImpactLight();
+                        setDeleteTargetId(photo.id);
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Photo from ${formatEntryDate(photo.date)}`}
+                    >
+                      <View>
+                        <Image source={{ uri: progressPhotoUri(photo) }} style={styles.gridImage} contentFit="cover" />
+                        {isDeleteTarget ? (
+                          <Pressable
+                            style={styles.gridDeleteBadge}
+                            onPress={() => {
+                              setDeleteTargetId(null);
+                              handleDelete(photo.id);
+                            }}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel="Delete photo"
+                          >
+                            <SymbolView name="trash.fill" size={13} tintColor="#ffffff" />
+                          </Pressable>
+                        ) : null}
+                      </View>
+                      <Text style={styles.gridDate} maxFontSizeMultiplier={1.2}>{formatEntryDate(photo.date)}</Text>
+                    </Pressable>
+                  );
+                })}
               </View>
             )}
           </View>
         </ScrollView>
+        </ReanimatedAnimated.View>
       )}
 
       <Modal visible={viewing !== null} animationType="fade" transparent onRequestClose={() => setViewing(null)}>
@@ -382,6 +446,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       flex: 1,
       backgroundColor: colors.background,
     },
+    fadeLayer: {
+      flex: 1,
+    },
     headerRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -398,8 +465,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     headerTitle: {
       color: colors.text,
-      fontSize: 16,
-      fontFamily: 'Geist-SemiBold',
+      fontSize: Type.headerTitle,
+      letterSpacing: -0.2,
+      fontFamily: 'Geist-Bold',
     },
     scrollContent: {
       paddingHorizontal: 20,
@@ -411,7 +479,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     sectionKicker: {
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       letterSpacing: 1,
       fontFamily: 'Geist-SemiBold',
     },
@@ -428,7 +496,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     addRowText: {
       color: colors.text,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
     addCard: {
@@ -450,13 +518,13 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     choiceText: {
       color: colors.text,
-      fontSize: 13.5,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
     },
     savingText: {
       textAlign: 'center',
       color: colors.textTertiary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
       paddingVertical: 8,
     },
@@ -473,7 +541,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     emptyText: {
       color: colors.textTertiary,
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
       lineHeight: 18,
       textAlign: 'center',
@@ -493,9 +561,22 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       borderRadius: 10,
       backgroundColor: colors.surface,
     },
+    gridDeleteBadge: {
+      position: 'absolute',
+      top: 6,
+      right: 6,
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#E5484D',
+      borderWidth: 1.5,
+      borderColor: 'rgba(255,255,255,0.85)',
+    },
     gridDate: {
       color: colors.textTertiary,
-      fontSize: 10.5,
+      fontSize: Type.micro,
       fontFamily: 'Geist-Medium',
       textAlign: 'center',
     },
@@ -512,7 +593,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     viewerDate: {
       color: '#ffffff',
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-SemiBold',
     },
     viewerImage: {
@@ -535,13 +616,13 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       position: 'absolute',
       left: 0,
       color: 'rgba(255,255,255,0.5)',
-      fontSize: 10,
+      fontSize: Type.micro,
       letterSpacing: 1,
       fontFamily: 'Geist-SemiBold',
     },
     compareDate: {
       color: '#ffffff',
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
       minWidth: 90,
       textAlign: 'center',

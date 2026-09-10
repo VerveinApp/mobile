@@ -5,7 +5,7 @@
 
 import '@/global.css';
 
-import { Platform } from 'react-native';
+import { Platform, type TextStyle } from 'react-native';
 
 /**
  * Light mode follows the same grouped-list convention as iOS Settings: a
@@ -97,6 +97,59 @@ export const Spacing = {
   five: 32,
   six: 64,
 } as const;
+
+/**
+ * A real font-size scale — added after a later full-app audit found 30+
+ * distinct fontSize values in use across the app, several of them clearly
+ * unintentional drift (two labels serving the identical visual role a half-
+ * pixel apart, e.g. profile.tsx's own goalEyebrow at 10 next to
+ * sectionKicker's 11 for the same "small-caps eyebrow" role — nobody chose
+ * that difference, it just accumulated). This is deliberately NOT a new
+ * design language: every value here already existed as one of the app's
+ * own dominant, most-repeated sizes — this only gives the handful of real
+ * roles a shared name so future screens draw from one small set instead of
+ * each hand-picking its own close-but-not-quite-matching number, the same
+ * fix MOTION_DURATION (motion.ts) already applied to animation timings.
+ * Adopted so far in profile.tsx as the first, fully-converted example —
+ * the remaining screens still use their own literal fontSize values and
+ * are real, larger follow-up work, not done here.
+ */
+export const Type = {
+  /** Smallest captions — footnotes, maintenance-calorie caption, log-row subtitles. */
+  micro: 10.5,
+  /** Small-caps eyebrows/section kickers, badges, secondary row notes. */
+  caption: 11,
+  /** Secondary supporting text under a heading — email, muted stat suffixes. */
+  secondary: 12,
+  /** Default body/row text — the single most common size in the app. */
+  body: 13,
+  /** Slightly larger body — modal/sheet inputs, emphasized inline text. */
+  bodyLarge: 14,
+  /** Modal/sheet titles. */
+  subtitle: 16,
+  /** In-card large stat numbers (rings, single big values). */
+  stat: 18,
+  /** Screen-level names/titles. */
+  title: 19,
+  /** Nav header titles — see the app-wide headerTitle bump this same audit already applied. */
+  headerTitle: 20,
+  /** A full page's own greeting/heading — Home's "Good morning" — distinct
+   * from title/headerTitle/display, all real, already-observed sizes in
+   * use for genuinely different roles, not collapsed into one another. */
+  heading: 22,
+  /** Large hero numbers — avatar initials, big display stats. */
+  display: 24,
+} as const;
+
+// A number that IS the content (ring values, ruler readouts, stat cards)
+// gets this — every digit the same width, so the value doesn't visually
+// jitter as it changes and a column of numbers stays aligned. This is a
+// spacing feature Geist itself provides for its own digits, not a
+// different typeface, so it layers onto any existing Type/fontFamily
+// combination rather than replacing it. Deliberately NOT applied to prose
+// that merely contains a number (a date, a count inside a sentence) —
+// only to a value standing alone as the thing being read.
+export const TabularNums: Pick<TextStyle, 'fontVariant'> = { fontVariant: ['tabular-nums'] };
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;

@@ -9,18 +9,22 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  useWindowDimensions,
   View,
 } from 'react-native';
+
+import { useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, { FadeIn } from 'react-native-reanimated';
 import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight, hapticSuccess } from '@/lib/haptics';
+import { MOTION_DURATION } from '@/lib/motion';
+import { markOnboardingComplete } from '@/lib/onboarding-draft';
 import { goBack } from '@/lib/onboarding-nav';
+import { pullProfileFromRemote } from '@/lib/profile-sync';
 import { signInWithApple, signInWithGoogle } from '@/lib/social-auth';
 import { supabase } from '@/lib/supabase';
-import { finishOnboarding } from '@/lib/user-profile';
+import { finishOnboarding, saveProfile } from '@/lib/user-profile';
 import {
   AppleIconGraphic,
   ArrowUpIconGraphic,
@@ -34,6 +38,7 @@ import {
   WordmarkTextGraphic,
 } from '@/components/auth/create-account-graphics';
 import { BackArrowGraphic } from '@/components/auth/verify-email-graphics';
+import { Type } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 
 const CANVAS_WIDTH = 375;
@@ -53,8 +58,7 @@ const isGlassAvailable = isLiquidGlassAvailable();
  * is lost at account creation.
  */
 export default function CreateAccountScreen() {
-  const { width: windowWidth } = useWindowDimensions();
-  const scale = windowWidth / CANVAS_WIDTH;
+  const scale = useCanvasScale();
   const { colors, resolvedScheme } = useAppTheme();
   const isDark = resolvedScheme === 'dark';
   const hoverWashColor = isDark ? '#ffffff' : '#000000';
@@ -196,21 +200,36 @@ export default function CreateAccountScreen() {
   // answered everything and just needs an identity to finish with), or is
   // this welcome.tsx's bare "Sign in" path (no local profile, no answers
   // collected yet)? The full-questionnaire case finishes immediately, same
-  // as verify.tsx's own mid-onboarding branch. The bare case can't finish
-  // onboarding with no real answers to save, so it routes into the real
-  // questionnaire instead — carrying the now-verified email forward as an
-  // ordinary route param (see onboarding/index.tsx's own doc comment for
-  // why that's a route param, not a global flag) so this screen's own
-  // mount effect above skips straight through when that chain reaches here
-  // again at the end.
+  // as verify.tsx's own mid-onboarding branch.
+  //
+  // BUG FIX: the bare case used to route straight into the questionnaire
+  // with no check for an existing account — meaning a returning user who
+  // signs in with Apple/Google on a fresh device (no local profile, so
+  // onboardingParams.name is empty here) got sent through the entire
+  // questionnaire again, even though the exact same bare case on the EMAIL
+  // path (verify.tsx's own no-local-profile branch) already checks for a
+  // synced remote profile first. Mirrors that check here so both identity
+  // paths treat a returning account the same way — only genuinely nothing-
+  // to-restore falls through to the real questionnaire, carrying the
+  // now-verified email forward as an ordinary route param (see
+  // onboarding/index.tsx's own doc comment for why that's a route param,
+  // not a global flag) so this screen's own mount effect above skips
+  // straight through when that chain reaches here again at the end.
   const handleSocialAuthSuccess = async (email: string) => {
     hapticSuccess();
     if (onboardingParams.name) {
       await finishOnboarding(onboardingParams, email);
       router.replace('/onboarding/all-set' as never);
-    } else {
-      router.replace({ pathname: '/onboarding', params: { verifiedEmail: email } } as never);
+      return;
     }
+    const remoteProfile = await pullProfileFromRemote();
+    if (remoteProfile) {
+      await saveProfile(remoteProfile);
+      await markOnboardingComplete();
+      router.replace('/(tabs)' as never);
+      return;
+    }
+    router.replace({ pathname: '/onboarding', params: { verifiedEmail: email } } as never);
   };
 
   const handleAppleAuth = async () => {
@@ -341,7 +360,7 @@ export default function CreateAccountScreen() {
           </View>
 
           {emailError ? (
-            <ReanimatedAnimated.Text entering={FadeIn.duration(150)} style={styles.errorText} maxFontSizeMultiplier={1.3}>
+            <ReanimatedAnimated.Text entering={FadeIn.duration(MOTION_DURATION.fast)} style={styles.errorText} maxFontSizeMultiplier={1.3}>
               {emailError}
             </ReanimatedAnimated.Text>
           ) : null}
@@ -406,44 +425,50 @@ export default function CreateAccountScreen() {
             <View style={styles.dividerLine} />
           </View>
 
-          <Pressable
-            style={styles.socialButtonHit}
-            onPress={handleAppleAuth}
-            disabled={isSocialAuthInProgress}
-            onHoverIn={appleHover.onHoverIn}
-            onHoverOut={appleHover.onHoverOut}
-            onPressIn={applePress.onPressIn}
-            onPressOut={applePress.onPressOut}
-          >
-            <Animated.View style={[styles.socialButtonVisual, { transform: [{ scale: applePress.scale }] }]}>
-              {/* This button's own pill — the shared CardFrameGraphic no longer draws it,
-                  so the whole box (fill + border) scales and glows together on press.
-                  zIndex keeps these overlays behind the icon/text on every platform. */}
-              <View style={[StyleSheet.absoluteFill, styles.behindContent]} pointerEvents="none">
-                <InputFieldGraphic width={285} height={35} fill={colors.surface} stroke={colors.surfaceBorder} />
-              </View>
-              <Animated.View
-                pointerEvents="none"
-                style={[
-                  StyleSheet.absoluteFill,
-                  styles.hoverWash,
-                  styles.behindContent,
-                  { opacity: appleHover.anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.08] }) },
-                ]}
-              />
-              <Animated.View
-                pointerEvents="none"
-                style={[
-                  StyleSheet.absoluteFill,
-                  styles.hoverWash,
-                  styles.behindContent,
-                  { opacity: applePress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.18] }) },
-                ]}
-              />
-              <AppleIconGraphic width={15.17} height={18} color={colors.text} />
-              <Text style={[styles.socialText, styles.appleText]} maxFontSizeMultiplier={1.2}>Continue with Apple</Text>
-            </Animated.View>
-          </Pressable>
+          {/* expo-apple-authentication has no Android implementation — Google
+              Sign-In (below) is Android's only social option, moved up into
+              this button's own slot on that platform (see
+              socialButtonGoogleHit) rather than leaving a dead gap. */}
+          {Platform.OS === 'ios' ? (
+            <Pressable
+              style={styles.socialButtonHit}
+              onPress={handleAppleAuth}
+              disabled={isSocialAuthInProgress}
+              onHoverIn={appleHover.onHoverIn}
+              onHoverOut={appleHover.onHoverOut}
+              onPressIn={applePress.onPressIn}
+              onPressOut={applePress.onPressOut}
+            >
+              <Animated.View style={[styles.socialButtonVisual, { transform: [{ scale: applePress.scale }] }]}>
+                {/* This button's own pill — the shared CardFrameGraphic no longer draws it,
+                    so the whole box (fill + border) scales and glows together on press.
+                    zIndex keeps these overlays behind the icon/text on every platform. */}
+                <View style={[StyleSheet.absoluteFill, styles.behindContent]} pointerEvents="none">
+                  <InputFieldGraphic width={285} height={35} fill={colors.surface} stroke={colors.surfaceBorder} />
+                </View>
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    StyleSheet.absoluteFill,
+                    styles.hoverWash,
+                    styles.behindContent,
+                    { opacity: appleHover.anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.08] }) },
+                  ]}
+                />
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    StyleSheet.absoluteFill,
+                    styles.hoverWash,
+                    styles.behindContent,
+                    { opacity: applePress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.18] }) },
+                  ]}
+                />
+                <AppleIconGraphic width={15.17} height={18} color={colors.text} />
+                <Text style={[styles.socialText, styles.appleText]} maxFontSizeMultiplier={1.2}>Continue with Apple</Text>
+              </Animated.View>
+            </Pressable>
+          ) : null}
 
           <Pressable
             style={styles.socialButtonGoogleHit}
@@ -486,7 +511,7 @@ export default function CreateAccountScreen() {
 
           {socialAuthNotice ? (
             <ReanimatedAnimated.Text
-              entering={FadeIn.duration(150)}
+              entering={FadeIn.duration(MOTION_DURATION.fast)}
               style={styles.socialNoticeText}
               maxFontSizeMultiplier={1.3}
             >
@@ -499,7 +524,10 @@ export default function CreateAccountScreen() {
           {'By continuing, you agree to VerveIn’s\n'}
           <Text
             style={styles.termsLink}
-            // Placeholder route — the legal screen doesn't exist yet.
+            // BUG FIX (found in a later full-app audit): this comment used
+            // to say the route itself doesn't exist — it does (see
+            // legal/terms.tsx / legal/privacy.tsx); only the page's real
+            // content is still a placeholder pending legal review.
             onPress={() => router.push('/legal/terms' as never)}
           >
             Terms of Service
@@ -507,7 +535,10 @@ export default function CreateAccountScreen() {
           <Text> and </Text>
           <Text
             style={styles.termsLink}
-            // Placeholder route — the legal screen doesn't exist yet.
+            // BUG FIX (found in a later full-app audit): this comment used
+            // to say the route itself doesn't exist — it does (see
+            // legal/terms.tsx / legal/privacy.tsx); only the page's real
+            // content is still a placeholder pending legal review.
             onPress={() => router.push('/legal/privacy' as never)}
           >
             Privacy Policy
@@ -595,8 +626,12 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       letterSpacing: -0.3048,
       fontFamily: 'Geist-SemiBold',
     },
+    // BUG FIX: was #2f6647, a dark green that computes to only ~3.11:1
+    // contrast against this screen's pure-black dark-mode background —
+    // fails the 4.5:1 text threshold. #438C63 (this same file's own
+    // termsLink color) computes to ~5.17:1 here instead.
     titleAccent: {
-      color: '#2f6647',
+      color: '#438C63',
       fontSize: 32,
       letterSpacing: -0.32,
     },
@@ -605,7 +640,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       left: 31,
       top: 275,
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       lineHeight: 18,
       fontFamily: 'Geist-Regular',
     },
@@ -634,13 +669,13 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     formHeading: {
       color: colors.text,
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-SemiBold',
     },
     fieldLabel: {
       marginTop: 12,
       color: colors.text,
-      fontSize: 10.5,
+      fontSize: Type.micro,
       fontFamily: 'Geist-Regular',
     },
     inputWrap: {
@@ -721,7 +756,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     primaryText: {
       color: '#ffffff',
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     buttonArrow: {
@@ -766,7 +801,10 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     socialButtonGoogleHit: {
       position: 'absolute',
       left: 19,
-      top: 261,
+      // Apple's own slot (212) when there's no Apple button above it to
+      // leave a dead gap under — see the Apple Pressable's own Platform.OS
+      // guard just above this in the JSX.
+      top: Platform.OS === 'ios' ? 261 : 212,
       width: 285,
       height: 35,
     },
@@ -779,7 +817,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     socialText: {
       marginLeft: 10,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     appleText: {
@@ -787,7 +825,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     googleText: {
       color: colors.text,
-      fontSize: 11,
+      fontSize: Type.caption,
       letterSpacing: 0.33,
     },
     termsText: {

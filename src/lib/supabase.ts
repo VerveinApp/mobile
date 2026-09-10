@@ -1,8 +1,9 @@
 import './crypto-polyfill';
 import 'react-native-url-polyfill/auto';
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
+
+import { secureSessionStorage } from '@/lib/secure-session-storage';
 
 // EXPO_PUBLIC_* vars are inlined at build time and shipped inside the app
 // binary — both of these are meant to be public/client-embeddable (the
@@ -21,11 +22,18 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 /**
  * The one Supabase client for the app — real auth (email OTP, Apple, and
- * Google), not the AsyncStorage-only mock this replaces. `storage:
- * AsyncStorage` is required on React Native (Supabase's default assumes a
- * browser's localStorage, which doesn't exist here); `detectSessionInUrl:
- * false` because there's no browser URL for a redirect to land in on a
- * native app.
+ * Google), not the AsyncStorage-only mock this replaces. `storage` is
+ * required on React Native (Supabase's default assumes a browser's
+ * localStorage, which doesn't exist here) — secureSessionStorage (not bare
+ * AsyncStorage, found as a real gap in a later full-app audit) is
+ * Supabase's own documented hybrid adapter for this: session tokens end up
+ * AES-encrypted at rest, with the encryption key itself Keychain-protected
+ * via expo-secure-store, rather than sitting in plain AsyncStorage where a
+ * jailbreak or backup extraction could read them directly. See
+ * secure-session-storage.ts's own doc comment for why this needs a hybrid
+ * (SecureStore alone caps out around 2KB, too small for a full session).
+ * `detectSessionInUrl: false` because there's no browser URL for a
+ * redirect to land in on a native app.
  *
  * BUG FIX: `flowType: 'pkce'` is required for social-auth.ts's Google
  * sign-in to work at all — `@supabase/auth-js` defaults to the IMPLICIT
@@ -42,7 +50,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
  */
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    storage: AsyncStorage,
+    storage: secureSessionStorage,
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,

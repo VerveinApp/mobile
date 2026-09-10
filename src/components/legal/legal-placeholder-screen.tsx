@@ -2,8 +2,9 @@ import { router } from 'expo-router';
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView } from '@/components/ui/app-symbol';
 
+import { Type } from '@/constants/theme';
 import { useHoverFade } from '@/lib/button-interactions';
 import { useAppColors } from '@/lib/theme-context';
 
@@ -69,7 +70,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     headerTitle: {
       color: colors.text,
-      fontSize: 16,
+      fontSize: Type.subtitle,
       fontFamily: 'Geist-SemiBold',
     },
     body: {
@@ -79,7 +80,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     placeholderText: {
       color: colors.textSecondary,
-      fontSize: 13.5,
+      fontSize: Type.body,
       lineHeight: 20,
       fontFamily: 'Geist-Medium',
     },

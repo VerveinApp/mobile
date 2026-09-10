@@ -8,18 +8,21 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  useWindowDimensions,
   View,
 } from 'react-native';
+
+import { useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, { FadeIn } from 'react-native-reanimated';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight, hapticSuccess } from '@/lib/haptics';
+import { MOTION_DURATION } from '@/lib/motion';
 import { hasCompletedOnboarding, markOnboardingComplete } from '@/lib/onboarding-draft';
 import { goBack } from '@/lib/onboarding-nav';
 import { pullProfileFromRemote } from '@/lib/profile-sync';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { supabase } from '@/lib/supabase';
+import { Type } from '@/constants/theme';
 import { useAppColors, useAppTheme } from '@/lib/theme-context';
 import { finishOnboarding, saveProfile } from '@/lib/user-profile';
 import {
@@ -50,8 +53,7 @@ function formatCountdown(seconds: number) {
 }
 
 export default function VerifyEmailScreen() {
-  const { width: windowWidth } = useWindowDimensions();
-  const scale = windowWidth / CANVAS_WIDTH;
+  const scale = useCanvasScale();
   const { colors, resolvedScheme } = useAppTheme();
   // Dark mode keeps its exact original chevron gray; light mode gets its
   // own value since #E0E0E0 was tuned for a dark card, not a white one.
@@ -295,7 +297,7 @@ export default function VerifyEmailScreen() {
           </View>
 
           {codeError ? (
-            <ReanimatedAnimated.Text entering={FadeIn.duration(150)} style={styles.codeErrorText} maxFontSizeMultiplier={1.3}>
+            <ReanimatedAnimated.Text entering={FadeIn.duration(MOTION_DURATION.fast)} style={styles.codeErrorText} maxFontSizeMultiplier={1.3}>
               {codeError}
             </ReanimatedAnimated.Text>
           ) : null}
@@ -468,7 +470,7 @@ function createStyles(
       top: 206,
       width: 202,
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       lineHeight: 18,
       fontFamily: 'Geist-Medium',
     },
@@ -577,7 +579,7 @@ function createStyles(
     },
     primaryText: {
       color: '#ffffff',
-      fontSize: 12,
+      fontSize: Type.secondary,
       // No fontWeight here — Geist-SemiBold is a single static-weight font
       // file, so layering a numeric weight on top risks iOS synthetic-bolding
       // it further instead of just rendering the weight the file already is.

@@ -39,7 +39,11 @@ import type { UserProfile } from '@/lib/user-profile';
 // fixed label is honest; it's not standing in for a real multi-user id.
 export const LOCAL_USER_ID = 'local-user';
 
-const EQUIPMENT_BY_ENVIRONMENT: Record<string, Equipment> = {
+// Exported (Vervein addition) so check-in.tsx's own "Where are you working
+// out today?" override can map its onboarding-vocabulary answer to the same
+// Equipment ceiling this file already uses, rather than a second, driftable
+// copy of the same four cases.
+export const EQUIPMENT_BY_ENVIRONMENT: Record<string, Equipment> = {
   'full-gym': 'full_gym',
   // A home gym in this app's onboarding copy means "some equipment, not a
   // commercial rack" — the engine's middle tier, not its top one.
@@ -70,8 +74,10 @@ const BIAS_SIMPLE_BY_EXPERIENCE: Record<string, boolean> = {
   'years-experience': false,
 };
 
-// Same values plan-preview.ts's BASE_DURATION_MIN_BY_BUCKET already uses.
-const SESSION_MIN_BY_DURATION: Record<string, number> = {
+// Exported so anything estimating a real session length from the onboarding
+// duration bucket (calorie-estimate.ts's weekly-burn-goal suggestion, so
+// far) uses this exact mapping rather than inventing its own numbers.
+export const SESSION_MIN_BY_DURATION: Record<string, number> = {
   'under-30': 25,
   '30-45': 38,
   '45-60': 52,

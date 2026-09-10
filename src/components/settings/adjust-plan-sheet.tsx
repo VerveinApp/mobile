@@ -1,8 +1,10 @@
 import { BottomSheetBackdrop, type BottomSheetBackdropProps, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { SymbolView } from 'expo-symbols';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SymbolView } from '@/components/ui/app-symbol';
 
+import { Type } from '@/constants/theme';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { CommitmentDial } from '@/components/onboarding/commitment-dial';
@@ -45,6 +47,7 @@ const DAY_OPTIONS: { id: string; label: string }[] = [
 export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRef) => {
   const sheetRef = useRef<BottomSheetModal>(null);
   useImperativeHandle(forwardedRef, () => sheetRef.current as BottomSheetModal, []);
+  const insets = useSafeAreaInsets();
 
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -143,7 +146,10 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
         </Pressable>
       </View>
 
-      <BottomSheetScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <BottomSheetScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 + insets.bottom }]}
+        showsVerticalScrollIndicator={false}
+      >
         <PillGrid
           styles={styles}
           label="Goal"
@@ -307,7 +313,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     headerTitle: {
       color: colors.text,
-      fontSize: 16,
+      fontSize: Type.subtitle,
       fontFamily: 'Geist-SemiBold',
     },
     closeButton: {
@@ -320,7 +326,8 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     scrollContent: {
       paddingHorizontal: 20,
-      paddingBottom: 40,
+      // paddingBottom set inline (40 + insets.bottom) — real safe-area
+      // clearance below the home indicator.
       gap: 24,
     },
     section: {
@@ -328,7 +335,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     fieldLabel: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
     },
     pillGrid: {
@@ -364,7 +371,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     gridPillText: {
       color: colors.textSecondary,
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
       textAlign: 'center',
     },
@@ -391,7 +398,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     dayCircleText: {
       color: colors.textSecondary,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
     dayCircleTextSelected: {
@@ -404,7 +411,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     commitmentReadout: {
       textAlign: 'center',
       color: colors.text,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
     saveButton: {
@@ -419,7 +426,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     saveButtonText: {
       color: '#ffffff',
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-SemiBold',
     },
   });

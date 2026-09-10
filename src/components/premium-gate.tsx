@@ -1,7 +1,9 @@
 import { router } from 'expo-router';
+import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView } from '@/components/ui/app-symbol';
 
+import { Type } from '@/constants/theme';
 import { useHoverFade } from '@/lib/button-interactions';
 import { hapticSelect } from '@/lib/haptics';
 import { useAppTheme } from '@/lib/theme-context';
@@ -59,6 +61,14 @@ export function PremiumGate({
 
 function useStyles() {
   const { colors } = useAppTheme();
+  // BUG FIX: this rebuilt a fresh StyleSheet object every render (missing
+  // the useMemo(() => ..., [colors]) pattern every other themed component in
+  // this app uses) — a new object identity each time defeats memoization on
+  // anything downstream that depends on these styles by reference.
+  return useMemo(() => createStyles(colors), [colors]);
+}
+
+function createStyles(colors: ReturnType<typeof useAppTheme>['colors']) {
   return StyleSheet.create({
     card: {
       borderRadius: 16,
@@ -80,14 +90,14 @@ function useStyles() {
     },
     title: {
       color: colors.text,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
       textAlign: 'center',
     },
     subtitle: {
       marginTop: 4,
       color: colors.textSecondary,
-      fontSize: 11.5,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Regular',
       textAlign: 'center',
     },

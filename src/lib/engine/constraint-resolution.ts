@@ -26,6 +26,7 @@
 import { IMPACT_RANK, INTENSITY_RANK } from '@/lib/engine/exercise-library';
 import { ENERGY_MODIFIER_TABLE } from '@/lib/engine/reference/energy-modifier-table';
 import { SYMPTOM_OVERRIDE_TABLE } from '@/lib/engine/reference/symptom-override-table';
+import type { SymptomTag } from '@/lib/symptom-tags';
 import type {
   BodyArea,
   ConstraintProfile,
@@ -78,7 +79,9 @@ export function computeEffectiveConstraints(
 
   const activeTags = new Set<string>([...standingSymptomTags, ...checkIn.acuteSymptomTags]);
   for (const tag of activeTags) {
-    const row = SYMPTOM_OVERRIDE_TABLE[tag];
+    // Cast, not a type-level guarantee — see baseline-plan.ts's identical
+    // cast for why the runtime guard right below still does the real work.
+    const row = SYMPTOM_OVERRIDE_TABLE[tag as SymptomTag];
     if (!row) {
       throw new Error(`M5: unrecognized symptom tag "${tag}" — rejected at the Gate 1 boundary, never silently passed through.`);
     }

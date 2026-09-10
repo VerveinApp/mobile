@@ -1,8 +1,10 @@
 import { BottomSheetBackdrop, type BottomSheetBackdropProps, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { SymbolView } from 'expo-symbols';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SymbolView } from '@/components/ui/app-symbol';
 
+import { Type } from '@/constants/theme';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { MOVEMENT_RESTRICTIONS, MOVEMENT_RESTRICTION_LABELS, type MovementRestriction } from '@/lib/movement-restrictions';
@@ -27,6 +29,7 @@ import { getProfile, updateProfile } from '@/lib/user-profile';
 export const MovementRestrictionsSheet = forwardRef<BottomSheetModal>((_props, forwardedRef) => {
   const sheetRef = useRef<BottomSheetModal>(null);
   useImperativeHandle(forwardedRef, () => sheetRef.current as BottomSheetModal, []);
+  const insets = useSafeAreaInsets();
 
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -120,7 +123,10 @@ export const MovementRestrictionsSheet = forwardRef<BottomSheetModal>((_props, f
         </Pressable>
       </View>
 
-      <BottomSheetScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <BottomSheetScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 + insets.bottom }]}
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={styles.headline} maxFontSizeMultiplier={1.3}>Anything your body just doesn&apos;t do right now?</Text>
         <Text style={styles.hint} maxFontSizeMultiplier={1.4}>No explanation needed — we&apos;ll build around it.</Text>
 
@@ -181,7 +187,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     headerTitle: {
       color: colors.text,
-      fontSize: 16,
+      fontSize: Type.subtitle,
       fontFamily: 'Geist-SemiBold',
     },
     closeButton: {
@@ -194,7 +200,8 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     scrollContent: {
       paddingHorizontal: 20,
-      paddingBottom: 40,
+      // paddingBottom set inline (40 + insets.bottom) — real safe-area
+      // clearance below the home indicator.
       gap: 16,
     },
     headline: {
@@ -206,7 +213,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     hint: {
       marginTop: -8,
       color: colors.textTertiary,
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       lineHeight: 18,
       fontFamily: 'Geist-Medium',
     },
@@ -243,7 +250,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     rowLabel: {
       color: colors.text,
-      fontSize: 13.5,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
     },
     checkbox: {
@@ -271,7 +278,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     saveButtonText: {
       color: '#ffffff',
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-SemiBold',
     },
   });

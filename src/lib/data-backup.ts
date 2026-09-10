@@ -25,7 +25,8 @@ import {
   restoreExercisePerformance,
   type ExercisePerformance,
 } from '@/lib/exercise-performance';
-import { clearNotes, getNotes, restoreNotes, type NoteEntry } from '@/lib/notes';
+import { clearNotes, getAllNotes, restoreNotes, type NoteEntry } from '@/lib/notes';
+import { clearNutritionLog, getNutritionLog, restoreNutritionLog, type NutritionLogEntry } from '@/lib/nutrition-log';
 import { clearOnboardingCompleted, clearOnboardingDraft } from '@/lib/onboarding-draft';
 import { clearProgressPhotos } from '@/lib/progress-photos';
 import { disableSessionReminders } from '@/lib/session-reminders';
@@ -36,6 +37,7 @@ import {
   restoreMilestones,
 } from '@/lib/session-milestones';
 import { clearSessionHistory, getSessionHistory, restoreSessionHistory, type SessionHistoryEntry } from '@/lib/session-history';
+import { clearSleepLog, getSleepLog, restoreSleepLog, type SleepLogEntry } from '@/lib/sleep-log';
 import { clearTodaySession } from '@/lib/today-session';
 import { clearProfile, getProfile, saveProfile, type UserProfile } from '@/lib/user-profile';
 import { clearWorkoutLog, getAllWorkoutLogs, restoreWorkoutLog, type WorkoutLogEntry } from '@/lib/workout-log';
@@ -69,14 +71,22 @@ import { clearWeightLog, getWeightLog, restoreWeightLog, type WeightLogEntry } f
 // Bumped 2 → 3 alongside adding the notes field, same reasoning.
 // Bumped 3 → 4 alongside adding the bodyMeasurements field, same reasoning.
 // Bumped 4 → 5 alongside adding the conditionLog field, same reasoning.
+// Bumped 5 → 6 alongside adding the sleepLog and nutritionLog fields, same
+// reasoning.
+// Bumped 6 → 7 because exercisePerformance's own VALUE shape changed (one
+// ExercisePerformance per exercise → a chronological history array per
+// exercise, see exercise-performance.ts's own migration note) — not a new
+// field, but the exact same "an older/newer build could silently
+// misinterpret this" risk parseBackupPayload's version check exists for.
 //
+
 // progress-photos.ts is deliberately NOT a field here and never bumped this
 // version — its whole store is actual image files, and this module's
 // contract is a pasteable JSON blob (see parseBackupPayload's own doc
 // comment); base64-inlining photos into that would balloon an ordinary
 // export to megabytes. clearAllLocalData below still wipes it — the
 // export-format gap and the delete-my-data guarantee are separate concerns.
-export const BACKUP_VERSION = 5;
+export const BACKUP_VERSION = 7;
 
 export type BackupPayload = {
   version: number;
@@ -96,10 +106,15 @@ export type BackupPayload = {
   // header comment already calls out for workout-log.ts/weight-log.ts/
   // decision-trace-log.ts. See exercise-performance.ts's own clear/restore
   // functions for the matching other half of this fix.
-  exercisePerformance: Record<string, ExercisePerformance>;
+  //
+  // Value is a chronological history per exercise, not a single record —
+  // see exercise-performance.ts's own migration note (BACKUP_VERSION 6→7).
+  exercisePerformance: Record<string, ExercisePerformance[]>;
   notes: NoteEntry[];
   bodyMeasurements: BodyMeasurementEntry[];
   conditionLog: ConditionLogEntry[];
+  sleepLog: SleepLogEntry[];
+  nutritionLog: NutritionLogEntry[];
 };
 
 export async function buildBackupPayload(): Promise<BackupPayload> {
@@ -117,6 +132,8 @@ export async function buildBackupPayload(): Promise<BackupPayload> {
     notes,
     bodyMeasurements,
     conditionLog,
+    sleepLog,
+    nutritionLog,
   ] = await Promise.all([
     getProfile(),
     getCalibration(),
@@ -128,9 +145,11 @@ export async function buildBackupPayload(): Promise<BackupPayload> {
     getLifetimeSessionCount(),
     getShownMilestones(),
     getAllExercisePerformances(),
-    getNotes(),
+    getAllNotes(),
     getBodyMeasurements(),
     getConditionLog(),
+    getSleepLog(),
+    getNutritionLog(),
   ]);
   return {
     version: BACKUP_VERSION,
@@ -147,6 +166,8 @@ export async function buildBackupPayload(): Promise<BackupPayload> {
     notes,
     bodyMeasurements,
     conditionLog,
+    sleepLog,
+    nutritionLog,
   };
 }
 
@@ -206,7 +227,20 @@ export function parseBackupPayload(raw: string): ParseResult {
   ) {
     return { ok: false, error: 'Backup milestone data is malformed.' };
   }
-  if (!isPlainObject(candidate.exercisePerformance)) {
+  // BUG FIX: this only checked the outer shape (a plain object), never that
+  // each value is actually an array — the real v7 shape (BACKUP_VERSION
+  // 6→7's own migration note). A hand-edited or corrupted paste that still
+  // claims version 7 but keeps the old single-record-per-exercise values
+  // passed this check, then crashed uncaught inside restoreExercisePerformance
+  // (history.slice on a plain object) partway through Promise.all — aborting
+  // the restore with no rollback while whichever stores had already resolved
+  // stayed overwritten. Every other array-shaped field here is validated
+  // with Array.isArray directly; this Record-of-arrays field needs the same
+  // check one level deeper.
+  if (
+    !isPlainObject(candidate.exercisePerformance) ||
+    !Object.values(candidate.exercisePerformance).every((v) => Array.isArray(v))
+  ) {
     return { ok: false, error: 'Backup strength-progress data is malformed.' };
   }
   if (!Array.isArray(candidate.notes)) return { ok: false, error: 'Backup notes are malformed.' };
@@ -214,6 +248,8 @@ export function parseBackupPayload(raw: string): ParseResult {
     return { ok: false, error: 'Backup body-measurement data is malformed.' };
   }
   if (!Array.isArray(candidate.conditionLog)) return { ok: false, error: 'Backup condition-log data is malformed.' };
+  if (!Array.isArray(candidate.sleepLog)) return { ok: false, error: 'Backup sleep log is malformed.' };
+  if (!Array.isArray(candidate.nutritionLog)) return { ok: false, error: 'Backup nutrition log is malformed.' };
   return { ok: true, payload: candidate as unknown as BackupPayload };
 }
 
@@ -240,6 +276,8 @@ export async function restoreBackupPayload(payload: BackupPayload): Promise<void
     restoreNotes(payload.notes),
     restoreBodyMeasurements(payload.bodyMeasurements),
     restoreConditionLog(payload.conditionLog),
+    restoreSleepLog(payload.sleepLog),
+    restoreNutritionLog(payload.nutritionLog),
   ]);
 }
 
@@ -292,6 +330,8 @@ export async function clearAllLocalData(): Promise<void> {
     clearNotes(),
     clearBodyMeasurements(),
     clearConditionLog(),
+    clearSleepLog(),
+    clearNutritionLog(),
     clearProgressPhotos(),
     disableSessionReminders(),
   ]);

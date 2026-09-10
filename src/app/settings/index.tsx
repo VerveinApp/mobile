@@ -2,14 +2,16 @@ import type { BottomSheetModal } from '@gorhom/bottom-sheet';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import ReanimatedAnimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView } from '@/components/ui/app-symbol';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
 import appConfig from '../../../app.json';
 import { deleteAccount } from '@/lib/account';
 import { isAppLockEnabled, setAppLockEnabled } from '@/lib/app-lock';
+import { Type } from '@/constants/theme';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { buildBackupPayload, clearAllLocalData, parseBackupPayload, restoreBackupPayload, type BackupPayload } from '@/lib/data-backup';
 import {
@@ -19,6 +21,8 @@ import {
   setDevPremiumOverride,
   setDevPremiumUnlocked,
 } from '@/lib/dev-premium-override';
+import { seedFakeSessionHistory, seedFakeStrengthProgress } from '@/lib/dev-seed';
+import { getBillingMode, resetPurchaserIdentityForTesting, usePremiumEntitlement } from '@/lib/purchases';
 import { hapticError, hapticImpactLight, hapticSuccess, hapticWarning, isHapticsEnabled, setHapticsEnabled } from '@/lib/haptics';
 import {
   disconnectHealthKit,
@@ -28,6 +32,7 @@ import {
   requestHealthKitAccess,
 } from '@/lib/health-kit';
 import { localDateStr } from '@/lib/local-date';
+import { useFadeInEntering } from '@/lib/screen-transitions';
 import {
   disableSessionReminders,
   enableSessionReminders,
@@ -43,7 +48,9 @@ import { getProfile, updateProfile } from '@/lib/user-profile';
 import { AdjustPlanSheet } from '@/components/settings/adjust-plan-sheet';
 import { BiometricsSheet } from '@/components/settings/biometrics-sheet';
 import { ConditionsSheet } from '@/components/settings/conditions-sheet';
+import { GoalsSheet } from '@/components/settings/goals-sheet';
 import { MovementRestrictionsSheet } from '@/components/settings/movement-restrictions-sheet';
+import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 
 const UNIT_OPTIONS: { id: UnitSystem; label: string }[] = [
   { id: 'imperial', label: 'ft / lb' },
@@ -104,6 +111,7 @@ export default function SettingsScreen() {
   // something else.
   const hapticsTrackOff = resolvedScheme === 'dark' ? '#2a2a2a' : '#D1D1D6';
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const isPremium = usePremiumEntitlement();
   const [unit, setUnit] = useState<UnitSystem>('imperial');
   const [hapticsOn, setHapticsOn] = useState(true);
   const [loaded, setLoaded] = useState(false);
@@ -164,9 +172,18 @@ export default function SettingsScreen() {
   const [devKeyInput, setDevKeyInput] = useState('');
   const [devUnlocked, setDevUnlocked] = useState(false);
   const [devOverrideOn, setDevOverrideOn] = useState(false);
+  const [seedingHistory, setSeedingHistory] = useState(false);
+  const [seedResult, setSeedResult] = useState<'seeded' | 'no-schedule' | null>(null);
+  const [seedingStrength, setSeedingStrength] = useState(false);
+  const [strengthSeeded, setStrengthSeeded] = useState(false);
+  const [resettingSub, setResettingSub] = useState(false);
+  const [subResetResult, setSubResetResult] = useState<'reset' | 'already-anonymous' | 'not-configured' | 'error' | null>(
+    null
+  );
   const biometricsSheetRef = useRef<BottomSheetModal>(null);
   const adjustPlanSheetRef = useRef<BottomSheetModal>(null);
   const conditionsSheetRef = useRef<BottomSheetModal>(null);
+  const goalsSheetRef = useRef<BottomSheetModal>(null);
   const movementRestrictionsSheetRef = useRef<BottomSheetModal>(null);
 
   useFocusEffect(
@@ -181,11 +198,19 @@ export default function SettingsScreen() {
           LocalAuthentication.supportedAuthenticationTypesAsync(),
         ]);
         setAppLockAvailable(hasHardware && isEnrolled);
+        // "Face ID"/"Touch ID" are real Apple product names, correct only on
+        // iOS hardware — Android's own face/fingerprint unlock is the same
+        // AuthenticationType from this API but isn't either of those
+        // trademarked features, so it gets the generic name instead.
         setAppLockLabel(
           types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)
-            ? 'Face ID'
+            ? Platform.OS === 'ios'
+              ? 'Face ID'
+              : 'Face Unlock'
             : types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT)
-              ? 'Touch ID'
+              ? Platform.OS === 'ios'
+                ? 'Touch ID'
+                : 'Fingerprint'
               : 'App Lock'
         );
         const [remindersEnabled, remindersProfile, remindersSupportedNow] = await Promise.all([
@@ -218,6 +243,7 @@ export default function SettingsScreen() {
     }, [])
   );
 
+  const entering = useFadeInEntering();
   const backHover = useHoverFade();
   const deleteHover = useHoverFade();
   const deletePress = useLiquidPress();
@@ -227,6 +253,7 @@ export default function SettingsScreen() {
   const privacyHover = useHoverFade();
   const biometricsHover = useHoverFade();
   const weightHistoryHover = useHoverFade();
+  const goalsHover = useHoverFade();
   const referralHover = useHoverFade();
   const adjustPlanHover = useHoverFade();
   const conditionsHover = useHoverFade();
@@ -235,6 +262,8 @@ export default function SettingsScreen() {
   const bodyMeasurementsHover = useHoverFade();
   const conditionLogHover = useHoverFade();
   const progressPhotosHover = useHoverFade();
+  const sleepHistoryHover = useHoverFade();
+  const nutritionHistoryHover = useHoverFade();
   const nameHover = useHoverFade();
   const imperialInteraction = { hover: useHoverFade(), press: useLiquidPress() };
   const metricInteraction = { hover: useHoverFade(), press: useLiquidPress() };
@@ -512,12 +541,45 @@ export default function SettingsScreen() {
     void setDevPremiumOverride(value);
   };
 
-  if (!loaded) {
-    return <View style={styles.root} />;
-  }
+  // ⚠️ TEMPORARY — see dev-seed.ts's own header comment.
+  const handleSeedFakeHistory = async () => {
+    if (seedingHistory) return;
+    hapticImpactLight();
+    setSeedingHistory(true);
+    setSeedResult(null);
+    const seeded = await seedFakeSessionHistory();
+    setSeedingHistory(false);
+    setSeedResult(seeded ? 'seeded' : 'no-schedule');
+    if (seeded) hapticSuccess();
+    else hapticError();
+  };
+
+  // ⚠️ TEMPORARY — see dev-seed.ts's own header comment.
+  const handleSeedFakeStrength = async () => {
+    if (seedingStrength) return;
+    hapticImpactLight();
+    setSeedingStrength(true);
+    await seedFakeStrengthProgress();
+    setSeedingStrength(false);
+    setStrengthSeeded(true);
+    hapticSuccess();
+  };
+
+  // ⚠️ TEMPORARY — see resetPurchaserIdentityForTesting's own doc comment
+  // in purchases.ts for exactly what this can and can't actually clear.
+  const handleResetSubscription = async () => {
+    if (resettingSub) return;
+    hapticImpactLight();
+    setResettingSub(true);
+    const result = await resetPurchaserIdentityForTesting();
+    setResettingSub(false);
+    setSubResetResult(result);
+    if (result === 'reset') hapticSuccess();
+    else hapticError();
+  };
 
   return (
-    <View style={styles.root}>
+    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={[styles.headerRow, { paddingTop: insets.top + 8 }]}>
         <Pressable
           onPress={() => router.back()}
@@ -534,7 +596,24 @@ export default function SettingsScreen() {
         <View style={styles.backButton} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      {!loaded ? (
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <SkeletonCard height={90} lines={2} />
+          <View style={styles.skeletonSection}>
+            <SkeletonBlock width={60} height={11} borderRadius={4} />
+            <SkeletonCard height={180} lines={4} />
+          </View>
+          <View style={styles.skeletonSection}>
+            <SkeletonBlock width={80} height={11} borderRadius={4} />
+            <SkeletonCard height={120} lines={3} />
+          </View>
+        </ScrollView>
+      ) : (
+      <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled">
         <Section styles={styles} title="PROFILE">
           <View style={styles.card}>
             <NavRow
@@ -565,6 +644,15 @@ export default function SettingsScreen() {
             <NavRow
               styles={styles}
               colors={colors}
+              icon="target"
+              label="Goals"
+              onPress={() => (isPremium ? goalsSheetRef.current?.present() : router.push('/paywall' as never))}
+              hover={goalsHover}
+              locked={!isPremium}
+            />
+            <NavRow
+              styles={styles}
+              colors={colors}
               icon="heart.text.square"
               label="Health Conditions"
               onPress={() => conditionsSheetRef.current?.present()}
@@ -591,8 +679,36 @@ export default function SettingsScreen() {
               label="Adjust My Plan"
               onPress={() => adjustPlanSheetRef.current?.present()}
               hover={adjustPlanHover}
-              last
             />
+            <View style={styles.unitRow}>
+              <Text style={styles.rowLabel} maxFontSizeMultiplier={1.3}>Units</Text>
+              <View style={styles.unitPills}>
+                {UNIT_OPTIONS.map((option) => {
+                  const isSelected = unit === option.id;
+                  const interaction = unitInteractions[option.id];
+                  return (
+                    <Pressable
+                      key={option.id}
+                      onPress={() => handleSelectUnit(option.id)}
+                      onHoverIn={interaction.hover.onHoverIn}
+                      onHoverOut={interaction.hover.onHoverOut}
+                      onPressIn={interaction.press.onPressIn}
+                      onPressOut={interaction.press.onPressOut}
+                      style={styles.unitPillHit}
+                    >
+                      <View style={[styles.unitPillVisual, isSelected && styles.unitPillVisualSelected]}>
+                        <Text
+                          style={[styles.unitPillText, isSelected && styles.unitPillTextSelected]}
+                          maxFontSizeMultiplier={1.2}
+                        >
+                          {option.label}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
           </View>
         </Section>
 
@@ -613,6 +729,15 @@ export default function SettingsScreen() {
           </View>
         </Section>
 
+        {/* Units and Apple Health moved out (TRAINING and APP respectively)
+            — with every row here Plus-only and hidden outright for a free
+            account, this whole section used to survive as a two-item stub
+            still labeled DATA even though neither remaining row was really
+            "data." Now it only ever renders for Plus, over real content,
+            never sparse or mislabeled. isPremium === null (entitlement
+            still resolving) also hides it, the same safe default
+            PremiumGate itself uses elsewhere. */}
+        {isPremium ? (
         <Section styles={styles} title="DATA">
           <View style={styles.card}>
             <NavRow
@@ -647,50 +772,26 @@ export default function SettingsScreen() {
               onPress={() => router.push('/settings/progress-photos' as never)}
               hover={progressPhotosHover}
             />
-            <View style={[styles.unitRow, styles.rowDivider]}>
-              <Text style={styles.rowLabel} maxFontSizeMultiplier={1.3}>Units</Text>
-              <View style={styles.unitPills}>
-                {UNIT_OPTIONS.map((option) => {
-                  const isSelected = unit === option.id;
-                  const interaction = unitInteractions[option.id];
-                  return (
-                    <Pressable
-                      key={option.id}
-                      onPress={() => handleSelectUnit(option.id)}
-                      onHoverIn={interaction.hover.onHoverIn}
-                      onHoverOut={interaction.hover.onHoverOut}
-                      onPressIn={interaction.press.onPressIn}
-                      onPressOut={interaction.press.onPressOut}
-                      style={styles.unitPillHit}
-                    >
-                      <View style={[styles.unitPillVisual, isSelected && styles.unitPillVisualSelected]}>
-                        <Text
-                          style={[styles.unitPillText, isSelected && styles.unitPillTextSelected]}
-                          maxFontSizeMultiplier={1.2}
-                        >
-                          {option.label}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-            <AppLockRow
+            <NavRow
               styles={styles}
               colors={colors}
-              icon="link"
-              label="Apple Health"
-              available={healthKitAvailable}
-              value={healthKitOn && healthKitAvailable}
-              onValueChange={handleToggleHealthKit}
-              trackOffColor={hapticsTrackOff}
-              unavailableSubtitle="Not available on this device"
-              connectedSubtitle={formatLastSync(healthKitLastSync)}
+              icon="bed.double"
+              label="Sleep History"
+              onPress={() => router.push('/settings/sleep-history' as never)}
+              hover={sleepHistoryHover}
+            />
+            <NavRow
+              styles={styles}
+              colors={colors}
+              icon="fork.knife"
+              label="Nutrition History"
+              onPress={() => router.push('/settings/nutrition-history' as never)}
+              hover={nutritionHistoryHover}
               last
             />
           </View>
         </Section>
+        ) : null}
 
         <Section styles={styles} title="VERVEIN PLUS">
           <View style={styles.card}>
@@ -737,7 +838,7 @@ export default function SettingsScreen() {
                 })}
               </View>
             </View>
-            <View style={styles.switchRow}>
+            <View style={[styles.switchRow, styles.rowDivider]}>
               <View style={styles.switchRowLeft}>
                 <SymbolView name="iphone.radiowaves.left.and.right" size={15} tintColor="#5FBE84" style={styles.rowIcon} />
                 <Text style={styles.rowLabel} maxFontSizeMultiplier={1.3}>Haptics</Text>
@@ -749,6 +850,19 @@ export default function SettingsScreen() {
                 thumbColor="#ffffff"
               />
             </View>
+            <AppLockRow
+              styles={styles}
+              colors={colors}
+              icon="link"
+              label="Apple Health"
+              available={healthKitAvailable}
+              value={healthKitOn && healthKitAvailable}
+              onValueChange={handleToggleHealthKit}
+              trackOffColor={hapticsTrackOff}
+              unavailableSubtitle="Not available on this device"
+              connectedSubtitle={formatLastSync(healthKitLastSync)}
+              last
+            />
           </View>
         </Section>
 
@@ -996,7 +1110,7 @@ export default function SettingsScreen() {
               <Pressable style={styles.importCard} onPress={() => {}}>
                 <Text style={styles.importTitle} maxFontSizeMultiplier={1.3}>Edit your name</Text>
                 <TextInput
-                  style={styles.importInput}
+                  style={styles.nameInput}
                   value={nameDraft}
                   onChangeText={setNameDraft}
                   placeholder="Your name"
@@ -1070,10 +1184,78 @@ export default function SettingsScreen() {
         <Section styles={styles} title="DEVELOPER">
           <View style={styles.card}>
             {devUnlocked ? (
-              <View style={styles.aboutRow}>
-                <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>VerveIn Plus (Dev Override)</Text>
-                <Switch value={devOverrideOn} onValueChange={handleToggleDevOverride} />
-              </View>
+              <>
+                <View style={[styles.aboutRow, styles.rowDivider]}>
+                  <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>VerveIn Plus (Dev Override)</Text>
+                  <Switch value={devOverrideOn} onValueChange={handleToggleDevOverride} />
+                </View>
+                <View style={[styles.aboutRow, styles.rowDivider]}>
+                  <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>RevenueCat Billing</Text>
+                  <Text style={styles.devValueText} maxFontSizeMultiplier={1.2}>
+                    {{ 'test-store': 'Test Store', production: 'Production', unconfigured: 'Unconfigured' }[getBillingMode()]}
+                  </Text>
+                </View>
+                <Pressable
+                  style={[styles.aboutRow, styles.rowDivider]}
+                  disabled={seedingHistory}
+                  onPress={handleSeedFakeHistory}
+                >
+                  <View>
+                    <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>Seed Fake Session History</Text>
+                    {seedResult === 'no-schedule' ? (
+                      <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>No training days set — finish onboarding first.</Text>
+                    ) : null}
+                  </View>
+                  {seedingHistory ? (
+                    <ActivityIndicator size="small" color={colors.iconFaint} />
+                  ) : seedResult === 'seeded' ? (
+                    <SymbolView name="checkmark" size={14} tintColor="#5FBE84" />
+                  ) : (
+                    <SymbolView name="arrow.clockwise" size={14} tintColor={colors.iconFaint} />
+                  )}
+                </Pressable>
+                <Pressable
+                  style={[styles.aboutRow, styles.rowDivider]}
+                  disabled={seedingStrength}
+                  onPress={handleSeedFakeStrength}
+                >
+                  <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>Seed Fake Strength Progress</Text>
+                  {seedingStrength ? (
+                    <ActivityIndicator size="small" color={colors.iconFaint} />
+                  ) : strengthSeeded ? (
+                    <SymbolView name="checkmark" size={14} tintColor="#5FBE84" />
+                  ) : (
+                    <SymbolView name="arrow.clockwise" size={14} tintColor={colors.iconFaint} />
+                  )}
+                </Pressable>
+                <Pressable
+                  style={styles.aboutRow}
+                  disabled={resettingSub}
+                  onPress={handleResetSubscription}
+                >
+                  <View>
+                    <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>Reset VerveIn Plus Sub</Text>
+                    {subResetResult === 'already-anonymous' ? (
+                      <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>Already on a fresh identity.</Text>
+                    ) : subResetResult === 'not-configured' ? (
+                      <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>RevenueCat isn&apos;t configured.</Text>
+                    ) : subResetResult === 'error' ? (
+                      <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>Couldn&apos;t reset — try again.</Text>
+                    ) : subResetResult === 'reset' ? (
+                      <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>
+                        Fresh identity for this session — restarting the app re-syncs your real account.
+                      </Text>
+                    ) : null}
+                  </View>
+                  {resettingSub ? (
+                    <ActivityIndicator size="small" color={colors.iconFaint} />
+                  ) : subResetResult === 'reset' ? (
+                    <SymbolView name="checkmark" size={14} tintColor="#5FBE84" />
+                  ) : (
+                    <SymbolView name="arrow.clockwise" size={14} tintColor={colors.iconFaint} />
+                  )}
+                </Pressable>
+              </>
             ) : (
               <View style={styles.aboutRow}>
                 <TextInput
@@ -1091,12 +1273,15 @@ export default function SettingsScreen() {
           </View>
         </Section>
       </ScrollView>
+      </ReanimatedAnimated.View>
+      )}
 
       <BiometricsSheet ref={biometricsSheetRef} />
       <AdjustPlanSheet ref={adjustPlanSheetRef} />
       <ConditionsSheet ref={conditionsSheetRef} />
+      <GoalsSheet ref={goalsSheetRef} />
       <MovementRestrictionsSheet ref={movementRestrictionsSheetRef} />
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -1118,6 +1303,7 @@ function NavRow({
   onPress,
   hover,
   last = false,
+  locked = false,
 }: {
   styles: ReturnType<typeof createStyles>;
   colors: Record<string, string>;
@@ -1128,6 +1314,13 @@ function NavRow({
   onPress: () => void;
   hover: ReturnType<typeof useHoverFade>;
   last?: boolean;
+  /** VerveIn Plus tease, not a hide — the row itself, its label, and its
+   * icon stay exactly as a subscriber sees them; only the trailing chevron
+   * swaps for a lock glyph and the accessibility label names Plus, same
+   * "show what you'd get" copy PremiumGate itself uses. The caller is
+   * still the one deciding onPress's real behavior (open the real feature
+   * vs. push to the paywall) — this prop only ever changes what's drawn. */
+  locked?: boolean;
 }) {
   return (
     <Pressable
@@ -1139,7 +1332,13 @@ function NavRow({
       onHoverIn={hover.onHoverIn}
       onHoverOut={hover.onHoverOut}
       accessibilityRole="button"
-      accessibilityLabel={subtitle ? `${label}. ${subtitle}` : label}
+      accessibilityLabel={
+        locked
+          ? `${label} is part of VerveIn Plus. Tap to see what's included.`
+          : subtitle
+            ? `${label}. ${subtitle}`
+            : label
+      }
     >
       <View style={styles.switchRowLeft}>
         <SymbolView name={icon} size={15} tintColor="#5FBE84" style={styles.rowIcon} />
@@ -1150,7 +1349,7 @@ function NavRow({
           ) : null}
         </View>
       </View>
-      <SymbolView name="chevron.right" size={12} tintColor={colors.iconFaint} />
+      <SymbolView name={locked ? 'lock.fill' : 'chevron.right'} size={12} tintColor={colors.iconFaint} />
     </Pressable>
   );
 }
@@ -1243,6 +1442,13 @@ function createStyles(colors: Record<string, string>) {
       flex: 1,
       backgroundColor: colors.background,
     },
+    fadeLayer: {
+      flex: 1,
+    },
+    skeletonSection: {
+      marginTop: 20,
+      gap: 12,
+    },
     headerRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -1259,8 +1465,9 @@ function createStyles(colors: Record<string, string>) {
     },
     headerTitle: {
       color: colors.text,
-      fontSize: 16,
-      fontFamily: 'Geist-SemiBold',
+      fontSize: Type.headerTitle,
+      letterSpacing: -0.2,
+      fontFamily: 'Geist-Bold',
     },
     scrollContent: {
       paddingHorizontal: 20,
@@ -1272,7 +1479,7 @@ function createStyles(colors: Record<string, string>) {
     },
     sectionKicker: {
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       letterSpacing: 1,
       fontFamily: 'Geist-SemiBold',
     },
@@ -1294,7 +1501,7 @@ function createStyles(colors: Record<string, string>) {
     },
     rowLabel: {
       color: colors.text,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
     },
     navRow: {
@@ -1349,7 +1556,7 @@ function createStyles(colors: Record<string, string>) {
     },
     unitPillText: {
       color: colors.textSecondary,
-      fontSize: 10.5,
+      fontSize: Type.micro,
       fontFamily: 'Geist-SemiBold',
     },
     unitPillTextSelected: {
@@ -1363,13 +1570,13 @@ function createStyles(colors: Record<string, string>) {
     },
     comingSoonLabel: {
       color: colors.textSecondary,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
     },
     comingSoonSubtitle: {
       marginTop: 2,
       color: colors.textTertiary,
-      fontSize: 10.5,
+      fontSize: Type.micro,
       fontFamily: 'Geist-Medium',
     },
     // Deliberately not the destructive red — signing out loses nothing (see
@@ -1377,12 +1584,12 @@ function createStyles(colors: Record<string, string>) {
     // warning weight as Delete My Data.
     signOutText: {
       color: colors.textSecondary,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
     },
     deleteAccountRowText: {
       color: '#E5484D',
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
     },
     comingSoonBadge: {
@@ -1393,7 +1600,7 @@ function createStyles(colors: Record<string, string>) {
     },
     comingSoonBadgeText: {
       color: colors.textTertiary,
-      fontSize: 10,
+      fontSize: Type.micro,
       fontFamily: 'Geist-SemiBold',
     },
     actionVisual: {
@@ -1407,14 +1614,14 @@ function createStyles(colors: Record<string, string>) {
     },
     actionText: {
       color: '#5FBE84',
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
     importConfirmText: {
       marginBottom: 10,
       textAlign: 'center',
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
     },
     importBackdrop: {
@@ -1437,13 +1644,13 @@ function createStyles(colors: Record<string, string>) {
     },
     importTitle: {
       color: colors.text,
-      fontSize: 16,
+      fontSize: Type.subtitle,
       fontFamily: 'Geist-SemiBold',
       textAlign: 'center',
     },
     importBody: {
       color: colors.textSecondary,
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       lineHeight: 18,
       fontFamily: 'Geist-Medium',
       textAlign: 'center',
@@ -1457,14 +1664,35 @@ function createStyles(colors: Record<string, string>) {
       backgroundColor: colors.pillBg,
       padding: 12,
       color: colors.text,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Regular',
       textAlignVertical: 'top',
+    },
+    // BUG FIX: "Edit your name" used to reuse importInput above wholesale —
+    // that style's 120px height and top-anchored text (textAlignVertical:
+    // 'top') exist for the Import My Data JSON textarea's multi-line paste
+    // box, not a one-word name field. On a single-line input, that combo
+    // left a few letters sitting at the top of a tall, mostly-empty box —
+    // reading as text floating in the middle of the card rather than a
+    // normal name field, not because of any actual horizontal centering.
+    // This is that same visual language (border, background, radius) sized
+    // for one line instead.
+    nameInput: {
+      marginTop: 6,
+      borderRadius: 12,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.surfaceBorder,
+      backgroundColor: colors.pillBg,
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      color: colors.text,
+      fontSize: Type.bodyLarge,
+      fontFamily: 'Geist-Medium',
     },
     importErrorText: {
       marginTop: 4,
       color: '#E5484D',
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
       textAlign: 'center',
     },
@@ -1481,7 +1709,7 @@ function createStyles(colors: Record<string, string>) {
     },
     importCancelText: {
       color: colors.textTertiary,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
       textDecorationLine: 'underline',
     },
@@ -1497,7 +1725,7 @@ function createStyles(colors: Record<string, string>) {
     },
     importConfirmHitText: {
       color: '#ffffff',
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
     importDestructiveHit: {
@@ -1509,7 +1737,7 @@ function createStyles(colors: Record<string, string>) {
     },
     importDestructiveHitText: {
       color: '#ffffff',
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
     destructiveVisual: {
@@ -1523,7 +1751,7 @@ function createStyles(colors: Record<string, string>) {
     },
     destructiveText: {
       color: '#E5484D',
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
     aboutRow: {
@@ -1534,20 +1762,31 @@ function createStyles(colors: Record<string, string>) {
     },
     aboutRowLabel: {
       color: colors.text,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
     },
     devKeyInput: {
       flex: 1,
       color: colors.text,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
       paddingVertical: 4,
+    },
+    devValueText: {
+      color: colors.textSecondary,
+      fontSize: Type.body,
+      fontFamily: 'Geist-Medium',
+    },
+    devHintText: {
+      marginTop: 2,
+      color: colors.textTertiary,
+      fontSize: Type.caption,
+      fontFamily: 'Geist-Medium',
     },
     footer: {
       textAlign: 'center',
       color: colors.textQuaternary,
-      fontSize: 11,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
     },
   });

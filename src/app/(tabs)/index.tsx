@@ -5,6 +5,7 @@ import ReanimatedAnimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
+import { TabularNums, Type } from '@/constants/theme';
 import { getCalibration } from '@/lib/calibration';
 import { getDeloadNudge } from '@/lib/deload';
 import { DEFAULT_CALIBRATION } from '@/lib/engine/personal-calibration';
@@ -24,27 +25,20 @@ import { getShareableWeeklyRecapText, getWeeklyRecap } from '@/lib/momentum';
 import { hasCompletedOnboarding, loadOnboardingDraft, ONBOARDING_STEP_ROUTES } from '@/lib/onboarding-draft';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
+import { SESSION_LABEL_BY_GOAL, WEEKDAY_NAMES } from '@/lib/profile-labels';
 import { usePremiumEntitlement } from '@/lib/purchases';
 import { getWeekActivity, type WeekDay } from '@/lib/session-history';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { getTodaySession, type TodaySession } from '@/lib/today-session';
-import { getTrainingState } from '@/lib/training-state';
+import { getTrainingState } from '@/lib/training-state-loader';
 import { tierOf, type TrainingState } from '@/lib/engine/training-state';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
 import { TodaysTrainingCard } from '@/components/home/todays-training-card';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView } from '@/components/ui/app-symbol';
 
-const WEEKDAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 const WEEKDAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']; // Monday-start, matches session-history.ts
-
-const SESSION_LABEL_BY_GOAL: Record<string, string> = {
-  'build-physique': 'Strength Session',
-  'get-leaner': 'Conditioning Session',
-  'get-stronger': 'Strength Session',
-  'move-better': 'Mobility Session',
-};
 
 function getGreeting(): string {
   const hour = new Date().getHours();
@@ -125,13 +119,17 @@ export default function SummaryScreen() {
         todaySession?.timeAvailableMin,
         undefined,
         undefined,
-        effectiveHealthReadinessReasons
+        effectiveHealthReadinessReasons,
+        todaySession?.preferredBodyArea,
+        todaySession?.equipmentOverride
       ),
     [
       profile,
       todaySession?.energy,
       todaySession?.symptomTags,
       todaySession?.timeAvailableMin,
+      todaySession?.preferredBodyArea,
+      todaySession?.equipmentOverride,
       calibration,
       trainingState,
       effectiveHealthReadinessModifier,
@@ -245,7 +243,8 @@ export default function SummaryScreen() {
         setHealthReadinessReasons(loadedReadinessReasons);
         setTrainingState(loadedTrainingState);
         const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
-        setWeekActivity(await getWeekActivity(trainingDays));
+        const activity = await getWeekActivity(trainingDays);
+        setWeekActivity(activity);
       })();
       // isPremium added alongside the getDeloadNudge/effectiveHealthReadinessModifier
       // gating fix — without it, this callback (and the isPremium value it
@@ -282,7 +281,8 @@ export default function SummaryScreen() {
     setHealthReadinessReasons(loadedReadinessReasons);
     setTrainingState(loadedTrainingState);
     const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
-    setWeekActivity(await getWeekActivity(trainingDays));
+    const activity = await getWeekActivity(trainingDays);
+    setWeekActivity(activity);
     setRefreshing(false);
   }, [isPremium]);
 
@@ -347,7 +347,7 @@ export default function SummaryScreen() {
     return (
       <View style={styles.root}>
         <ScrollView
-          contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 32 }]}
+          contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 100 + insets.bottom }]}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.header}>
@@ -399,7 +399,7 @@ export default function SummaryScreen() {
     <View style={styles.root}>
       <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
       <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 32 }]}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 100 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.textSecondary} />
@@ -430,7 +430,7 @@ export default function SummaryScreen() {
             <View style={styles.healthKitBannerRow}>
               <SymbolView name="heart.fill" size={15} tintColor="#5FBE84" />
               <Text style={styles.healthKitBannerText} maxFontSizeMultiplier={1.4}>
-                See your plan alongside real activity, sleep, and heart rate from Apple Health.
+                See your plan alongside real activity, calories burned, sleep, and heart rate from Apple Health.
               </Text>
             </View>
             <View style={styles.healthKitBannerActions}>
@@ -553,6 +553,7 @@ function WeeklyActivity({
   // week with nothing real to report yet (blameless silence, not a lesser/
   // empty version of the button).
   const canShare = weekActivity.completedCount > 0;
+
   return (
     <View style={styles.section}>
       <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>THIS WEEK</Text>
@@ -621,6 +622,11 @@ function YourFitness({
 }) {
   const commitment = Number(profile?.commitmentLevel) || 4;
   const loadLabel = commitment <= 3 ? 'Light' : commitment <= 6 ? 'Moderate' : 'High';
+  // Same three buckets loadLabel already reads off commitment — a level
+  // meter reads at a glance the way the word alone doesn't, same instrument-
+  // style legibility weekRow's own dot strip and EnergyGauge's segmented bar
+  // already use elsewhere in this app, not a new visual language.
+  const loadLevel = commitment <= 3 ? 1 : commitment <= 6 ? 2 : 3;
   const energy = todaySession?.energy;
   const readinessNote =
     energy === undefined
@@ -677,6 +683,11 @@ function YourFitness({
           <Text style={styles.fitnessCardLabel} maxFontSizeMultiplier={1.3}>Training Load</Text>
           <Text style={styles.fitnessCardValue} maxFontSizeMultiplier={1.2}>{loadLabel}</Text>
         </View>
+        <View style={styles.loadMeter} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          {[1, 2, 3].map((bar) => (
+            <View key={bar} style={[styles.loadMeterBar, bar <= loadLevel && styles.loadMeterBarFilled]} />
+          ))}
+        </View>
         <Text style={styles.fitnessCardNote} maxFontSizeMultiplier={1.4}>{readinessNote}</Text>
         {calibrationNote ? (
           <Text style={styles.fitnessCardCalibrationNote} maxFontSizeMultiplier={1.4}>
@@ -724,14 +735,14 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     greeting: {
       color: colors.text,
-      fontSize: 22,
+      fontSize: Type.heading,
       letterSpacing: -0.3,
       fontFamily: 'Geist-Bold',
     },
     dateText: {
       marginTop: 4,
       color: colors.textSecondary,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
     },
     momentumRow: {
@@ -756,7 +767,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     deloadBannerText: {
       flex: 1,
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       lineHeight: 16,
       fontFamily: 'Geist-Medium',
     },
@@ -768,7 +779,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     deloadBannerAction: {
       alignSelf: 'flex-end',
       color: '#5FBE84',
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     healthKitBanner: {
@@ -788,7 +799,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     healthKitBannerText: {
       flex: 1,
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       lineHeight: 16,
       fontFamily: 'Geist-Medium',
     },
@@ -803,7 +814,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     healthKitBannerDismissText: {
       color: colors.textTertiary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     healthKitBannerConnect: {
@@ -812,7 +823,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     healthKitBannerConnectText: {
       color: '#5FBE84',
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     // Neutral, not a celebratory accent — this is an observation ("3
@@ -820,7 +831,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     // other plain fact on the screen rather than drawing extra attention.
     momentumText: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
     },
     avatarHit: {
@@ -839,7 +850,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     avatarText: {
       color: '#5FBE84',
-      fontSize: 15,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-Bold',
     },
     section: {
@@ -847,7 +858,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     sectionKicker: {
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       letterSpacing: 1,
       fontFamily: 'Geist-SemiBold',
     },
@@ -862,7 +873,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     weekDayLetter: {
       color: colors.textSecondary,
-      fontSize: 11,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
     },
     weekDot: {
@@ -893,8 +904,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     weekSummary: {
       color: colors.textSecondary,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
+      ...TabularNums,
     },
     weekShareButton: {
       flexDirection: 'row',
@@ -903,7 +915,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     weekShareText: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
     },
     fitnessCard: {
@@ -920,30 +932,45 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     fitnessCardLabel: {
       color: colors.text,
-      fontSize: 13.5,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
     fitnessCardValue: {
       color: colors.text,
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-Bold',
+      ...TabularNums,
     },
     fitnessCardTier: {
       color: colors.textTertiary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
+    },
+    loadMeter: {
+      marginTop: 10,
+      flexDirection: 'row',
+      gap: 4,
+    },
+    loadMeterBar: {
+      flex: 1,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: colors.badgeBg,
+    },
+    loadMeterBarFilled: {
+      backgroundColor: '#5FBE84',
     },
     fitnessCardNote: {
       marginTop: 6,
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       lineHeight: 17,
       fontFamily: 'Geist-Regular',
     },
     fitnessCardCalibrationNote: {
       marginTop: 4,
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       lineHeight: 15,
       fontFamily: 'Geist-Regular',
     },

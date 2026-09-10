@@ -1,15 +1,19 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo } from 'react';
-import { Animated, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+
+import { useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, { FadeIn, FadeInDown, useReducedMotion } from 'react-native-reanimated';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticImpactLight } from '@/lib/haptics';
 import { DEFAULT_CALIBRATION } from '@/lib/engine/personal-calibration';
+import { MOTION_DURATION, MOTION_EASING } from '@/lib/motion';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
 import { goBack } from '@/lib/onboarding-nav';
 import { useFadeInEntering } from '@/lib/screen-transitions';
+import { Type } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 import {
   ArrowUpIconGraphic,
@@ -28,8 +32,7 @@ const CANVAS_HEIGHT = 812;
  * of onboarding is done, this is the "here's why it was worth it" moment.
  */
 export default function OnboardingFirstLookScreen() {
-  const { width: windowWidth } = useWindowDimensions();
-  const scale = windowWidth / CANVAS_WIDTH;
+  const scale = useCanvasScale();
   const { colors, resolvedScheme } = useAppTheme();
   const isDark = resolvedScheme === 'dark';
   const hoverWashColor = isDark ? '#ffffff' : '#000000';
@@ -47,6 +50,7 @@ export default function OnboardingFirstLookScreen() {
     sex?: string;
     heightCm?: string;
     weightKg?: string;
+    age?: string;
     duration?: string;
     days?: string;
     commitmentLevel?: string;
@@ -98,7 +102,7 @@ export default function OnboardingFirstLookScreen() {
         <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>Same plan, two different days:</Text>
 
         <ReanimatedAnimated.View
-          entering={reducedMotion ? undefined : FadeInDown.duration(400).delay(150).springify().damping(16)}
+          entering={reducedMotion ? undefined : FadeInDown.duration(MOTION_DURATION.slow).delay(150).easing(MOTION_EASING.standard)}
           style={styles.card}
         >
           <View pointerEvents="none" style={styles.cardSheen} />
@@ -113,7 +117,7 @@ export default function OnboardingFirstLookScreen() {
         </ReanimatedAnimated.View>
 
         <ReanimatedAnimated.View
-          entering={reducedMotion ? undefined : FadeInDown.duration(400).delay(380).springify().damping(16)}
+          entering={reducedMotion ? undefined : FadeInDown.duration(MOTION_DURATION.slow).delay(380).easing(MOTION_EASING.standard)}
           style={[styles.card, styles.cardSecond]}
         >
           <View pointerEvents="none" style={styles.cardSheen} />
@@ -128,7 +132,7 @@ export default function OnboardingFirstLookScreen() {
         </ReanimatedAnimated.View>
 
         <ReanimatedAnimated.Text
-          entering={reducedMotion ? undefined : FadeIn.duration(350).delay(680)}
+          entering={reducedMotion ? undefined : FadeIn.duration(MOTION_DURATION.slow).delay(680)}
           style={styles.closingLine}
           maxFontSizeMultiplier={1.4}
         >
@@ -221,7 +225,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       top: 188,
       paddingHorizontal: 40,
       color: colors.text,
-      fontSize: 22,
+      fontSize: Type.heading,
       lineHeight: 28,
       letterSpacing: -0.3,
       textAlign: 'center',
@@ -235,7 +239,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       // so this has to clear that, not just a single-line title.
       top: 254,
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       textAlign: 'center',
       fontFamily: 'Geist-Medium',
     },
@@ -267,7 +271,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     cardLabel: {
       color: colors.textSecondary,
-      fontSize: 10.5,
+      fontSize: Type.micro,
       letterSpacing: 0.4,
       textTransform: 'uppercase',
       fontFamily: 'Geist-SemiBold',
@@ -293,18 +297,18 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     cardStat: {
       color: colors.text,
-      fontSize: 20,
+      fontSize: Type.headerTitle,
       fontFamily: 'Geist-Bold',
     },
     cardStatUnit: {
       color: colors.textTertiary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontWeight: '500',
     },
     cardExplanation: {
       marginTop: 8,
       color: colors.textSecondary,
-      fontSize: 11,
+      fontSize: Type.caption,
       lineHeight: 16,
       fontFamily: 'Geist-Regular',
     },
@@ -339,7 +343,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     primaryText: {
       color: '#ffffff',
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     buttonArrow: {

@@ -1,12 +1,15 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Animated, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+
+import { useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated from 'react-native-reanimated';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { goBack } from '@/lib/onboarding-nav';
 import { useFadeInEntering } from '@/lib/screen-transitions';
+import { Type } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 import {
   ArrowUpIconGraphic,
@@ -15,7 +18,7 @@ import {
 } from '@/components/auth/create-account-graphics';
 import { BackArrowGraphic } from '@/components/auth/verify-email-graphics';
 import { OnboardingProgress } from '@/components/onboarding/onboarding-progress';
-import { WheelPicker } from '@/components/onboarding/wheel-picker';
+import { HorizontalRuler } from '@/components/onboarding/horizontal-ruler';
 import { saveOnboardingDraft } from '@/lib/onboarding-draft';
 
 const CANVAS_WIDTH = 375;
@@ -86,8 +89,7 @@ function kgToKgIndex(kg: number): number {
  * separate screen you couldn't reach without it.
  */
 export default function OnboardingConsentBiometricsScreen() {
-  const { width: windowWidth } = useWindowDimensions();
-  const scale = windowWidth / CANVAS_WIDTH;
+  const scale = useCanvasScale();
   const { colors, resolvedScheme } = useAppTheme();
   const washColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
   const styles = useMemo(() => createStyles(colors, washColor), [colors, washColor]);
@@ -102,6 +104,7 @@ export default function OnboardingConsentBiometricsScreen() {
     sex: incomingSex,
     heightCm,
     weightKg,
+    age,
   } = useLocalSearchParams<{
     name?: string;
     goal?: string;
@@ -112,6 +115,7 @@ export default function OnboardingConsentBiometricsScreen() {
     sex?: string;
     heightCm?: string;
     weightKg?: string;
+    age?: string;
   }>();
 
   const baseParams = {
@@ -184,6 +188,13 @@ export default function OnboardingConsentBiometricsScreen() {
       sex: sex as SexId,
       heightCm: String(heightCmValue),
       weightKg: String(weightKgValue),
+      // No age control on this fixed-canvas screen (a third wheel didn't fit
+      // next to height/weight without real visual verification this session
+      // couldn't get) — age is collected from Settings' Biometrics sheet
+      // instead, same "optional, fill in later" contract sex/height/weight
+      // already have. Carries forward whatever came in via back-navigation
+      // unchanged rather than fabricating a default.
+      age: age ?? '',
     };
     saveOnboardingDraft({ step: 6, params });
     router.push({ pathname: '/onboarding/step-6', params } as never);
@@ -197,6 +208,7 @@ export default function OnboardingConsentBiometricsScreen() {
       sex: '',
       heightCm: '',
       weightKg: '',
+      age: '',
     };
     saveOnboardingDraft({ step: 6, params });
     router.push({ pathname: '/onboarding/step-6', params } as never);
@@ -350,49 +362,44 @@ export default function OnboardingConsentBiometricsScreen() {
           {unit === 'imperial' ? (
             <>
               <View style={styles.heightWheelRow}>
-                <WheelPicker
+                <HorizontalRuler
                   key="feet"
                   items={FEET_ITEMS}
                   selectedIndex={feetIndex}
                   onChange={(index) => setHeightCmValue(feetInchesToCm(index, inchesIndex))}
-                  width={76}
                 />
-                <WheelPicker
+                <HorizontalRuler
                   key="inches"
                   items={INCHES_ITEMS}
                   selectedIndex={inchesIndex}
                   onChange={(index) => setHeightCmValue(feetInchesToCm(feetIndex, index))}
-                  width={76}
                 />
               </View>
               <View style={styles.weightWheelWrap}>
-                <WheelPicker
+                <HorizontalRuler
                   key="lb"
                   items={WEIGHT_LB_ITEMS}
                   selectedIndex={lbIndex}
                   onChange={(index) => setWeightKgValue(lbToKg(index))}
-                  width={110}
                 />
               </View>
             </>
           ) : (
             <>
               <View style={styles.heightWheelRow}>
-                <WheelPicker
+                <HorizontalRuler
                   key="cm"
                   items={HEIGHT_CM_ITEMS}
                   selectedIndex={cmIndex}
                   onChange={(index) => setHeightCmValue(index + 120)}
-                  width={163}
                 />
               </View>
               <View style={styles.weightWheelWrap}>
-                <WheelPicker
+                <HorizontalRuler
                   key="kg"
                   items={WEIGHT_KG_ITEMS}
                   selectedIndex={kgIndex}
                   onChange={(index) => setWeightKgValue(index + 35)}
-                  width={110}
                 />
               </View>
             </>
@@ -513,7 +520,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       top: 168,
       paddingHorizontal: 44,
       color: colors.text,
-      fontSize: 20,
+      fontSize: Type.headerTitle,
       lineHeight: 27,
       textAlign: 'center',
       fontFamily: 'Geist-SemiBold',
@@ -525,7 +532,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       top: 202,
       paddingHorizontal: 60,
       color: colors.textSecondary,
-      fontSize: 11,
+      fontSize: Type.caption,
       lineHeight: 16.5,
       textAlign: 'center',
       fontFamily: 'Geist-Medium',
@@ -589,7 +596,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       left: 16,
       top: 300,
       color: colors.textTertiary,
-      fontSize: 10.5,
+      fontSize: Type.micro,
       letterSpacing: 0.6,
       textTransform: 'uppercase',
       fontFamily: 'Geist-SemiBold',
@@ -675,19 +682,29 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       position: 'absolute',
       left: 16,
       top: 416,
-      width: 163,
+      width: 176,
       flexDirection: 'row',
-      justifyContent: 'space-between',
+      gap: 8,
     },
     weightWheelWrap: {
       position: 'absolute',
       left: 222,
       top: 416,
+      // Explicit width, not left-to-flex — this sits on the fixed canvas
+      // with no sibling in its row, so HorizontalRuler (which fills via
+      // flex when no width is passed) has nothing to measure against
+      // without one. 375 canvas width minus this box's own left inset and
+      // the same 16px margin the canvas uses on its other edges.
+      width: 137,
     },
     primaryButtonHit: {
       position: 'absolute',
       left: 46,
-      top: 656,
+      // Shifted up from the original 656 — HorizontalRuler (68 tall) is
+      // shorter than WheelPicker (160 tall) it replaced here, and this
+      // keeps the same ~80px gap below the wheels that the original
+      // spacing had.
+      top: 564,
       width: 285,
       height: 38,
     },
@@ -706,7 +723,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
     },
     primaryText: {
       color: '#ffffff',
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     buttonArrow: {
@@ -718,7 +735,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
     skipButtonHit: {
       position: 'absolute',
       left: 46,
-      top: 704,
+      top: 612,
       width: 285,
       height: 38,
     },
@@ -734,7 +751,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
     },
     skipText: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     hoverWash: {

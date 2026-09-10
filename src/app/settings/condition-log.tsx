@@ -1,12 +1,14 @@
 import * as Crypto from 'expo-crypto';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import ReanimatedAnimated from 'react-native-reanimated';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView } from '@/components/ui/app-symbol';
 
-import { WheelPicker } from '@/components/onboarding/wheel-picker';
+import { HorizontalRuler } from '@/components/onboarding/horizontal-ruler';
+import { Type } from '@/constants/theme';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { CONDITIONS, CONDITION_LABELS, type Condition } from '@/lib/conditions';
 import {
@@ -17,9 +19,15 @@ import {
 } from '@/lib/condition-log';
 import { hapticError, hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { localDateStr } from '@/lib/local-date';
+import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { getProfile } from '@/lib/user-profile';
 import { HealthConsentGate } from '@/components/settings/health-consent-gate';
+import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
+
+// Same full-swipe-commits gesture as Notes/Weight History's own lists — see
+// notes/index.tsx's comment for the full reasoning.
+const FULL_SWIPE_DELETE_THRESHOLD = -220;
 
 // 0 = today, since a flare-up (unlike a training session) can honestly be
 // logged the same day it's happening — unlike log-past-session-sheet.tsx's
@@ -49,11 +57,22 @@ export default function ConditionLogScreen() {
   const backHover = useHoverFade();
   const addHover = useHoverFade();
   const savePress = useLiquidPress();
+  const entering = useFadeInEntering();
+  const swipeableRefs = useRef<Map<string, Swipeable>>(new Map());
+  const dragListeners = useRef<Map<string, string>>(new Map());
+  const pendingFullSwipeDelete = useRef<Set<string>>(new Set());
 
   const [entries, setEntries] = useState<ConditionLogEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [hasConsent, setHasConsent] = useState(false);
   const [adding, setAdding] = useState(false);
+  // BUG FIX (found in a later full-app audit): handleSave had no in-flight
+  // guard at all — condition-log.ts's addConditionLogEntry does an
+  // unprotected readAll→append→write, so an eager double-tap fired two
+  // concurrent writes that both read the same snapshot, silently dropping
+  // one of the two logged entries. Same disabled-while-saving pattern
+  // progress-photos.tsx's savePickedAsset already uses.
+  const [saving, setSaving] = useState(false);
   const [dayIndex, setDayIndex] = useState(0);
   const [selectedCondition, setSelectedCondition] = useState<Condition | null>(null);
   const [note, setNote] = useState('');
@@ -89,14 +108,16 @@ export default function ConditionLogScreen() {
   };
 
   const handleSave = async () => {
-    if (!selectedCondition) return;
+    if (!selectedCondition || saving) return;
     hapticImpactLight();
+    setSaving(true);
     await addConditionLogEntry(Crypto.randomUUID(), selectedDateStr, selectedCondition, note);
     reload();
     setDayIndex(0);
     setSelectedCondition(null);
     setNote('');
     setAdding(false);
+    setSaving(false);
   };
 
   const handleDelete = async (id: string) => {
@@ -112,7 +133,9 @@ export default function ConditionLogScreen() {
   };
 
   return (
-    <View style={styles.root}>
+    // BUG FIX (found in a later full-app audit): this screen's note field
+    // has no keyboard-avoidance — same fix as settings/index.tsx already has.
+    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={[styles.headerRow, { paddingTop: insets.top + 8 }]}>
         <Pressable
           onPress={() => router.back()}
@@ -129,9 +152,18 @@ export default function ConditionLogScreen() {
         <View style={styles.backButton} />
       </View>
 
-      {!loaded ? null : !hasConsent ? (
+      {!loaded ? (
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <SkeletonBlock height={44} borderRadius={14} />
+          <View style={styles.section}>
+            <SkeletonBlock height={11} borderRadius={4} />
+            <SkeletonCard height={80} lines={2} />
+          </View>
+        </ScrollView>
+      ) : !hasConsent ? (
         <HealthConsentGate />
       ) : (
+        <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.section}>
             <Pressable
@@ -152,7 +184,7 @@ export default function ConditionLogScreen() {
               <View style={styles.addCard}>
                 <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>When</Text>
                 <View style={styles.wheelCard}>
-                  <WheelPicker items={wheelItems} selectedIndex={dayIndex} onChange={setDayIndex} width={200} />
+                  <HorizontalRuler items={wheelItems} selectedIndex={dayIndex} onChange={setDayIndex} />
                 </View>
 
                 <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>Which condition</Text>
@@ -197,11 +229,13 @@ export default function ConditionLogScreen() {
                   onPress={handleSave}
                   onPressIn={savePress.onPressIn}
                   onPressOut={savePress.onPressOut}
-                  disabled={!selectedCondition}
+                  disabled={!selectedCondition || saving}
                   style={styles.saveButtonHit}
                 >
-                  <View style={[styles.saveButton, !selectedCondition && styles.saveButtonDisabled]}>
-                    <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>Log It</Text>
+                  <View style={[styles.saveButton, (!selectedCondition || saving) && styles.saveButtonDisabled]}>
+                    <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>
+                      {saving ? 'Logging…' : 'Log It'}
+                    </Text>
                   </View>
                 </Pressable>
               </View>
@@ -222,17 +256,38 @@ export default function ConditionLogScreen() {
                 {entries.map((entry, index) => (
                   <Swipeable
                     key={entry.id}
-                    renderRightActions={() => (
-                      <Pressable
-                        style={styles.deleteAction}
-                        onPress={() => handleDelete(entry.id)}
-                        accessibilityRole="button"
-                        accessibilityLabel="Delete entry"
-                      >
-                        <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
-                      </Pressable>
-                    )}
-                    overshootRight={false}
+                    ref={(ref) => {
+                      if (ref) swipeableRefs.current.set(entry.id, ref);
+                      else swipeableRefs.current.delete(entry.id);
+                    }}
+                    renderRightActions={(_progress, dragX) => {
+                      const previousListenerId = dragListeners.current.get(entry.id);
+                      if (previousListenerId) dragX.removeListener(previousListenerId);
+                      const listenerId = dragX.addListener(({ value }) => {
+                        if (value < FULL_SWIPE_DELETE_THRESHOLD && !pendingFullSwipeDelete.current.has(entry.id)) {
+                          pendingFullSwipeDelete.current.add(entry.id);
+                          swipeableRefs.current.get(entry.id)?.close();
+                        }
+                      });
+                      dragListeners.current.set(entry.id, listenerId);
+                      return (
+                        <Pressable
+                          style={styles.deleteAction}
+                          onPress={() => handleDelete(entry.id)}
+                          accessibilityRole="button"
+                          accessibilityLabel="Delete entry"
+                        >
+                          <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
+                        </Pressable>
+                      );
+                    }}
+                    onSwipeableClose={() => {
+                      if (pendingFullSwipeDelete.current.has(entry.id)) {
+                        pendingFullSwipeDelete.current.delete(entry.id);
+                        handleDelete(entry.id);
+                      }
+                    }}
+                    overshootRight
                   >
                     <View
                       style={[
@@ -259,8 +314,9 @@ export default function ConditionLogScreen() {
             )}
           </View>
         </ScrollView>
+        </ReanimatedAnimated.View>
       )}
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -269,6 +325,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     root: {
       flex: 1,
       backgroundColor: colors.background,
+    },
+    fadeLayer: {
+      flex: 1,
     },
     headerRow: {
       flexDirection: 'row',
@@ -286,8 +345,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     headerTitle: {
       color: colors.text,
-      fontSize: 16,
-      fontFamily: 'Geist-SemiBold',
+      fontSize: Type.headerTitle,
+      letterSpacing: -0.2,
+      fontFamily: 'Geist-Bold',
     },
     scrollContent: {
       paddingHorizontal: 20,
@@ -299,7 +359,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     sectionKicker: {
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       letterSpacing: 1,
       fontFamily: 'Geist-SemiBold',
     },
@@ -316,7 +376,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     addRowText: {
       color: colors.text,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
     addCard: {
@@ -330,7 +390,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     fieldLabel: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
     },
     wheelCard: {
@@ -367,7 +427,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     gridPillText: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     gridPillTextSelected: {
@@ -381,7 +441,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       backgroundColor: colors.background,
       padding: 12,
       color: colors.text,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Regular',
       textAlignVertical: 'top',
     },
@@ -399,7 +459,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     saveButtonText: {
       color: '#ffffff',
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-SemiBold',
     },
     card: {
@@ -422,7 +482,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     emptyText: {
       color: colors.textTertiary,
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
       lineHeight: 18,
       textAlign: 'center',
@@ -445,17 +505,17 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     entryCondition: {
       color: colors.text,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
     entryNote: {
       color: colors.textTertiary,
-      fontSize: 11.5,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Regular',
     },
     entryDate: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
     },
     deleteAction: {

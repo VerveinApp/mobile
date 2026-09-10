@@ -1,12 +1,16 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Animated, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+
+import { useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, { FadeIn } from 'react-native-reanimated';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticImpactLight } from '@/lib/haptics';
+import { MOTION_DURATION } from '@/lib/motion';
 import { goBack } from '@/lib/onboarding-nav';
 import { useFadeInEntering } from '@/lib/screen-transitions';
+import { Type } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 import {
   LogoMarkAccentGraphic,
@@ -22,8 +26,7 @@ const CANVAS_WIDTH = 375;
 const CANVAS_HEIGHT = 812;
 
 export default function OnboardingCommitmentScreen() {
-  const { width: windowWidth } = useWindowDimensions();
-  const scale = windowWidth / CANVAS_WIDTH;
+  const scale = useCanvasScale();
   const { colors, resolvedScheme } = useAppTheme();
   const hoverWashColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
   const styles = useMemo(() => createStyles(colors, hoverWashColor), [colors, hoverWashColor]);
@@ -38,6 +41,7 @@ export default function OnboardingCommitmentScreen() {
     sex,
     heightCm,
     weightKg,
+    age,
     duration,
     days,
     commitmentLevel: incomingCommitmentLevel,
@@ -51,6 +55,7 @@ export default function OnboardingCommitmentScreen() {
     sex?: string;
     heightCm?: string;
     weightKg?: string;
+    age?: string;
     duration?: string;
     days?: string;
     commitmentLevel?: string;
@@ -66,6 +71,7 @@ export default function OnboardingCommitmentScreen() {
     sex: sex ?? '',
     heightCm: heightCm ?? '',
     weightKg: weightKg ?? '',
+    age: age ?? '',
     duration: duration ?? '',
     days: days ?? '',
   };
@@ -145,7 +151,7 @@ export default function OnboardingCommitmentScreen() {
 
         <View style={styles.readout}>
           {selected ? (
-            <ReanimatedAnimated.View key={selectedIndex} entering={FadeIn.duration(120)}>
+            <ReanimatedAnimated.View key={selectedIndex} entering={FadeIn.duration(MOTION_DURATION.fast)}>
               <Text style={styles.readoutLevel} maxFontSizeMultiplier={1.1}>
                 {selectedIndex! + 1} <Text style={styles.readoutLevelMuted}>/ 8</Text>
               </Text>
@@ -247,7 +253,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       top: 188,
       paddingHorizontal: 32,
       color: colors.text,
-      fontSize: 22,
+      fontSize: Type.heading,
       lineHeight: 27,
       letterSpacing: -0.4,
       textAlign: 'center',
@@ -260,7 +266,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       top: 224,
       paddingHorizontal: 32,
       color: colors.textSecondary,
-      fontSize: 11,
+      fontSize: Type.caption,
       lineHeight: 16.5,
       textAlign: 'center',
       fontFamily: 'Geist-Regular',
@@ -294,7 +300,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     readoutName: {
       marginTop: 2,
       color: '#438C63',
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
       textAlign: 'center',
     },
@@ -302,14 +308,14 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       marginTop: 8,
       paddingHorizontal: 56,
       color: colors.textSecondary,
-      fontSize: 10.5,
+      fontSize: Type.micro,
       lineHeight: 15,
       fontFamily: 'Geist-Regular',
       textAlign: 'center',
     },
     readoutPrompt: {
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
       textAlign: 'center',
     },
@@ -335,7 +341,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     primaryText: {
       color: '#ffffff',
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     hoverWash: {

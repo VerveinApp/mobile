@@ -1,8 +1,10 @@
 import * as LocalAuthentication from 'expo-local-authentication';
+import type { SFSymbol } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, type AppStateStatus, Pressable, StyleSheet, Text, View } from 'react-native';
-import { SymbolView } from 'expo-symbols';
+import { AppState, type AppStateStatus, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { SymbolView } from '@/components/ui/app-symbol';
 
+import { Type } from '@/constants/theme';
 import { isAppLockEnabled } from '@/lib/app-lock';
 import { hapticError, hapticSuccess } from '@/lib/haptics';
 import { useAppColors } from '@/lib/theme-context';
@@ -20,6 +22,25 @@ export function AppLockGate() {
   const [locked, setLocked] = useState(false);
   const [checked, setChecked] = useState(false);
   const appState = useRef(AppState.currentState);
+  // "Face ID"/"Touch ID" are real Apple product names, correct only on iOS
+  // hardware — settings/index.tsx's own AppLockRow label already makes this
+  // same distinction. Fetched once at mount (the device's biometric type
+  // doesn't change between foreground events, unlike the lock-enabled check
+  // below), so there's no per-unlock-attempt flash of the generic fallback.
+  const [biometricLabel, setBiometricLabel] = useState('biometrics');
+  const [biometricIcon, setBiometricIcon] = useState<SFSymbol>('faceid');
+  useEffect(() => {
+    (async () => {
+      const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
+      if (types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)) {
+        setBiometricLabel(Platform.OS === 'ios' ? 'Face ID' : 'Face Unlock');
+        setBiometricIcon('faceid');
+      } else if (types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT)) {
+        setBiometricLabel(Platform.OS === 'ios' ? 'Touch ID' : 'Fingerprint');
+        setBiometricIcon('touchid');
+      }
+    })();
+  }, []);
 
   const attemptUnlock = useCallback(async () => {
     const hasHardware = await LocalAuthentication.hasHardwareAsync();
@@ -73,10 +94,10 @@ export function AppLockGate() {
   return (
     <View style={styles.root}>
       <View style={styles.iconWrap}>
-        <SymbolView name="faceid" size={48} tintColor="#5FBE84" />
+        <SymbolView name={biometricIcon} size={48} tintColor="#5FBE84" />
       </View>
       <Text style={styles.title} maxFontSizeMultiplier={1.3}>VerveIn is locked</Text>
-      <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>Unlock with Face ID to continue.</Text>
+      <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>Unlock with {biometricLabel} to continue.</Text>
       <Pressable style={styles.unlockButton} onPress={attemptUnlock}>
         <Text style={styles.unlockButtonText} maxFontSizeMultiplier={1.15}>Try Again</Text>
       </Pressable>
@@ -110,14 +131,14 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     title: {
       color: colors.text,
-      fontSize: 18,
+      fontSize: Type.stat,
       letterSpacing: -0.2,
       fontFamily: 'Geist-Bold',
     },
     subtitle: {
       marginTop: 6,
       color: colors.textSecondary,
-      fontSize: 13,
+      fontSize: Type.body,
       textAlign: 'center',
       fontFamily: 'Geist-Medium',
     },
@@ -130,7 +151,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     unlockButtonText: {
       color: '#ffffff',
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
   });

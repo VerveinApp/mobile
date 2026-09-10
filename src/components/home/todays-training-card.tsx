@@ -1,8 +1,11 @@
 import { router } from 'expo-router';
+import { useMemo } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { Type } from '@/constants/theme';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticImpactLight } from '@/lib/haptics';
+import { useAppColors } from '@/lib/theme-context';
 import type { TodaySession } from '@/lib/today-session';
 
 /**
@@ -30,6 +33,14 @@ export function TodaysTrainingCard({
 }) {
   const press = useLiquidPress();
   const hover = useHoverFade();
+  // BUG FIX (found in a later full-app audit): every style below was
+  // hardcoded to exactly match Colors.dark's own token values — this card
+  // never read the real theme at all, so it rendered as a solid near-black
+  // island with white text inside an otherwise light-themed screen in
+  // light mode. The literal hex match to Colors.dark rules out "deliberately
+  // always dark" as the explanation.
+  const colors = useAppColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   const handlePress = () => {
     hapticImpactLight();
@@ -79,53 +90,57 @@ export function TodaysTrainingCard({
   );
 }
 
-const styles = StyleSheet.create({
-  card: {
-    padding: 20,
-    borderRadius: 20,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: '#0C0C0C',
-    overflow: 'hidden',
-  },
-  cardSheen: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    height: '55%',
-    backgroundColor: 'rgba(255,255,255,0.025)',
-  },
-  cardKicker: {
-    color: '#5FBE84',
-    fontSize: 10.5,
-    letterSpacing: 1,
-    fontFamily: 'Geist-SemiBold',
-  },
-  cardTitle: {
-    marginTop: 6,
-    color: '#ffffff',
-    fontSize: 20,
-    letterSpacing: -0.2,
-    fontFamily: 'Geist-Bold',
-  },
-  cardMeta: {
-    marginTop: 4,
-    color: '#9a9a9a',
-    fontSize: 13,
-    fontFamily: 'Geist-Medium',
-  },
-  cardReason: {
-    marginTop: 8,
-    color: '#7a7a7a',
-    fontSize: 11.5,
-    lineHeight: 16,
-    fontFamily: 'Geist-Regular',
-  },
-  cardLinkText: {
-    marginTop: 14,
-    color: '#5FBE84',
-    fontSize: 13,
-    fontFamily: 'Geist-SemiBold',
-  },
-});
+function createStyles(colors: ReturnType<typeof useAppColors>) {
+  return StyleSheet.create({
+    card: {
+      padding: 20,
+      borderRadius: 20,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.surfaceBorder,
+      backgroundColor: colors.surface,
+      overflow: 'hidden',
+    },
+    cardSheen: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      top: 0,
+      height: '55%',
+      backgroundColor: colors.surfaceSheen,
+    },
+    cardKicker: {
+      // Brand green — deliberately fixed across both themes, same as every
+      // other accent usage in this app, not a theme token.
+      color: '#5FBE84',
+      fontSize: Type.micro,
+      letterSpacing: 1,
+      fontFamily: 'Geist-SemiBold',
+    },
+    cardTitle: {
+      marginTop: 6,
+      color: colors.text,
+      fontSize: Type.headerTitle,
+      letterSpacing: -0.2,
+      fontFamily: 'Geist-Bold',
+    },
+    cardMeta: {
+      marginTop: 4,
+      color: colors.textSecondary,
+      fontSize: Type.body,
+      fontFamily: 'Geist-Medium',
+    },
+    cardReason: {
+      marginTop: 8,
+      color: colors.textTertiary,
+      fontSize: Type.caption,
+      lineHeight: 16,
+      fontFamily: 'Geist-Regular',
+    },
+    cardLinkText: {
+      marginTop: 14,
+      color: '#5FBE84',
+      fontSize: Type.body,
+      fontFamily: 'Geist-SemiBold',
+    },
+  });
+}

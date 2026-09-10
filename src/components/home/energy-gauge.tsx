@@ -3,7 +3,6 @@ import { Platform, StyleSheet, Text, View } from 'react-native';
 import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import ReanimatedAnimated, {
-  Easing,
   runOnJS,
   useAnimatedStyle,
   useReducedMotion,
@@ -12,7 +11,9 @@ import ReanimatedAnimated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { Type } from '@/constants/theme';
 import { hapticSelect } from '@/lib/haptics';
+import { MOTION_DURATION, MOTION_EASING } from '@/lib/motion';
 import { useAppColors } from '@/lib/theme-context';
 
 const isGlassAvailable = isLiquidGlassAvailable();
@@ -101,7 +102,9 @@ export function EnergyGauge({ size = 260, canvasScale = 1, value, onChange, prev
   const reducedMotion = useReducedMotion();
   const pulse = useSharedValue(0);
   useEffect(() => {
-    pulse.value = reducedMotion ? 0.5 : withRepeat(withTiming(1, { duration: 900, easing: Easing.inOut(Easing.sin) }), -1, true);
+    pulse.value = reducedMotion
+      ? 0.5
+      : withRepeat(withTiming(1, { duration: MOTION_DURATION.pulse, easing: MOTION_EASING.pulse }), -1, true);
   }, [pulse, reducedMotion]);
   const pulseAnimatedStyle = useAnimatedStyle(() => ({
     borderWidth: 1.5 + pulse.value * 2.5,
@@ -187,8 +190,22 @@ export function EnergyGauge({ size = 260, canvasScale = 1, value, onChange, prev
                   },
                 ]}
               >
+                {/* BUG FIX: was tintColor="#FFFFFF" — a white frost veil over
+                    whatever's underneath, which reads fine on the darker
+                    ends of MOOD_COLORS (red, green) but visibly washes out
+                    the lighter middle ones (orange, yellow) toward pale/
+                    faded instead of "selected." Tinting with the segment's
+                    own color instead reinforces its real hue through the
+                    glass — the standard tinted-glass pattern (matching a
+                    control's own accent color, not a mismatched white) —
+                    so the selected segment reads as more vivid, not less,
+                    regardless of which one it is. */}
                 {isGlassAvailable && isSelected ? (
-                  <GlassView glassEffectStyle="regular" tintColor="#FFFFFF" style={StyleSheet.absoluteFill} />
+                  <GlassView
+                    glassEffectStyle="regular"
+                    tintColor={MOOD_COLORS[level.score]}
+                    style={StyleSheet.absoluteFill}
+                  />
                 ) : null}
                 {isSelected ? (
                   <ReanimatedAnimated.View pointerEvents="none" style={[styles.segmentOutline, pulseAnimatedStyle]} />
@@ -252,7 +269,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     readoutLabel: {
       marginTop: 2,
       color: '#438C63',
-      fontSize: 11,
+      fontSize: Type.caption,
       fontFamily: 'Geist-SemiBold',
     },
   });

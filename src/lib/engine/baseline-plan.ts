@@ -58,6 +58,7 @@ import type {
   Impact,
 } from './types';
 import { SYMPTOM_OVERRIDE_TABLE } from './reference/symptom-override-table';
+import type { SymptomTag } from '@/lib/symptom-tags';
 import { EXERCISES_PER_FOCUS_AREA } from './reference/policy-parameters';
 import { exerciseLibrary, INTENSITY_RANK, IMPACT_RANK, byNumericId, bySelectionOrder } from './exercise-library';
 import { filterAndSubstitute } from './exercise-filtering';
@@ -95,7 +96,12 @@ function onboardingConstraints(ctx: OnboardingContext): EffectiveConstraintSet {
   const forceAddTypes = new Set<string>();
 
   for (const tag of new Set(ctx.standingSymptomTags)) {
-    const row = SYMPTOM_OVERRIDE_TABLE[tag];
+    // Cast, not a type-level guarantee: standingSymptomTags is still plain
+    // string[] at this boundary (real caller-supplied data), so the runtime
+    // guard right below is still the actual safety net — SYMPTOM_OVERRIDE_TABLE's
+    // own SymptomTag-keyed type only guarantees the TABLE itself covers every
+    // canonical tag, not that an arbitrary input string is one.
+    const row = SYMPTOM_OVERRIDE_TABLE[tag as SymptomTag];
     if (!row) {
       throw new Error(`M3: unrecognized standing symptom tag "${tag}" — rejected, never silently passed through.`);
     }

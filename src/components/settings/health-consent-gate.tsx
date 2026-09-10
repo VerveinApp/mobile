@@ -1,7 +1,8 @@
 import { router } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView } from '@/components/ui/app-symbol';
 
+import { Type } from '@/constants/theme';
 import { useAppColors } from '@/lib/theme-context';
 
 /**
@@ -44,7 +45,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     text: {
       color: colors.textSecondary,
-      fontSize: 13,
+      fontSize: Type.body,
       lineHeight: 19,
       textAlign: 'center',
       fontFamily: 'Geist-Medium',
@@ -55,7 +56,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     backText: {
       color: '#438C63',
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
   });

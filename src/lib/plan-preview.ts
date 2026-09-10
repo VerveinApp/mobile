@@ -53,10 +53,13 @@ import { filterAndSubstitute } from '@/lib/engine/exercise-filtering';
 import { checkFallbackTrigger } from '@/lib/engine/fallback-logic';
 import { ENERGY_MODIFIER_TABLE } from '@/lib/engine/reference/energy-modifier-table';
 import { SYMPTOM_OVERRIDE_TABLE } from '@/lib/engine/reference/symptom-override-table';
+import type { SymptomTag } from '@/lib/symptom-tags';
 import type {
   BaselinePlan,
+  BodyArea,
   DailyCheckIn,
   EffectiveConstraintSet,
+  Equipment,
   Exercise,
   FallbackTrigger,
   PolicyApplicationRecord,
@@ -69,7 +72,7 @@ import { bodyAreaPriorityScore, type TrainingState } from '@/lib/engine/training
 import { scaleVolume } from '@/lib/engine/volume-scaling';
 import { assembleWorkout } from '@/lib/engine/workout-assembly';
 import { localDateStr } from '@/lib/local-date';
-import { LOCAL_USER_ID, profileToOnboardingContext } from '@/lib/onboarding-to-engine';
+import { EQUIPMENT_BY_ENVIRONMENT, LOCAL_USER_ID, profileToOnboardingContext } from '@/lib/onboarding-to-engine';
 import { ENVIRONMENT_LABELS } from '@/lib/profile-labels';
 import type { UserProfile } from '@/lib/user-profile';
 
@@ -198,11 +201,26 @@ export type PlanPreviewResult = {
  * least provisional evidence for one of the two fields — deliberate
  * epistemic humility, same rule as every other TrainingState reader in this
  * codebase: don't act on a field its own tier calls thin.
+ *
+ * `preferredBodyArea` (Vervein addition) is the one deliberate exception to
+ * "the engine decides, never the person" this reorder otherwise embodies —
+ * an explicit, opt-in choice always wins over the computed neglected-area
+ * signal, no tier check. Scoped specifically to check-in.tsx's rest-day
+ * "check in anyway" path (see its own isRestDay gate): a day the engine
+ * wasn't already planning to train at all is the one place honoring a
+ * person's own stated preference over the algorithm's own guess doesn't
+ * compete with this app's adaptive-plan identity for every OTHER day.
  */
 function reorderByBodyAreaPriority(
   filtered: Exercise[],
-  trainingState: TrainingState | undefined
+  trainingState: TrainingState | undefined,
+  preferredBodyArea?: BodyArea
 ): Exercise[] {
+  if (preferredBodyArea) {
+    return [...filtered].sort(
+      (a, b) => (b.body_area === preferredBodyArea ? 1 : 0) - (a.body_area === preferredBodyArea ? 1 : 0)
+    );
+  }
   if (!trainingState) return filtered;
   if (trainingState.stimulusDebt.tier === 'insufficient' && trainingState.recency.tier === 'insufficient') {
     return filtered;
@@ -253,13 +271,51 @@ export const BODY_AREA_PRIORITY_LABEL: Record<Exercise['body_area'], string> = {
 // Self-invalidates the moment a genuinely new profile object is passed in —
 // a real profile edit always produces a new object (setState never mutates
 // in place), so there's no staleness case a reference check could miss.
+//
+// BUG FIX (caught while adding equipmentOverride): also keys on the
+// effective equipment level, not just the profile reference. The pool
+// itself is generated at this equipment ceiling (onboardingConstraints
+// reads ctx.equipment) — without this, a day's real equipmentOverride could
+// only ever TIGHTEN what Gate 1 re-filters out of an already-generated
+// pool, never LOOSEN it, since the pool would still be capped at whatever
+// the STANDING profile's equipment was regardless of today's real answer.
+// It also fixes a real cross-contamination risk: check-in.tsx calls this
+// twice per render with the SAME profile reference (`preview`, with
+// whatever override is active, and `baseline`, deliberately without one) —
+// a cache keyed on profile identity alone would serve one call's plan to
+// the other whenever they disagree on equipment.
+// Also keys on the effective simple-exercise bias, same reasoning and same
+// bug class as the equipment key above — a real return-after-absence
+// (daysSinceLastCheckIn) can flip this to true for a session even when the
+// standing profile's own experience level wouldn't, and the pool itself
+// (not just the daily re-filter) needs to reflect that, or check-in.tsx's
+// own `preview`-vs-`baseline` pair could contaminate each other again.
 let cachedProfileInput: PlanPreviewInput | null = null;
+let cachedEquipment: Equipment | null = null;
+let cachedBiasSimpleExercises: boolean | null = null;
 let cachedBaselinePlan: BaselinePlan | null = null;
 
-function getBaselinePlanCached(input: PlanPreviewInput, ctx: OnboardingContext): BaselinePlan {
-  if (input === cachedProfileInput && cachedBaselinePlan) return cachedBaselinePlan;
+function getBaselinePlanCached(
+  input: PlanPreviewInput,
+  ctx: OnboardingContext,
+  effectiveEquipment: Equipment,
+  effectiveBiasSimpleExercises: boolean
+): BaselinePlan {
+  if (
+    input === cachedProfileInput &&
+    effectiveEquipment === cachedEquipment &&
+    effectiveBiasSimpleExercises === cachedBiasSimpleExercises &&
+    cachedBaselinePlan
+  ) {
+    return cachedBaselinePlan;
+  }
   cachedProfileInput = input;
-  cachedBaselinePlan = generateBaselinePlan(ctx, LOCAL_USER_ID);
+  cachedEquipment = effectiveEquipment;
+  cachedBiasSimpleExercises = effectiveBiasSimpleExercises;
+  cachedBaselinePlan = generateBaselinePlan(
+    { ...ctx, equipment: effectiveEquipment, biasSimpleExercises: effectiveBiasSimpleExercises },
+    LOCAL_USER_ID
+  );
   return cachedBaselinePlan;
 }
 
@@ -343,10 +399,49 @@ export function computePlanPreview(
    * rather than a broken sentence — every existing call site keeps working
    * unchanged if it doesn't pass this yet.
    */
-  healthReadinessReasons?: { rhrElevated: boolean; sleepDeficit: boolean }
+  healthReadinessReasons?: { rhrElevated: boolean; sleepDeficit: boolean },
+  /**
+   * Vervein addition, not in the vault — an explicit body-area choice from
+   * check-in.tsx's rest-day "check in anyway" flow only (see that screen's
+   * own isRestDay gate). Undefined on every other call site/day, byte-
+   * identical to today's existing behavior. See reorderByBodyAreaPriority's
+   * own doc comment for why this is allowed to override the engine's own
+   * neglected-area signal specifically here and nowhere else.
+   */
+  preferredBodyArea?: BodyArea,
+  /**
+   * Vervein addition, not in the vault — check-in.tsx's own "Where are you
+   * working out today?" answer, in the same onboarding-vocabulary keys
+   * ('full-gym'/'home-gym'/'minimal-equipment'/'bodyweight-only') the
+   * profile's own standing `environment` answer uses, mapped through the
+   * exact same EQUIPMENT_BY_ENVIRONMENT table onboarding-to-engine.ts
+   * already applies to that standing answer. Undefined means today's
+   * equipment matches the standing profile, byte-identical to every call
+   * site that doesn't pass one. Unlike the safety-driven ceilings above
+   * (intensity/impact, tightened only, never loosened — Most Restrictive
+   * Wins), equipment is an availability fact, not a safety limit, so a
+   * day's real answer fully REPLACES the standing one, in either direction
+   * — someone traveling has real LESS equipment than home; someone at a
+   * hotel gym for the day has real MORE. Same full-override precedent as
+   * preferredBodyArea above, for the same reason: this is the one input
+   * where what the person reports today is more true than a standing
+   * onboarding answer could be.
+   */
+  equipmentOverride?: string
 ): PlanPreviewResult {
   const ctx = profileToOnboardingContext(input);
-  const baselinePlan = getBaselinePlanCached(input, ctx);
+  const effectiveEquipment = equipmentOverride ? (EQUIPMENT_BY_ENVIRONMENT[equipmentOverride] ?? ctx.equipment) : ctx.equipment;
+  // Vervein addition — a real return-after-absence biases toward simpler,
+  // more familiar exercises for that one session, the same real mechanism
+  // ctx.biasSimpleExercises already gives a beginner (see baseline-plan.ts's
+  // own bySelectionOrder — a soft preference ordering, never a hard filter,
+  // so nothing becomes unselectable, just reordered behind). daysSinceLast
+  // CheckIn already gates the "welcome back" explanation wording below at
+  // this exact same RETURN_GAP_MIN_DAYS threshold; this is the same real
+  // detection now also touching what gets selected, not just what gets said.
+  const effectiveBiasSimpleExercises =
+    ctx.biasSimpleExercises || (daysSinceLastCheckIn !== undefined && daysSinceLastCheckIn >= RETURN_GAP_MIN_DAYS);
+  const baselinePlan = getBaselinePlanCached(input, ctx, effectiveEquipment, effectiveBiasSimpleExercises);
 
   // Step 2 — today's constraint set, re-filtered against the baseline pool.
   const checkIn: DailyCheckIn = {
@@ -361,17 +456,17 @@ export function computePlanPreview(
     ctx.conditionProfile,
     ctx.standingSymptomTags,
     ctx.movementRestrictions,
-    ctx.equipment,
+    effectiveEquipment,
     ctx.conditions
   );
-  const filterResult = filterAndSubstitute(baselinePlan, dailyConstraints, ctx.biasSimpleExercises);
+  const filterResult = filterAndSubstitute(baselinePlan, dailyConstraints, effectiveBiasSimpleExercises);
   // Body-area priority reorder (Vervein addition — see the function's own
   // doc comment). Every downstream use of "today's eligible exercises in
   // order" reads this, not filterResult.filtered directly, so the reorder
   // stays consistent across volume scaling, the trim step, and the final
   // per-exercise metadata zip below — a partial reorder (some call sites
   // updated, others not) would silently misalign body areas by index.
-  const prioritizedFiltered = reorderByBodyAreaPriority(filterResult.filtered, trainingState);
+  const prioritizedFiltered = reorderByBodyAreaPriority(filterResult.filtered, trainingState, preferredBodyArea);
   const prioritizedArea =
     prioritizedFiltered[0] && filterResult.filtered[0] && prioritizedFiltered[0].body_area !== filterResult.filtered[0].body_area
       ? prioritizedFiltered[0].body_area
@@ -380,7 +475,11 @@ export function computePlanPreview(
   // Standing ∪ acute, deduplicated — the same merge M13 does before both
   // the volume-scaling multiplier lookup and the explanation's tag lines.
   const activeTags = [...new Set([...ctx.standingSymptomTags, ...acuteSymptomTags])];
-  const activeSymptomOverrides = activeTags.map((t) => SYMPTOM_OVERRIDE_TABLE[t]).filter(Boolean);
+  // Cast, not a type-level guarantee — same reasoning as constraint-
+  // resolution.ts's identical cast. .filter(Boolean) (not a throw) is this
+  // call site's own existing, pre-existing behavior for an unrecognized
+  // tag — unchanged by this cast.
+  const activeSymptomOverrides = activeTags.map((t) => SYMPTOM_OVERRIDE_TABLE[t as SymptomTag]).filter(Boolean);
 
   // Step 3 — Fallback check.
   const fallback = checkFallbackTrigger(filterResult.filtered.length, energy, false);
@@ -540,7 +639,6 @@ export function computePlanPreview(
     energy,
     activeTags,
     calibration,
-    assembledExercises,
     workout.totalDuration,
     overallSetsPct
   );
@@ -674,8 +772,26 @@ export function computePlanPreview(
   // debt) — priorityOf blends both, so naming one specific mechanism as THE
   // reason would overclaim whichever one didn't actually drive it this time.
   // Lowest priority of the capped observations: nice context, lowest stakes.
-  if (prioritizedArea) {
-    observations.push(`Started with ${BODY_AREA_PRIORITY_LABEL[prioritizedArea]} — it's fallen behind the rest lately.`);
+  // Two different real causes can move the same first exercise — the
+  // computed neglected-area signal above, or (rest-day "check in anyway"
+  // only) an explicit preferredBodyArea. Reusing "exactly what you asked
+  // for" for the first case would be a real inaccuracy: nothing about a
+  // self-chosen bonus session applies to a signal the person never touched.
+  //
+  // BUG FIX: this used to read "it's fallen behind the rest lately" — a
+  // debt/guilt framing (this app's own bodyAreaPriorityScore literally
+  // calls the underlying field stimulusDebt) for what the physiology
+  // actually is: a body area that hasn't been loaded in a while is
+  // RECOVERED, not neglected. Same real signal, opposite emotional
+  // valence — "well-rested" is the more honest read of what long recency
+  // means, not just the kinder one, and it's this app's own explicit stance
+  // against any "you're behind" framing (see the vault's own no-streaks
+  // rule this already lives alongside). Observation only, never a command —
+  // this states which area led the order, not that the user should train it.
+  if (prioritizedArea && preferredBodyArea && prioritizedArea === preferredBodyArea) {
+    observations.push(`Started with ${BODY_AREA_PRIORITY_LABEL[prioritizedArea]} — exactly what you asked for today.`);
+  } else if (prioritizedArea) {
+    observations.push(`Started with ${BODY_AREA_PRIORITY_LABEL[prioritizedArea]} — it's well-rested and ready for more.`);
   }
 
   const MAX_OBSERVATIONS = 3;
@@ -763,7 +879,26 @@ export function computePlanPreview(
     };
   });
 
-  const equipmentNote = `Selected from your ${ENVIRONMENT_LABELS[input.environment ?? ''] ?? 'equipment'} setup.`;
+  // BUG FIX (caught while adding equipmentOverride): this always read the
+  // standing profile's environment, regardless of today's own override —
+  // on a day the override was active, this would have kept naming the
+  // standing setup even though a genuinely different one governed which
+  // exercises actually got selected. Names whichever one was real for today.
+  //
+  // BUG FIX #2 (found in a later full-app audit): this originally branched
+  // on equipmentOverride's bare truthiness, not on whether it actually
+  // resolved to a real Equipment value the way effectiveEquipment itself
+  // does above. For a value absent from EQUIPMENT_BY_ENVIRONMENT (stale
+  // data from an older backup, or a value the environment type gained
+  // before a table entry existed for it), effectiveEquipment already
+  // correctly falls back to the standing ctx.equipment — but this note
+  // would still say "today's [equipment fallback label]" while the
+  // standing setup was what actually governed selection. Gated on the same
+  // resolved lookup effectiveEquipment uses, so the two can never disagree.
+  const resolvedOverrideLabel = equipmentOverride ? ENVIRONMENT_LABELS[equipmentOverride] : undefined;
+  const equipmentNote = resolvedOverrideLabel
+    ? `Selected from today's ${resolvedOverrideLabel} setup.`
+    : `Selected from your ${ENVIRONMENT_LABELS[input.environment ?? ''] ?? 'equipment'} setup.`;
 
   // Fallback-branch exercises are full Exercise objects with an `id`, not a
   // ScaledExercise's `exerciseId`/`adapted_sets` — but ledger/debt folds

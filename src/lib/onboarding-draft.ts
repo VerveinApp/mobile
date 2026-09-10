@@ -1,7 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { localDateStr } from '@/lib/local-date';
+
 const DRAFT_KEY = 'vervein.onboardingDraft.v1';
 const COMPLETED_KEY = 'vervein.onboardingCompleted.v1';
+const START_DATE_KEY = 'vervein.accountStartDate.v1';
 
 /**
  * Onboarding step screens that can be resumed after the name-entry screen.
@@ -79,6 +82,11 @@ export async function markOnboardingComplete() {
   try {
     await AsyncStorage.setItem(COMPLETED_KEY, 'true');
     await AsyncStorage.removeItem(DRAFT_KEY);
+    // Only ever set once per "generation" of this account on this device
+    // (cleared alongside COMPLETED_KEY by clearOnboardingCompleted below) —
+    // see getAccountStartDate's own doc comment for what this fixes.
+    const existing = await AsyncStorage.getItem(START_DATE_KEY);
+    if (!existing) await AsyncStorage.setItem(START_DATE_KEY, localDateStr());
   } catch {
     // Worst case the entry redirect re-checks and finds no flag — same as never having called this.
   }
@@ -92,10 +100,68 @@ export async function hasCompletedOnboarding(): Promise<boolean> {
   }
 }
 
+/**
+ * The local YYYY-MM-DD this device's account first finished onboarding —
+ * used by session-history.ts to stop treating calendar days from BEFORE the
+ * account existed as "missed." getWeekActivity/getRecentWeeks used to
+ * compute a missed day purely from scheduledDays' recurring weekly pattern
+ * projected across the calendar, with no floor: a brand-new account created
+ * on a Friday whose weekly pattern includes Monday–Thursday saw those same-
+ * week days rendered as missed red dots, despite the account (and its plan)
+ * not existing yet on any of them. Null only if onboarding was never
+ * completed on this device at all (shouldn't be reachable from a screen
+ * that's already past onboarding, but never assumed).
+ *
+ * BUG FIX: this only got set going forward (inside markOnboardingComplete),
+ * so an account that finished onboarding before this field existed had no
+ * way to ever pick one up — it would read null forever, silently falling
+ * back to the old, buggy "exclude nothing" behavior permanently, on the
+ * exact accounts most likely to still be showing the bug being fixed.
+ * Self-heals here instead: the first time this is read with onboarding
+ * already complete but no start date on file, today becomes that date.
+ * This can't know the account's TRUE original start day, but "today" is the
+ * safe direction to guess — it only ever excludes days from here forward
+ * from being wrongly treated as pre-existing history, never the reverse.
+ */
+export async function getAccountStartDate(): Promise<string | null> {
+  try {
+    const existing = await AsyncStorage.getItem(START_DATE_KEY);
+    if (existing) return existing;
+    if ((await AsyncStorage.getItem(COMPLETED_KEY)) !== 'true') return null;
+    const backfilled = localDateStr();
+    await AsyncStorage.setItem(START_DATE_KEY, backfilled);
+    return backfilled;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ⚠️ DEV-ONLY — Settings' Developer section, "Seed fake session history"
+ * only. Backdates this device's own account-start floor so a freshly seeded
+ * multi-week history doesn't get excluded by the same real check
+ * getAccountStartDate's own doc comment describes (a day before the account
+ * "existed" always reads as unscheduled, never as missed). Never pulls the
+ * date forward — only backdates further than what's already on file, so
+ * this can't accidentally erase a real earlier start date by being called
+ * with a more recent one.
+ */
+export async function backdateAccountStartDateForTesting(date: string): Promise<void> {
+  try {
+    const existing = await AsyncStorage.getItem(START_DATE_KEY);
+    if (existing && existing <= date) return;
+    await AsyncStorage.setItem(START_DATE_KEY, date);
+  } catch {
+    // Best-effort dev tool — worst case the seeded history just gets
+    // excluded again, same as the bug this exists to let you re-test.
+  }
+}
+
 /** Un-does markOnboardingComplete — used by Profile's "Reset & Restart" action. */
 export async function clearOnboardingCompleted() {
   try {
     await AsyncStorage.removeItem(COMPLETED_KEY);
+    await AsyncStorage.removeItem(START_DATE_KEY);
   } catch {
     // Best-effort — same as never having completed onboarding.
   }

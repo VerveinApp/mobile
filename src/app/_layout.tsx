@@ -117,11 +117,14 @@ function RootNavigator() {
           <Stack.Screen name="settings/index" />
           <Stack.Screen name="settings/progress-history" />
           <Stack.Screen name="settings/weight-history" />
+          <Stack.Screen name="settings/sleep-history" />
+          <Stack.Screen name="settings/nutrition-history" />
           <Stack.Screen name="settings/body-measurements" />
           <Stack.Screen name="settings/condition-log" />
           <Stack.Screen name="settings/progress-photos" />
           <Stack.Screen name="log" />
           <Stack.Screen name="notes/index" />
+          <Stack.Screen name="notes/archive" />
           <Stack.Screen name="notes/[id]" />
           <Stack.Screen name="referral" />
           <Stack.Screen name="legal/terms" />

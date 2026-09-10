@@ -1,10 +1,13 @@
 import { BottomSheetBackdrop, type BottomSheetBackdropProps, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { SymbolView } from 'expo-symbols';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SymbolView } from '@/components/ui/app-symbol';
 
 import { ENERGY_LABELS, type EnergyScore } from '@/components/home/energy-gauge';
-import { WheelPicker } from '@/components/onboarding/wheel-picker';
+import { HorizontalRuler } from '@/components/onboarding/horizontal-ruler';
+import { Type } from '@/constants/theme';
+import { BODY_AREA_LABELS, BODY_AREA_ORDER } from '@/lib/body-area-labels';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticImpactLight, hapticSelect, hapticSuccess } from '@/lib/haptics';
 import { localDateStr } from '@/lib/local-date';
@@ -21,14 +24,6 @@ import { getCompletionStatus, saveRetroactiveWorkoutLog, type WorkoutLogExercise
 // exact same day would create two conflicting "what happened today"
 // records rather than one honest one.
 const WHEEL_DAY_OFFSETS = Array.from({ length: 30 }, (_, i) => i + 1);
-
-const BODY_AREA_ORDER: BodyArea[] = ['upper', 'lower', 'core', 'full'];
-const BODY_AREA_LABELS: Record<BodyArea, string> = {
-  upper: 'Upper Body',
-  lower: 'Lower Body',
-  core: 'Core',
-  full: 'Full Body',
-};
 const ENERGY_SCORES: EnergyScore[] = [1, 2, 3, 4, 5];
 const SORENESS_LABELS: Record<EnergyScore, string> = {
   1: 'None',
@@ -63,6 +58,7 @@ function wheelLabel(offsetDays: number, date: Date): string {
 export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () => void }>(({ onSaved }, forwardedRef) => {
   const sheetRef = useRef<BottomSheetModal>(null);
   useImperativeHandle(forwardedRef, () => sheetRef.current as BottomSheetModal, []);
+  const insets = useSafeAreaInsets();
 
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -199,11 +195,14 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
         </Pressable>
       </View>
 
-      <BottomSheetScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <BottomSheetScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 + insets.bottom }]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.section}>
           <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>When</Text>
           <View style={styles.wheelCard}>
-            <WheelPicker items={wheelItems} selectedIndex={dayIndex} onChange={setDayIndex} width={200} />
+            <HorizontalRuler items={wheelItems} selectedIndex={dayIndex} onChange={setDayIndex} />
           </View>
           {alreadyLogged ? (
             <Text style={styles.warningText} maxFontSizeMultiplier={1.3}>
@@ -350,7 +349,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     headerTitle: {
       color: colors.text,
-      fontSize: 16,
+      fontSize: Type.subtitle,
       fontFamily: 'Geist-SemiBold',
     },
     closeButton: {
@@ -363,7 +362,8 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     scrollContent: {
       paddingHorizontal: 20,
-      paddingBottom: 40,
+      // paddingBottom set inline (40 + insets.bottom) — real safe-area
+      // clearance below the home indicator.
       gap: 24,
     },
     section: {
@@ -371,7 +371,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     fieldLabel: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
     },
     wheelCard: {
@@ -384,7 +384,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     warningText: {
       color: '#E8823C',
-      fontSize: 11.5,
+      fontSize: Type.caption,
       lineHeight: 16,
       fontFamily: 'Geist-Medium',
     },
@@ -413,7 +413,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     gridPillText: {
       color: colors.textSecondary,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
     gridPillTextSelected: {
@@ -443,7 +443,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     energyPillText: {
       color: colors.textSecondary,
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-SemiBold',
     },
     energyPillTextSelected: {
@@ -451,7 +451,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     energyReadout: {
       color: colors.textTertiary,
-      fontSize: 11.5,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
     },
     noteInput: {
@@ -462,7 +462,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       backgroundColor: colors.surface,
       padding: 12,
       color: colors.text,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Regular',
       textAlignVertical: 'top',
     },
@@ -478,7 +478,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     saveButtonText: {
       color: '#ffffff',
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-SemiBold',
     },
   });

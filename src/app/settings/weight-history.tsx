@@ -1,18 +1,28 @@
 import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import ReanimatedAnimated from 'react-native-reanimated';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView } from '@/components/ui/app-symbol';
 
+import { TabularNums, Type } from '@/constants/theme';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { localDateStr } from '@/lib/local-date';
+import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { getUnitSystem, type UnitSystem } from '@/lib/unit-preference';
-import { updateProfile } from '@/lib/user-profile';
-import { deleteWeightEntry, getWeightLog, saveWeightEntry, type WeightLogEntry } from '@/lib/weight-log';
-import { WheelPicker } from '@/components/onboarding/wheel-picker';
+import { getProfile, updateProfile } from '@/lib/user-profile';
+import { deleteWeightEntry, getWeightLog, resolveCurrentWeightKg, saveWeightEntry, type WeightLogEntry } from '@/lib/weight-log';
+import { HorizontalRuler } from '@/components/onboarding/horizontal-ruler';
+import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
+import { Sparkline } from '@/components/ui/sparkline';
+
+// Same full-swipe-commits gesture as Notes' own list — see that file's
+// comment for the full reasoning. Only one action here (Delete), so there's
+// no archive-vs-delete ambiguity to resolve on commit.
+const FULL_SWIPE_DELETE_THRESHOLD = -220;
 
 // Same conversion math and item ranges as biometrics-sheet.tsx — duplicated
 // rather than shared so this screen stays independent of that sheet, same
@@ -29,14 +39,30 @@ const DEFAULT_WEIGHT_KG = 73;
 function roundTo1(n: number): number {
   return Math.round(n * 10) / 10;
 }
+// BUG FIX: kg/0.453592 lands a hair off the true lb value due to ordinary
+// float representation error (e.g. 75.5684272/0.453592 can come back as
+// 166.59999999999997, not 166.6) — harmless for Math.round (formatWeight's
+// own display math), but Math.floor/modulo below are boundary-sensitive:
+// flooring that noisy value gives 165, not 166. Rounding to the nearest
+// thousandth of a pound first clears the noise while still being far finer
+// than the 0.1lb resolution this screen actually offers.
 function kgToLbWholeIndex(kg: number): number {
-  return Math.min(WEIGHT_LB_ITEMS.length - 1, Math.max(0, Math.floor(kg / 0.453592) - 80));
+  const lb = Math.round((kg / 0.453592) * 1000) / 1000;
+  return Math.min(WEIGHT_LB_ITEMS.length - 1, Math.max(0, Math.floor(lb) - 80));
 }
 function kgToLbDecimalIndex(kg: number): number {
-  return Math.round((kg / 0.453592) % 1 * 10) % 10;
+  const lb = Math.round((kg / 0.453592) * 1000) / 1000;
+  return Math.round((lb % 1) * 10) % 10;
 }
+// BUG FIX: this used to round the converted kg value to 1 decimal place
+// before storing it — but 0.1kg (~0.22lb) is coarser than the 0.1lb this
+// wheel actually lets someone pick, so a real selection like 166.6lb stored
+// as a rounded 75.6kg, then converted back for display, came back as
+// 166.7lb — a different number than the one actually chosen. Storing the
+// full-precision product (only ever rounded at display time, in
+// formatWeight) round-trips losslessly instead.
 function lbPartsToKg(lbWholeIndex: number, decimalIndex: number): number {
-  return roundTo1((lbWholeIndex + 80 + decimalIndex / 10) * 0.453592);
+  return (lbWholeIndex + 80 + decimalIndex / 10) * 0.453592;
 }
 function kgToKgWholeIndex(kg: number): number {
   return Math.min(WEIGHT_KG_ITEMS.length - 1, Math.max(0, Math.floor(kg) - 35));
@@ -50,6 +76,15 @@ function kgPartsToKg(kgWholeIndex: number, decimalIndex: number): number {
 
 function formatWeight(weightKg: number, unit: UnitSystem): string {
   return unit === 'metric' ? `${roundTo1(weightKg)} kg` : `${roundTo1(weightKg / 0.453592)} lb`;
+}
+
+// Always starts the decimal wheel at .0, in whichever unit is displayed —
+// carrying forward the exact tenths from a past entry (or worse, a raw
+// kg<->lb conversion artifact, e.g. the old flat 73kg default landed on an
+// unrelated .9) reads as false precision nobody actually weighed in at.
+// The whole-number part still seeds from the most recently known weight.
+function seedWholeUnitKg(weightKg: number, unit: UnitSystem): number {
+  return unit === 'metric' ? Math.round(weightKg) : Math.round(weightKg / 0.453592) * 0.453592;
 }
 
 function formatEntryDate(dateStr: string): string {
@@ -73,19 +108,38 @@ export default function WeightHistoryScreen() {
   const backHover = useHoverFade();
   const addHover = useHoverFade();
   const savePress = useLiquidPress();
+  const entering = useFadeInEntering();
+  const swipeableRefs = useRef<Map<string, Swipeable>>(new Map());
+  const dragListeners = useRef<Map<string, string>>(new Map());
+  const pendingFullSwipeDelete = useRef<Set<string>>(new Set());
 
   const [entries, setEntries] = useState<WeightLogEntry[]>([]);
   const [unit, setUnit] = useState<UnitSystem>('imperial');
   const [loaded, setLoaded] = useState(false);
   const [adding, setAdding] = useState(false);
   const [draftWeightKg, setDraftWeightKg] = useState(DEFAULT_WEIGHT_KG);
+  // The onboarding-collected profile weight, kept as the raw string
+  // (resolveCurrentWeightKg's own param type) rather than pre-cast to a
+  // number — every usage below calls that same shared resolver (also used
+  // by profile.tsx/goals-sheet.tsx) against the latest `entries` state
+  // instead of reimplementing the "log entry, else profile" priority
+  // inline, so a future fix to that shared logic can't silently miss this
+  // screen the way an inline copy would.
+  const [profileWeightKg, setProfileWeightKg] = useState<string | undefined>(undefined);
+  // Settings' Goals sheet — self-reported, never derived (see that sheet's
+  // own doc comment). null = no goal set, shown nowhere on this screen.
+  const [targetWeightKg, setTargetWeightKg] = useState<number | null>(null);
+  const [chartWidth, setChartWidth] = useState(0);
 
   useEffect(() => {
     (async () => {
-      const [log, globalUnit] = await Promise.all([getWeightLog(), getUnitSystem()]);
+      const [log, globalUnit, profile] = await Promise.all([getWeightLog(), getUnitSystem(), getProfile()]);
       setEntries(log);
       setUnit(globalUnit);
-      setDraftWeightKg(log[0]?.weightKg ?? DEFAULT_WEIGHT_KG);
+      const lastKnownWeightKg = resolveCurrentWeightKg(log, profile?.weightKg) ?? DEFAULT_WEIGHT_KG;
+      setProfileWeightKg(profile?.weightKg);
+      setTargetWeightKg(profile?.targetWeightKg ? Number(profile.targetWeightKg) : null);
+      setDraftWeightKg(seedWholeUnitKg(lastKnownWeightKg, globalUnit));
       setLoaded(true);
     })();
   }, []);
@@ -95,7 +149,16 @@ export default function WeightHistoryScreen() {
 
   const handleToggleAdd = () => {
     hapticSelect();
-    setAdding((a) => !a);
+    setAdding((wasAdding) => {
+      const willAdd = !wasAdding;
+      // Re-seed on every open, not just on first screen load — otherwise
+      // reopening after Cancel (or after this list changed) could show a
+      // stale value from whenever the screen first mounted.
+      if (willAdd) {
+        setDraftWeightKg(seedWholeUnitKg(currentWeightKg ?? DEFAULT_WEIGHT_KG, unit));
+      }
+      return willAdd;
+    });
   };
 
   const handleSave = async () => {
@@ -120,6 +183,14 @@ export default function WeightHistoryScreen() {
     }
   };
 
+  // Oldest-first for the chart (getWeightLog's own entries are newest-first,
+  // matching the list below) — raw kg regardless of the display unit
+  // toggle, since a line's shape is identical either way and Sparkline
+  // carries no axis labels to convert. Needs 2+ real points to draw an
+  // actual trend, not just a dot.
+  const weightTrendData = entries.length >= 2 ? [...entries].reverse().map((e) => ({ value: e.weightKg })) : [];
+  const currentWeightKg = resolveCurrentWeightKg(entries, profileWeightKg);
+
   const lbWholeIndex = kgToLbWholeIndex(draftWeightKg);
   const lbDecimalIndex = kgToLbDecimalIndex(draftWeightKg);
   const kgWholeIndex = kgToKgWholeIndex(draftWeightKg);
@@ -143,7 +214,16 @@ export default function WeightHistoryScreen() {
         <View style={styles.backButton} />
       </View>
 
-      {!loaded ? null : (
+      {!loaded ? (
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <SkeletonBlock width={130} height={44} borderRadius={14} />
+          <View style={styles.section}>
+            <SkeletonBlock width={60} height={11} borderRadius={4} />
+            <SkeletonCard height={80} lines={2} />
+          </View>
+        </ScrollView>
+      ) : (
+        <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.section}>
             <Pressable
@@ -165,32 +245,28 @@ export default function WeightHistoryScreen() {
                 <View style={styles.wheelRow}>
                   {unit === 'imperial' ? (
                     <>
-                      <WheelPicker
+                      <HorizontalRuler
                         items={WEIGHT_LB_ITEMS}
                         selectedIndex={lbWholeIndex}
                         onChange={(index) => setDraftWeightKg(lbPartsToKg(index, lbDecimalIndex))}
-                        width={110}
                       />
-                      <WheelPicker
+                      <HorizontalRuler
                         items={DECIMAL_ITEMS}
                         selectedIndex={lbDecimalIndex}
                         onChange={(index) => setDraftWeightKg(lbPartsToKg(lbWholeIndex, index))}
-                        width={50}
                       />
                     </>
                   ) : (
                     <>
-                      <WheelPicker
+                      <HorizontalRuler
                         items={WEIGHT_KG_ITEMS}
                         selectedIndex={kgWholeIndex}
                         onChange={(index) => setDraftWeightKg(kgPartsToKg(index, kgDecimalIndex))}
-                        width={110}
                       />
-                      <WheelPicker
+                      <HorizontalRuler
                         items={DECIMAL_ITEMS}
                         selectedIndex={kgDecimalIndex}
                         onChange={(index) => setDraftWeightKg(kgPartsToKg(kgWholeIndex, index))}
-                        width={50}
                       />
                     </>
                   )}
@@ -209,6 +285,45 @@ export default function WeightHistoryScreen() {
             ) : null}
           </View>
 
+          {weightTrendData.length > 0 ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TREND</Text>
+              <View style={[styles.card, styles.chartCardPadding]}>
+                <View style={styles.chartCardInner} onLayout={(e) => setChartWidth(e.nativeEvent.layout.width)}>
+                  {chartWidth > 0 ? (
+                    <Sparkline data={weightTrendData} width={chartWidth} height={56} color="#5FBE84" />
+                  ) : null}
+                </View>
+              </View>
+            </View>
+          ) : null}
+
+          {targetWeightKg !== null && currentWeightKg !== null ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TARGET</Text>
+              <View style={styles.card}>
+                <View style={styles.targetRow}>
+                  <Text style={styles.targetText} maxFontSizeMultiplier={1.3}>
+                    {formatWeight(currentWeightKg, unit)} now → {formatWeight(targetWeightKg, unit)} target
+                  </Text>
+                  {(() => {
+                    const remainingKg = Math.abs(currentWeightKg - targetWeightKg);
+                    // Neutral, direction-agnostic phrasing — "to go" either
+                    // way, never "over" or "under," same anti-guilt framing
+                    // as session-history.ts's own no-streaks rule.
+                    return (
+                      <Text style={styles.targetRemaining} maxFontSizeMultiplier={1.3}>
+                        {remainingKg < 0.5
+                          ? "You're at your target."
+                          : `${formatWeight(remainingKg, unit)} to go`}
+                      </Text>
+                    );
+                  })()}
+                </View>
+              </View>
+            </View>
+          ) : null}
+
           <View style={styles.section}>
             <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>HISTORY</Text>
             {entries.length === 0 ? (
@@ -223,17 +338,41 @@ export default function WeightHistoryScreen() {
                 {entries.map((entry, index) => (
                   <Swipeable
                     key={entry.date}
-                    renderRightActions={() => (
-                      <Pressable
-                        style={styles.deleteAction}
-                        onPress={() => handleDelete(entry.date)}
-                        accessibilityRole="button"
-                        accessibilityLabel="Delete entry"
-                      >
-                        <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
-                      </Pressable>
-                    )}
-                    overshootRight={false}
+                    ref={(ref) => {
+                      if (ref) swipeableRefs.current.set(entry.date, ref);
+                      else swipeableRefs.current.delete(entry.date);
+                    }}
+                    renderRightActions={(_progress, dragX) => {
+                      const previousListenerId = dragListeners.current.get(entry.date);
+                      if (previousListenerId) dragX.removeListener(previousListenerId);
+                      const listenerId = dragX.addListener(({ value }) => {
+                        if (
+                          value < FULL_SWIPE_DELETE_THRESHOLD &&
+                          !pendingFullSwipeDelete.current.has(entry.date)
+                        ) {
+                          pendingFullSwipeDelete.current.add(entry.date);
+                          swipeableRefs.current.get(entry.date)?.close();
+                        }
+                      });
+                      dragListeners.current.set(entry.date, listenerId);
+                      return (
+                        <Pressable
+                          style={styles.deleteAction}
+                          onPress={() => handleDelete(entry.date)}
+                          accessibilityRole="button"
+                          accessibilityLabel="Delete entry"
+                        >
+                          <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
+                        </Pressable>
+                      );
+                    }}
+                    onSwipeableClose={() => {
+                      if (pendingFullSwipeDelete.current.has(entry.date)) {
+                        pendingFullSwipeDelete.current.delete(entry.date);
+                        handleDelete(entry.date);
+                      }
+                    }}
+                    overshootRight
                   >
                     <View
                       style={[
@@ -253,6 +392,7 @@ export default function WeightHistoryScreen() {
             )}
           </View>
         </ScrollView>
+        </ReanimatedAnimated.View>
       )}
     </View>
   );
@@ -263,6 +403,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     root: {
       flex: 1,
       backgroundColor: colors.background,
+    },
+    fadeLayer: {
+      flex: 1,
     },
     headerRow: {
       flexDirection: 'row',
@@ -280,8 +423,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     headerTitle: {
       color: colors.text,
-      fontSize: 16,
-      fontFamily: 'Geist-SemiBold',
+      fontSize: Type.headerTitle,
+      letterSpacing: -0.2,
+      fontFamily: 'Geist-Bold',
     },
     scrollContent: {
       paddingHorizontal: 20,
@@ -293,7 +437,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     sectionKicker: {
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       letterSpacing: 1,
       fontFamily: 'Geist-SemiBold',
     },
@@ -310,7 +454,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     addRowText: {
       color: colors.text,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
     addCard: {
@@ -338,7 +482,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     saveButtonText: {
       color: '#ffffff',
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-SemiBold',
     },
     card: {
@@ -347,6 +491,28 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       borderColor: colors.surfaceBorder,
       backgroundColor: colors.surface,
       overflow: 'hidden',
+    },
+    chartCardPadding: {
+      padding: 16,
+    },
+    chartCardInner: {
+      width: '100%',
+    },
+    targetRow: {
+      padding: 16,
+      gap: 4,
+    },
+    targetText: {
+      color: colors.text,
+      fontSize: Type.body,
+      fontFamily: 'Geist-Medium',
+      ...TabularNums,
+    },
+    targetRemaining: {
+      color: colors.textTertiary,
+      fontSize: Type.secondary,
+      fontFamily: 'Geist-Regular',
+      ...TabularNums,
     },
     emptyCard: {
       borderRadius: 16,
@@ -361,7 +527,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     emptyText: {
       color: colors.textTertiary,
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
       lineHeight: 18,
       textAlign: 'center',
@@ -379,13 +545,14 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     entryDate: {
       color: colors.text,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
     },
     entryWeight: {
       color: colors.textSecondary,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
+      ...TabularNums,
     },
     deleteAction: {
       width: 72,

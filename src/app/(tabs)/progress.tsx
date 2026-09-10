@@ -1,21 +1,24 @@
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import ReanimatedAnimated from 'react-native-reanimated';
-import { SymbolView, type SFSymbol } from 'expo-symbols';
+import type { SFSymbol } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SymbolView } from '@/components/ui/app-symbol';
 import { RadarChart } from '@/components/onboarding/radar-chart';
+import { TabularNums, Type } from '@/constants/theme';
 import { PremiumGate } from '@/components/premium-gate';
-import { getImprovedExercises, type ExercisePerformance } from '@/lib/exercise-performance';
+import { Sparkline } from '@/components/ui/sparkline';
+import { BODY_AREA_LABELS, BODY_AREA_ORDER } from '@/lib/body-area-labels';
+import { getImprovedExercises, getPerformanceHistory, type ExercisePerformance } from '@/lib/exercise-performance';
 import { hapticSelect } from '@/lib/haptics';
 import { MOVEMENT_PATTERN_LABELS } from '@/lib/movement-pattern-labels';
-import type { BodyArea } from '@/lib/plan-preview';
 import { usePremiumEntitlement } from '@/lib/purchases';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { getRecentWeeks, type WeekDay } from '@/lib/session-history';
-import { useAppColors } from '@/lib/theme-context';
-import { getTrainingState } from '@/lib/training-state';
+import { useAppTheme } from '@/lib/theme-context';
+import { getTrainingState } from '@/lib/training-state-loader';
 import type { TrainingState } from '@/lib/engine/training-state';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
 import {
@@ -45,13 +48,6 @@ const RECENT_BALANCE_WINDOW_DAYS = 7;
 // is what actually fixes that, without touching the normalization math
 // itself, which has its own separate, still-valid rationale.
 const MIN_SESSIONS_FOR_SHAPE = 3;
-const BODY_AREA_LABELS: Record<BodyArea, string> = {
-  upper: 'Upper Body',
-  lower: 'Lower Body',
-  core: 'Core',
-  full: 'Full Body',
-};
-const BODY_AREA_ORDER: BodyArea[] = ['upper', 'lower', 'core', 'full'];
 const TREND_LABEL: Record<'improving' | 'stable' | 'declining', string> = {
   improving: 'Improving',
   stable: 'Steady',
@@ -62,6 +58,44 @@ const TREND_ICON: Record<'improving' | 'stable' | 'declining', SFSymbol> = {
   stable: 'arrow.right',
   declining: 'arrow.down.right',
 };
+
+// Local-date parsing (not `new Date(dateStr)`) to avoid the classic UTC
+// off-by-one — same pattern every other dated-history screen in this app
+// already uses for its own formatEntryDate.
+function parseLocalDate(dateStr: string): Date {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+/** Only fetches history for the exercises actually being shown, not the
+ * whole exercise-performance store — improvedExercises is already the
+ * filtered, real list Strength Progress renders. */
+async function loadExerciseHistories(
+  exercises: { exerciseName: string }[]
+): Promise<Record<string, ExercisePerformance[]>> {
+  const entries = await Promise.all(
+    exercises.map(async (e) => [e.exerciseName, await getPerformanceHistory(e.exerciseName)] as const)
+  );
+  return Object.fromEntries(entries);
+}
+
+// A real calendar reference for each row — the grid otherwise only ever
+// showed weekday letters (M T W …), with no way to tell which actual week a
+// row in a 4-week-stacked Month view was without counting backward by hand.
+function formatWeekRange(week: WeekDay[]): string {
+  const start = parseLocalDate(week[0].date);
+  const end = parseLocalDate(week[6].date);
+  const startLabel = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const endLabel =
+    start.getMonth() === end.getMonth()
+      ? end.toLocaleDateString('en-US', { day: 'numeric' })
+      : end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return `${startLabel}–${endLabel}`;
+}
+
+function formatEntryDateLabel(dateStr: string): string {
+  return parseLocalDate(dateStr).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+}
 
 /**
  * Real consistency and training-balance data only — no fabricated
@@ -76,8 +110,9 @@ const TREND_ICON: Record<'improving' | 'stable' | 'declining', SFSymbol> = {
  */
 export default function ProgressScreen() {
   const insets = useSafeAreaInsets();
-  const colors = useAppColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors, resolvedScheme } = useAppTheme();
+  const isDark = resolvedScheme === 'dark';
+  const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
   const isPremium = usePremiumEntitlement();
   // Same shared fade used across onboarding, check-in, and Home — the
   // loading-skeleton-to-real-content swap below previously hard-cut with no
@@ -91,6 +126,11 @@ export default function ProgressScreen() {
   const [improvedExercises, setImprovedExercises] = useState<
     { exerciseName: string; performance: ExercisePerformance }[]
   >([]);
+  // Full logged history per exercise, keyed by name — only fetched for the
+  // exercises actually shown (improvedExercises), not the whole store.
+  // Powers each row's own line trend below its current 1RM stat.
+  const [exerciseHistories, setExerciseHistories] = useState<Record<string, ExercisePerformance[]>>({});
+  const [strengthChartWidth, setStrengthChartWidth] = useState(0);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -101,6 +141,7 @@ export default function ProgressScreen() {
   const [balanceRange, setBalanceRange] = useState<'recent' | 'all'>('all');
   const [balanceView, setBalanceView] = useState<'body-area' | 'pattern'>('body-area');
   const balanceSinceDays = balanceRange === 'recent' ? RECENT_BALANCE_WINDOW_DAYS : undefined;
+  const [consistencyMeterWidth, setConsistencyMeterWidth] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
@@ -113,7 +154,9 @@ export default function ProgressScreen() {
         setMovementPatternBreakdown(await getMovementPatternBreakdown(balanceSinceDays));
         setLoggedSessionCount(await getLoggedSessionCount(balanceSinceDays));
         setTrainingState(await getTrainingState());
-        setImprovedExercises(await getImprovedExercises());
+        const improved = await getImprovedExercises();
+        setImprovedExercises(improved);
+        setExerciseHistories(await loadExerciseHistories(improved));
         setLoaded(true);
       })();
     }, [weekCount, balanceSinceDays])
@@ -129,7 +172,9 @@ export default function ProgressScreen() {
     setMovementPatternBreakdown(await getMovementPatternBreakdown(balanceSinceDays));
     setLoggedSessionCount(await getLoggedSessionCount(balanceSinceDays));
     setTrainingState(await getTrainingState());
-    setImprovedExercises(await getImprovedExercises());
+    const improved = await getImprovedExercises();
+    setImprovedExercises(improved);
+    setExerciseHistories(await loadExerciseHistories(improved));
     setRefreshing(false);
   }, [weekCount, balanceSinceDays]);
 
@@ -137,7 +182,7 @@ export default function ProgressScreen() {
     return (
       <View style={styles.root}>
         <ScrollView
-          contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 40 }]}
+          contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 140 + insets.bottom }]}
           showsVerticalScrollIndicator={false}
         >
           <SkeletonBlock width={130} height={24} borderRadius={6} />
@@ -158,6 +203,43 @@ export default function ProgressScreen() {
   const scheduledPast = weeks.flat().filter((d) => d.isScheduled && d.completed !== null);
   const completedPast = scheduledPast.filter((d) => d.completed);
   const completionRate = scheduledPast.length > 0 ? Math.round((completedPast.length / scheduledPast.length) * 100) : null;
+  // Weeks entirely before the account existed have no scheduled days at all
+  // (see session-history.ts's own account-start-date exclusion) — trimming
+  // them instead of rendering an empty shell row is what actually fixes a
+  // brand-new account showing 3 blank weeks above its one real one.
+  const visibleWeeks = weeks.filter((week) => week.some((d) => d.isScheduled));
+  // Weekly completion rate as its own trend line — the calendar below already
+  // shows the day-by-day detail; this is the same real data one level up,
+  // "how did each whole week go" rather than "how did each day go." Only
+  // resolved (non-future) scheduled days count toward a week's rate, so an
+  // in-progress current week isn't penalized for days that haven't happened
+  // yet — same exclusion completionRate above already applies.
+  const consistencyMeterData = visibleWeeks
+    .map((week) => {
+      const resolved = week.filter((d) => d.isScheduled && d.completed !== null);
+      if (resolved.length === 0) return null;
+      const completed = resolved.filter((d) => d.completed);
+      return { value: Math.round((completed.length / resolved.length) * 100) };
+    })
+    .filter((point): point is { value: number } => point !== null);
+  // First-vs-last comparison, not a recent-vs-earlier mean split like
+  // training-state.ts's own capacityTrend — that split needs more points
+  // than this typically-4-week window ever has. Same honest-default
+  // methodology though: a real double-digit swing before calling it a
+  // trend at all, 'stable' otherwise (never a fabricated direction off
+  // noise). Reuses TREND_ICON/TREND_LABEL below rather than a second,
+  // driftable copy of the same icon/label set Training Load's own energy
+  // trend already uses.
+  const CONSISTENCY_TREND_DELTA = 15;
+  const consistencyTrend: 'improving' | 'stable' | 'declining' =
+    consistencyMeterData.length < 2
+      ? 'stable'
+      : (() => {
+          const delta = consistencyMeterData[consistencyMeterData.length - 1].value - consistencyMeterData[0].value;
+          if (delta > CONSISTENCY_TREND_DELTA) return 'improving';
+          if (delta < -CONSISTENCY_TREND_DELTA) return 'declining';
+          return 'stable';
+        })();
 
   // Gated independently — capacityTrend reads session-history's energy log
   // (real data going back as far as that's been tracked), stimulusDebt reads
@@ -170,6 +252,16 @@ export default function ProgressScreen() {
   const bankedAreas = trainingState
     ? BODY_AREA_ORDER.filter((area) => trainingState.stimulusDebt.value[area].debtSets > 0)
     : [];
+  // Self-normalized against the user's own busiest banked area, same
+  // "no external target" register the radar/donut already use — a bar's
+  // length here is a magnitude comparison between real areas, never a
+  // fraction of some assigned ceiling, so this isn't the fill-toward-a-
+  // target bar the vault's brand system rules out (see balanceRow's own
+  // comment on that rule).
+  const maxBankedSets =
+    trainingState && bankedAreas.length > 0
+      ? Math.max(1, ...bankedAreas.map((area) => trainingState.stimulusDebt.value[area].debtSets))
+      : 1;
 
   // Relative strength (Vervein addition) — same "no fabricated default"
   // discipline check-in.tsx's own calorie estimate already applies to this
@@ -227,7 +319,7 @@ export default function ProgressScreen() {
     <View style={styles.root}>
       <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
       <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 40 }]}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 140 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.textSecondary} />
@@ -274,8 +366,56 @@ export default function ProgressScreen() {
             </View>
           </View>
 
+          {/* BUG FIX: this used to be its own separate PremiumGate, right
+              above the calendar's own — for anyone not on Plus, that meant
+              two identical "The consistency calendar is part of VerveIn
+              Plus" teaser cards stacked back-to-back, since both gates
+              shared the same label. One gate wrapping both real sections
+              below. */}
           <PremiumGate isPremium={isPremium} label="The consistency calendar">
+            {consistencyMeterData.length >= 2 ? (
+              <View style={styles.card}>
+                <View style={styles.chartCaptionRow}>
+                  <Text style={styles.chartCaption} maxFontSizeMultiplier={1.3}>Weekly completion</Text>
+                  <View style={styles.chartTrendIndicator}>
+                    <SymbolView
+                      name={TREND_ICON[consistencyTrend]}
+                      size={11}
+                      tintColor={consistencyTrend === 'improving' ? '#5FBE84' : colors.textTertiary}
+                    />
+                    <Text style={styles.chartTrendText} maxFontSizeMultiplier={1.2}>
+                      {TREND_LABEL[consistencyTrend]}
+                    </Text>
+                  </View>
+                </View>
+                <View
+                  style={styles.chartCardInner}
+                  onLayout={(e) => setConsistencyMeterWidth(e.nativeEvent.layout.width)}
+                >
+                  {consistencyMeterWidth > 0 ? (
+                    <Sparkline
+                      data={consistencyMeterData}
+                      width={consistencyMeterWidth}
+                      height={64}
+                      min={0}
+                      max={100}
+                      filled
+                      color="#5FBE84"
+                    />
+                  ) : null}
+                </View>
+              </View>
+            ) : null}
             <View style={styles.card}>
+              {visibleWeeks.length === 0 ? (
+                <View style={styles.emptyCard}>
+                  <SymbolView name="calendar" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />
+                  <Text style={styles.emptyText} maxFontSizeMultiplier={1.3}>
+                    Nothing scheduled yet — this fills in once your plan has its first training day.
+                  </Text>
+                </View>
+              ) : (
+                <>
               <View style={styles.gridHeaderRow}>
                 {WEEKDAY_LETTERS.map((letter, index) => (
                   <Text key={index} style={styles.gridHeaderText} maxFontSizeMultiplier={1.15}>
@@ -283,41 +423,88 @@ export default function ProgressScreen() {
                   </Text>
                 ))}
               </View>
-              {weeks.map((week, weekIndex) => (
-                <View key={weekIndex} style={styles.gridRow}>
-                  {week.map((day, dayIndex) => (
-                    <View key={dayIndex} style={styles.gridCellWrap}>
-                      {day.isScheduled ? (
-                        <View
-                          style={[
-                            styles.gridCell,
-                            day.completed === true && styles.gridCellCompleted,
-                            // Fixed bug: previously `day.completed === false`
-                            // only — a past day with zero recorded entry
-                            // (completed: null, not false — see WeekDay's own
-                            // doc comment) fell through to gridCellPending
-                            // below and rendered as "Upcoming" even though it
-                            // had already happened. !isFuture alone isn't
-                            // enough either: today is also !isFuture and
-                            // typically still completed:null before check-in,
-                            // so today is explicitly excluded from "Missed" —
-                            // the day isn't over yet.
-                            !day.isFuture && !day.isToday && day.completed !== true && styles.gridCellMissed,
-                            (day.isFuture || day.isToday) && day.completed !== true && styles.gridCellPending,
-                          ]}
-                        />
-                      ) : (
-                        <View style={styles.gridCellEmpty} />
-                      )}
+              {visibleWeeks.map((week, weekIndex) => {
+                const scheduledInWeek = week.filter((d) => d.isScheduled);
+                const completedInWeek = scheduledInWeek.filter((d) => d.completed);
+                return (
+                  <View key={weekIndex} style={styles.gridWeekBlock}>
+                    {/* A real date reference plus a plain count per row — no
+                        fill bar (this app's brand system treats those as
+                        permanently off-limits), just the two facts someone
+                        would otherwise have to count out by hand. */}
+                    <View style={styles.gridWeekLabelRow}>
+                      <Text style={styles.gridWeekLabel} maxFontSizeMultiplier={1.2}>
+                        {formatWeekRange(week)}
+                      </Text>
+                      {scheduledInWeek.length > 0 ? (
+                        <Text style={styles.gridWeekCount} maxFontSizeMultiplier={1.2}>
+                          {completedInWeek.length}/{scheduledInWeek.length}
+                        </Text>
+                      ) : null}
                     </View>
-                  ))}
-                </View>
-              ))}
+                    <View style={styles.gridRow}>
+                      {week.map((day, dayIndex) => (
+                        <View key={dayIndex} style={styles.gridCellWrap}>
+                          {day.isScheduled ? (
+                            <Pressable
+                              disabled={day.completed === null}
+                              onPress={() => {
+                                hapticSelect();
+                                // Progress & History itself is Plus-only —
+                                // this calendar stays free, but drilling
+                                // into a specific day's detail is the same
+                                // gated screen Settings' own DATA section
+                                // links to.
+                                router.push(
+                                  (isPremium
+                                    ? { pathname: '/settings/progress-history', params: { date: day.date } }
+                                    : '/paywall') as never
+                                );
+                              }}
+                              accessibilityRole={day.completed === null ? undefined : 'button'}
+                              accessibilityLabel={
+                                day.completed === null
+                                  ? undefined
+                                  : `${formatEntryDateLabel(day.date)}, ${day.completed ? 'completed' : 'missed'}. Tap for detail.`
+                              }
+                              style={[
+                                styles.gridCell,
+                                day.completed === true && styles.gridCellCompleted,
+                                // Fixed bug: previously `day.completed === false`
+                                // only — a past day with zero recorded entry
+                                // (completed: null, not false — see WeekDay's own
+                                // doc comment) fell through to gridCellPending
+                                // below and rendered as "Upcoming" even though it
+                                // had already happened. !isFuture alone isn't
+                                // enough either: today is also !isFuture and
+                                // typically still completed:null before check-in,
+                                // so today is explicitly excluded from "Missed" —
+                                // the day isn't over yet.
+                                !day.isFuture && !day.isToday && day.completed !== true && styles.gridCellMissed,
+                                (day.isFuture || day.isToday) && day.completed !== true && styles.gridCellPending,
+                                // Layered last so it wins regardless of which
+                                // state the cell is otherwise in — today needs
+                                // to be findable at a glance in a 4-week grid
+                                // without changing what its fill already says.
+                                day.isToday && styles.gridCellToday,
+                              ]}
+                            />
+                          ) : (
+                            <View style={styles.gridCellEmpty} />
+                          )}
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                );
+              })}
               <View style={styles.legendRow}>
                 <LegendDot styles={styles} style={styles.gridCellCompleted} label="Completed" />
                 <LegendDot styles={styles} style={styles.gridCellMissed} label="Missed" />
                 <LegendDot styles={styles} style={styles.gridCellPending} label="Upcoming" />
               </View>
+                </>
+              )}
             </View>
           </PremiumGate>
         </View>
@@ -460,17 +647,24 @@ export default function ProgressScreen() {
                       Banked volume — sets your plan called for that a lower-energy day trimmed, ready to make up on a
                       stronger one.
                     </Text>
-                    {bankedAreas.map((area, index) => (
-                      <View
-                        key={area}
-                        style={[styles.debtRow, index < bankedAreas.length - 1 && styles.rowDivider]}
-                      >
-                        <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{BODY_AREA_LABELS[area]}</Text>
-                        <Text style={styles.debtValue} maxFontSizeMultiplier={1.2}>
-                          {trainingState?.stimulusDebt.value[area].debtSets} sets banked
-                        </Text>
-                      </View>
-                    ))}
+                    {bankedAreas.map((area, index) => {
+                      const debtSets = trainingState?.stimulusDebt.value[area].debtSets ?? 0;
+                      const barFraction = Math.min(1, debtSets / maxBankedSets);
+                      return (
+                        <View
+                          key={area}
+                          style={[styles.debtRowStacked, index < bankedAreas.length - 1 && styles.rowDivider]}
+                        >
+                          <View style={styles.debtRow}>
+                            <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{BODY_AREA_LABELS[area]}</Text>
+                            <Text style={styles.debtValue} maxFontSizeMultiplier={1.2}>{debtSets} sets banked</Text>
+                          </View>
+                          <View style={styles.barTrack}>
+                            <View style={[styles.barFill, { width: `${barFraction * 100}%` }]} />
+                          </View>
+                        </View>
+                      );
+                    })}
                   </>
                 ) : (
                   <Text style={styles.debtHint} maxFontSizeMultiplier={1.3}>
@@ -499,27 +693,51 @@ export default function ProgressScreen() {
           <PremiumGate isPremium={isPremium} label="Strength Progress">
             {improvedExercises.length > 0 ? (
               <View style={styles.card}>
-                {improvedExercises.map((entry, index) => (
-                  <View
-                    key={entry.exerciseName}
-                    style={[styles.debtRow, index < improvedExercises.length - 1 && styles.rowDivider]}
-                  >
-                    <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{entry.exerciseName}</Text>
-                    <View style={styles.strengthProgressStats}>
-                      <View style={styles.strengthProgressValue}>
-                        <SymbolView name="arrow.up.right" size={12} tintColor="#5FBE84" />
-                        <Text style={styles.debtValue} maxFontSizeMultiplier={1.2}>
-                          {Math.round(entry.performance.estimatedOneRepMax)} kg est. 1RM
-                        </Text>
+                {improvedExercises.map((entry, index) => {
+                  // Real logged history, not just the current stat — needs
+                  // 2+ points to draw an actual line (a single point is a
+                  // dot, not a trend, and not worth its own chart row).
+                  const history = exerciseHistories[entry.exerciseName] ?? [];
+                  const showChart = history.length >= 2;
+                  return (
+                    <View
+                      key={entry.exerciseName}
+                      style={index < improvedExercises.length - 1 ? styles.rowDivider : undefined}
+                    >
+                      <View style={styles.debtRow}>
+                        <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{entry.exerciseName}</Text>
+                        <View style={styles.strengthProgressStats}>
+                          <View style={styles.strengthProgressValue}>
+                            <SymbolView name="arrow.up.right" size={12} tintColor="#5FBE84" />
+                            <Text style={styles.debtValue} maxFontSizeMultiplier={1.2}>
+                              {Math.round(entry.performance.estimatedOneRepMax)} kg est. 1RM
+                            </Text>
+                          </View>
+                          {weightKg > 0 ? (
+                            <Text style={styles.strengthProgressRelative} maxFontSizeMultiplier={1.3}>
+                              {(entry.performance.estimatedOneRepMax / weightKg).toFixed(2)}× bodyweight
+                            </Text>
+                          ) : null}
+                        </View>
                       </View>
-                      {weightKg > 0 ? (
-                        <Text style={styles.strengthProgressRelative} maxFontSizeMultiplier={1.3}>
-                          {(entry.performance.estimatedOneRepMax / weightKg).toFixed(2)}× bodyweight
-                        </Text>
+                      {showChart ? (
+                        <View
+                          style={[styles.sparklineWrap, styles.sparklineWrapPadded]}
+                          onLayout={(e) => setStrengthChartWidth(e.nativeEvent.layout.width)}
+                        >
+                          {strengthChartWidth > 0 ? (
+                            <Sparkline
+                              data={history.map((h) => ({ value: h.estimatedOneRepMax }))}
+                              width={strengthChartWidth}
+                              height={40}
+                              color="#5FBE84"
+                            />
+                          ) : null}
+                        </View>
                       ) : null}
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             ) : (
               <View style={styles.emptyCard}>
@@ -554,7 +772,7 @@ function LegendDot({
   );
 }
 
-function createStyles(colors: ReturnType<typeof useAppColors>) {
+function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], isDark: boolean) {
   return StyleSheet.create({
     root: {
       flex: 1,
@@ -569,7 +787,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     screenTitle: {
       color: colors.text,
-      fontSize: 24,
+      fontSize: Type.display,
       letterSpacing: -0.3,
       fontFamily: 'Geist-Bold',
     },
@@ -578,7 +796,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     sectionKicker: {
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       letterSpacing: 1,
       fontFamily: 'Geist-SemiBold',
     },
@@ -603,7 +821,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     rangeOptionText: {
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       fontFamily: 'Geist-SemiBold',
     },
     rangeOptionTextActive: {
@@ -615,6 +833,33 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       borderColor: colors.surfaceBorder,
       backgroundColor: colors.surface,
       padding: 16,
+    },
+    chartCaptionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 8,
+    },
+    chartCaption: {
+      color: colors.textTertiary,
+      fontSize: Type.caption,
+      fontFamily: 'Geist-SemiBold',
+    },
+    chartTrendIndicator: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    chartTrendText: {
+      color: colors.textSecondary,
+      fontSize: Type.caption,
+      fontFamily: 'Geist-SemiBold',
+    },
+    // No padding of its own — this is the View onLayout measures to size
+    // the chart itself; a horizontal padding here would silently shrink
+    // the chart's usable width below its measured box.
+    chartCardInner: {
+      width: '100%',
     },
     rowDivider: {
       borderBottomWidth: StyleSheet.hairlineWidth,
@@ -629,7 +874,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       marginTop: 4,
       marginBottom: 12,
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
     },
     // Reuses rangeToggle/rangeOption's exact pill styling (same segmented-
@@ -651,12 +896,12 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     balanceLabel: {
       color: colors.text,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
     },
     balanceCount: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     trendRow: {
@@ -667,30 +912,57 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     trendText: {
       color: colors.textSecondary,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
     },
     trendValue: {
       color: colors.text,
       fontFamily: 'Geist-SemiBold',
     },
+    sparklineWrap: {
+      width: '100%',
+    },
+    // Only ever adds vertical padding — never horizontal, since this View
+    // is also what onLayout measures to size the Sparkline itself; a
+    // horizontal padding here would silently shrink the chart's usable
+    // width below its measured box (the exact bug weight-history.tsx's own
+    // chart card fixed once already).
+    sparklineWrapPadded: {
+      paddingBottom: 12,
+    },
     debtHint: {
       paddingVertical: 12,
       color: colors.textTertiary,
-      fontSize: 11.5,
+      fontSize: Type.caption,
       lineHeight: 16,
       fontFamily: 'Geist-Medium',
+    },
+    debtRowStacked: {
+      paddingVertical: 6,
     },
     debtRow: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingVertical: 12,
+      paddingVertical: 6,
+    },
+    barTrack: {
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: colors.pillBg,
+      overflow: 'hidden',
+      marginBottom: 4,
+    },
+    barFill: {
+      height: '100%',
+      borderRadius: 3,
+      backgroundColor: '#5FBE84',
     },
     debtValue: {
       color: '#5FBE84',
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
+      ...TabularNums,
     },
     strengthProgressStats: {
       alignItems: 'flex-end',
@@ -706,8 +978,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     // set one.
     strengthProgressRelative: {
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
+      ...TabularNums,
     },
     emptyCard: {
       borderRadius: 16,
@@ -722,7 +995,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     emptyText: {
       color: colors.textTertiary,
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
       lineHeight: 18,
       textAlign: 'center',
@@ -742,14 +1015,15 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     summaryValue: {
       color: colors.text,
-      fontSize: 24,
+      fontSize: Type.display,
       letterSpacing: -0.4,
       fontFamily: 'Geist-Black',
+      ...TabularNums,
     },
     summaryLabel: {
       marginTop: 4,
       color: colors.textTertiary,
-      fontSize: 10.5,
+      fontSize: Type.micro,
       letterSpacing: 0.4,
       textTransform: 'uppercase',
       fontFamily: 'Geist-Medium',
@@ -763,8 +1037,27 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       width: 28,
       textAlign: 'center',
       color: colors.iconFaint,
-      fontSize: 10,
+      fontSize: Type.micro,
       fontFamily: 'Geist-SemiBold',
+    },
+    gridWeekBlock: {
+      marginBottom: 2,
+    },
+    gridWeekLabelRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginBottom: 6,
+    },
+    gridWeekLabel: {
+      color: colors.textTertiary,
+      fontSize: Type.micro,
+      fontFamily: 'Geist-Medium',
+    },
+    gridWeekCount: {
+      color: colors.textSecondary,
+      fontSize: Type.micro,
+      fontFamily: 'Geist-SemiBold',
+      ...TabularNums,
     },
     gridRow: {
       flexDirection: 'row',
@@ -793,13 +1086,32 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     // Neutral, not alarm-red — a day that passed without a session is a
     // fact, not a failure. Same reasoning as dropping streaks: the visual
     // language shouldn't punish a quiet day any more than the copy does.
+    //
+    // BUG FIX: the shared pillBg/pillBorder tokens (#F2F2F4 fill, 8%-alpha
+    // black border) are tuned for pills sitting on top of other UI chrome,
+    // not for a cell that needs to read clearly against this card's own
+    // pure-white surface in light mode — the two are close enough in
+    // luminance that "Missed" and "Upcoming" cells were nearly invisible,
+    // legible mainly by process of elimination against the clearly-green
+    // "Completed" cells. Dark mode's own pillBorder is already a solid,
+    // higher-contrast gray (not alpha-based), which is why only light mode
+    // needed its own stronger values here — this doesn't touch the shared
+    // tokens themselves, which still look right everywhere else they're
+    // used.
     gridCellMissed: {
-      backgroundColor: colors.pillBg,
-      borderColor: colors.pillBorder,
+      backgroundColor: isDark ? colors.pillBg : '#E4E4E9',
+      borderColor: isDark ? colors.pillBorder : 'rgba(0,0,0,0.14)',
     },
     gridCellPending: {
       backgroundColor: 'transparent',
-      borderColor: colors.pillBorder,
+      borderColor: isDark ? colors.pillBorder : 'rgba(0,0,0,0.18)',
+    },
+    // Layered on top of whichever state style already applies — only
+    // overrides the border, so a distinct ring marks today in a 4-week grid
+    // without changing what its own fill already communicates.
+    gridCellToday: {
+      borderWidth: 2,
+      borderColor: '#5FBE84',
     },
     legendRow: {
       flexDirection: 'row',
@@ -821,7 +1133,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     legendText: {
       color: colors.textTertiary,
-      fontSize: 10.5,
+      fontSize: Type.micro,
       fontFamily: 'Geist-Medium',
     },
   });

@@ -1,30 +1,40 @@
 import { router } from 'expo-router';
 import { useCallback, useRef } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SymbolView, type SFSymbol } from 'expo-symbols';
+import type { SFSymbol } from 'expo-symbols';
 import { BottomSheetModal } from '@gorhom/bottom-sheet';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SymbolView } from '@/components/ui/app-symbol';
 import { LogPastSessionSheet } from '@/components/settings/log-past-session-sheet';
+import { Type } from '@/constants/theme';
 import { useHoverFade } from '@/lib/button-interactions';
 import { hapticImpactLight } from '@/lib/haptics';
+import { usePremiumEntitlement } from '@/lib/purchases';
 import { useAppColors } from '@/lib/theme-context';
 
 /**
  * A quick-access hub for backfilling things about a day that already
- * happened — reachable from the Profile tab and from Settings, both of
- * which stay as they were (this doesn't replace either, just adds a
- * faster, more discoverable path to the same real actions). Deliberately
- * external to the live check-in flow, same "I trained on a day I never
- * opened the app for" honesty as log-past-session-sheet.tsx's own doc
- * comment — nothing here runs the adaptive engine or pretends to be a
- * real-time session.
+ * happened. Weight and Notes stay free, same as their own Settings
+ * screens — everything else here (Past Session, Sleep, Nutrition,
+ * Progress Photo, Body Measurements, Condition Log) is VerveIn Plus,
+ * hidden outright rather than shown locked, matching Settings' own DATA
+ * section gating for the exact same features.
+ *
+ * PRIOR HISTORY: this whole screen used to be Plus-gated, then had that
+ * gate removed entirely on the theory that every action here was already
+ * free via Settings — true at the time, but Settings' own gating later
+ * changed (these same six actions became Plus there) without this screen
+ * being revisited to match. Rather than re-gate the whole screen (Weight
+ * and Notes still have nothing to protect), each row now mirrors whatever
+ * its own Settings equivalent actually does.
  */
 export default function LogScreen() {
   const insets = useSafeAreaInsets();
   const colors = useAppColors();
   const styles = createStyles(colors);
   const backHover = useHoverFade();
+  const isPremium = usePremiumEntitlement();
 
   const logPastSessionSheetRef = useRef<BottomSheetModal>(null);
 
@@ -57,14 +67,16 @@ export default function LogScreen() {
         </Text>
 
         <View style={styles.card}>
-          <LogRow
-            styles={styles}
-            colors={colors}
-            icon="figure.strengthtraining.traditional"
-            label="Past Session"
-            subtitle="Which areas you trained, for a day you missed"
-            onPress={handleOpenPastSession}
-          />
+          {isPremium ? (
+            <LogRow
+              styles={styles}
+              colors={colors}
+              icon="figure.strengthtraining.traditional"
+              label="Past Session"
+              subtitle="Which areas you trained, for a day you missed"
+              onPress={handleOpenPastSession}
+            />
+          ) : null}
           <LogRow
             styles={styles}
             colors={colors}
@@ -73,6 +85,56 @@ export default function LogScreen() {
             subtitle="Add today's or a past weigh-in"
             onPress={() => router.push('/settings/weight-history' as never)}
           />
+          {isPremium ? (
+            <LogRow
+              styles={styles}
+              colors={colors}
+              icon="bed.double"
+              label="Sleep"
+              subtitle="Add tonight's or a past night's sleep"
+              onPress={() => router.push('/settings/sleep-history' as never)}
+            />
+          ) : null}
+          {isPremium ? (
+            <LogRow
+              styles={styles}
+              colors={colors}
+              icon="fork.knife"
+              label="Nutrition"
+              subtitle="Add today's or a past day's calories"
+              onPress={() => router.push('/settings/nutrition-history' as never)}
+            />
+          ) : null}
+          {isPremium ? (
+            <LogRow
+              styles={styles}
+              colors={colors}
+              icon="photo.on.rectangle"
+              label="Progress Photo"
+              subtitle="Add today's or a past photo"
+              onPress={() => router.push('/settings/progress-photos' as never)}
+            />
+          ) : null}
+          {isPremium ? (
+            <LogRow
+              styles={styles}
+              colors={colors}
+              icon="ruler"
+              label="Body Measurements"
+              subtitle="Waist, chest, and other numbers, for today or a past day"
+              onPress={() => router.push('/settings/body-measurements' as never)}
+            />
+          ) : null}
+          {isPremium ? (
+            <LogRow
+              styles={styles}
+              colors={colors}
+              icon="list.bullet.clipboard"
+              label="Condition Log"
+              subtitle="A symptom or condition worth recording, for today or a past day"
+              onPress={() => router.push('/settings/condition-log' as never)}
+            />
+          ) : null}
           <LogRow
             styles={styles}
             colors={colors}
@@ -154,8 +216,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     headerTitle: {
       color: colors.text,
-      fontSize: 16,
-      fontFamily: 'Geist-SemiBold',
+      fontSize: Type.headerTitle,
+      letterSpacing: -0.2,
+      fontFamily: 'Geist-Bold',
     },
     scrollContent: {
       paddingHorizontal: 20,
@@ -164,7 +227,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     introText: {
       color: colors.textSecondary,
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       lineHeight: 18,
       fontFamily: 'Geist-Regular',
     },
@@ -199,13 +262,13 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     rowLabel: {
       color: colors.text,
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-SemiBold',
     },
     rowSubtitle: {
       marginTop: 2,
       color: colors.textTertiary,
-      fontSize: 11.5,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Regular',
     },
   });

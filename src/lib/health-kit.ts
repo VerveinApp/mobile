@@ -21,6 +21,7 @@ const READ_TYPES = [
   'HKQuantityTypeIdentifierStepCount',
   'HKQuantityTypeIdentifierRestingHeartRate',
   'HKCategoryTypeIdentifierSleepAnalysis',
+  'HKQuantityTypeIdentifierActiveEnergyBurned',
 ] as const;
 
 // The one writeable type this app asks for — a completed session showing up
@@ -142,6 +143,55 @@ export async function getRecentSteps(days: number): Promise<DailyMetric[]> {
   } catch {
     return [];
   }
+}
+
+/** Daily active-energy (kcal) totals for the last `days` days, oldest first.
+ * Empty if not connected or no data — same aggregation-per-calendar-date
+ * shape as getRecentSteps above. */
+export async function getRecentActiveEnergy(days: number): Promise<DailyMetric[]> {
+  const HealthKit = await getModule();
+  if (!HealthKit || !(await hasConnectedHealthKit())) return [];
+  const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  try {
+    const samples = await HealthKit.queryQuantitySamples('HKQuantityTypeIdentifierActiveEnergyBurned', {
+      filter: { date: { startDate } },
+      limit: 0,
+      unit: 'kcal',
+      ascending: true,
+    });
+    const byDate = new Map<string, number>();
+    for (const s of samples) {
+      const date = localDateStr(s.startDate);
+      byDate.set(date, (byDate.get(date) ?? 0) + s.quantity);
+    }
+    return Array.from(byDate.entries())
+      .map(([date, value]) => ({ date, value: Math.round(value) }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * This week's real active-energy total (Monday through today, local
+ * calendar) — same week boundary session-history.ts's own
+ * getWeeklyCaloriesBurned uses, so a caller combining both sources is
+ * always comparing the same window. Returns null specifically when
+ * HealthKit isn't connected — distinct from a real, connected 0 — so a
+ * caller can tell "no real source, fall back to the on-device estimate"
+ * apart from "the real source genuinely says zero so far this week."
+ */
+export async function getWeeklyActiveEnergyKcal(): Promise<number | null> {
+  if (!(await hasConnectedHealthKit())) return null;
+  const daily = await getRecentActiveEnergy(7);
+  const now = new Date();
+  const todayIndex = now.getDay();
+  const mondayOffset = (todayIndex + 6) % 7;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - mondayOffset);
+  const mondayStr = localDateStr(monday);
+  const todayStr = localDateStr(now);
+  return daily.filter((d) => d.date >= mondayStr && d.date <= todayStr).reduce((sum, d) => sum + d.value, 0);
 }
 
 /**

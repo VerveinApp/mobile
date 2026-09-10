@@ -1,14 +1,17 @@
 import type { BottomSheetModal } from '@gorhom/bottom-sheet';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import ReanimatedAnimated from 'react-native-reanimated';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView } from '@/components/ui/app-symbol';
 
 import { LogPastSessionSheet } from '@/components/settings/log-past-session-sheet';
+import { Type } from '@/constants/theme';
 import { useHoverFade } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight, hapticSelect } from '@/lib/haptics';
+import { useFadeInEntering } from '@/lib/screen-transitions';
 import {
   deleteSessionHistoryEntry,
   getSessionHistory,
@@ -18,11 +21,48 @@ import {
 import { useAppColors } from '@/lib/theme-context';
 import { getProfile } from '@/lib/user-profile';
 import { deleteWorkoutLog, getAllWorkoutLogs, type WorkoutLogExercise } from '@/lib/workout-log';
+import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
+
+// Same full-swipe-commits gesture as Notes/Weight History's own lists — see
+// notes/index.tsx's comment for the full reasoning. Scoped per HistoryRow
+// instance below (a plain ref, not a Map) since each row is already its own
+// component instance, not an inline .map() render.
+const FULL_SWIPE_DELETE_THRESHOLD = -220;
 
 function formatEntryDate(dateStr: string): string {
   const [year, month, day] = dateStr.split('-').map(Number);
   const d = new Date(year, month - 1, day);
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function monthKey(dateStr: string): string {
+  return dateStr.slice(0, 7); // YYYY-MM
+}
+
+function formatMonthLabel(key: string): string {
+  const [year, month] = key.split('-').map(Number);
+  return new Date(year, month - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+
+type MonthGroup = { key: string; label: string; entries: SessionHistoryEntry[] };
+
+// Entries arrive newest-first (getSessionHistory's own sort) — bucketing in
+// that same order, first-seen-key-wins, keeps the resulting month groups
+// newest-first too, with no separate re-sort needed.
+function groupByMonth(entries: SessionHistoryEntry[]): MonthGroup[] {
+  const groups: MonthGroup[] = [];
+  const byKey = new Map<string, MonthGroup>();
+  for (const entry of entries) {
+    const key = monthKey(entry.date);
+    let group = byKey.get(key);
+    if (!group) {
+      group = { key, label: formatMonthLabel(key), entries: [] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    group.entries.push(entry);
+  }
+  return groups;
 }
 
 /**
@@ -31,16 +71,26 @@ function formatEntryDate(dateStr: string): string {
  * trend charts, or fabricated deltas here, just the actual local record.
  */
 export default function ProgressHistoryScreen() {
+  // Set when arriving from Progress's own consistency calendar (tapping a
+  // real logged day there) — the one this list should already have open and
+  // easy to spot, not just another undifferentiated row in the same list.
+  const { date: targetDate } = useLocalSearchParams<{ date?: string }>();
   const insets = useSafeAreaInsets();
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const backHover = useHoverFade();
   const addHover = useHoverFade();
+  const entering = useFadeInEntering();
   const logPastSessionSheetRef = useRef<BottomSheetModal>(null);
   const [entries, setEntries] = useState<SessionHistoryEntry[]>([]);
   const [workoutLogs, setWorkoutLogs] = useState<Map<string, WorkoutLogExercise[]>>(new Map());
   const [thisWeekCount, setThisWeekCount] = useState(0);
   const [loaded, setLoaded] = useState(false);
+  // Which month "folders" are open — defaulted once (see the effect below),
+  // never reset by a later reload (a delete or a new past-session log
+  // shouldn't silently re-collapse a month the user opened by hand).
+  const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set());
+  const hasSetDefaultExpandedMonth = useRef(false);
 
   // Shared by the initial load and the "Log a Past Session" sheet's onSaved
   // callback — a fresh read from storage rather than optimistically
@@ -74,6 +124,29 @@ export default function ProgressHistoryScreen() {
   }, [loadHistory]);
 
   const completedCount = entries.filter((e) => e.completed).length;
+  const monthGroups = useMemo(() => groupByMonth(entries), [entries]);
+
+  // Runs once, the first time real entries exist — opens the most recent
+  // month by default (so history doesn't load into an all-collapsed wall of
+  // folders), plus whichever month holds the day someone tapped from
+  // Progress's own calendar to get here, even if that's an older month.
+  useEffect(() => {
+    if (hasSetDefaultExpandedMonth.current || monthGroups.length === 0) return;
+    hasSetDefaultExpandedMonth.current = true;
+    const defaults = new Set([monthGroups[0].key]);
+    if (targetDate) defaults.add(monthKey(targetDate));
+    setExpandedMonths(defaults);
+  }, [monthGroups, targetDate]);
+
+  const toggleMonth = (key: string) => {
+    hapticSelect();
+    setExpandedMonths((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const handleDelete = async (date: string) => {
     hapticImpactLight();
@@ -129,7 +202,19 @@ export default function ProgressHistoryScreen() {
 
       <LogPastSessionSheet ref={logPastSessionSheetRef} onSaved={loadHistory} />
 
-      {!loaded ? null : (
+      {!loaded ? (
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.summaryRow}>
+            <SkeletonCard height={80} style={{ flex: 1 }} />
+            <SkeletonCard height={80} style={{ flex: 1 }} />
+          </View>
+          <View style={styles.section}>
+            <SkeletonBlock width={60} height={11} borderRadius={4} />
+            <SkeletonCard height={150} lines={3} />
+          </View>
+        </ScrollView>
+      ) : (
+      <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.summaryRow}>
             <View style={styles.summaryCard}>
@@ -152,22 +237,57 @@ export default function ProgressHistoryScreen() {
                 </Text>
               </View>
             ) : (
-              <View style={styles.card}>
-                {entries.map((entry, index) => (
-                  <HistoryRow
-                    key={entry.date}
-                    entry={entry}
-                    exercises={workoutLogs.get(entry.date)}
-                    isLast={index === entries.length - 1}
-                    styles={styles}
-                    colors={colors}
-                    onDelete={() => handleDelete(entry.date)}
-                  />
-                ))}
+              <View style={styles.monthList}>
+                {monthGroups.map((group) => {
+                  const expanded = expandedMonths.has(group.key);
+                  const completedInMonth = group.entries.filter((e) => e.completed).length;
+                  return (
+                    <View key={group.key} style={styles.card}>
+                      <Pressable
+                        style={styles.monthHeaderRow}
+                        onPress={() => toggleMonth(group.key)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${group.label}, ${completedInMonth} of ${group.entries.length} completed. ${expanded ? 'Collapse' : 'Expand'}.`}
+                      >
+                        <View style={styles.monthHeaderLeft}>
+                          <SymbolView name={expanded ? 'folder.fill' : 'folder'} size={14} tintColor={colors.textTertiary} />
+                          <Text style={styles.monthHeaderLabel} maxFontSizeMultiplier={1.2}>{group.label}</Text>
+                        </View>
+                        <View style={styles.monthHeaderRight}>
+                          <Text style={styles.monthHeaderCount} maxFontSizeMultiplier={1.2}>
+                            {completedInMonth}/{group.entries.length}
+                          </Text>
+                          <SymbolView
+                            name={expanded ? 'chevron.up' : 'chevron.down'}
+                            size={11}
+                            tintColor={colors.textTertiary}
+                          />
+                        </View>
+                      </Pressable>
+                      {expanded ? (
+                        <View style={styles.monthBody}>
+                          {group.entries.map((entry, index) => (
+                            <HistoryRow
+                              key={entry.date}
+                              entry={entry}
+                              exercises={workoutLogs.get(entry.date)}
+                              isLast={index === group.entries.length - 1}
+                              isTarget={entry.date === targetDate}
+                              styles={styles}
+                              colors={colors}
+                              onDelete={() => handleDelete(entry.date)}
+                            />
+                          ))}
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })}
               </View>
             )}
           </View>
         </ScrollView>
+      </ReanimatedAnimated.View>
       )}
     </View>
   );
@@ -178,6 +298,7 @@ function HistoryRow({
   entry,
   exercises,
   isLast,
+  isTarget,
   styles,
   colors,
   onDelete,
@@ -185,13 +306,20 @@ function HistoryRow({
   entry: SessionHistoryEntry;
   exercises: WorkoutLogExercise[] | undefined;
   isLast: boolean;
+  /** True for the one day someone tapped from Progress's own calendar to
+   * get here — starts pre-expanded (if it has a real log) and gets a
+   * subtle highlight so it's easy to spot among the rest of the list. */
+  isTarget: boolean;
   styles: ReturnType<typeof createStyles>;
   colors: ReturnType<typeof useAppColors>;
   onDelete: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(isTarget);
   const hasLog = !!exercises && exercises.length > 0;
   const doneCount = exercises?.filter((e) => e.completed).length ?? 0;
+  const swipeableRef = useRef<Swipeable>(null);
+  const dragListenerId = useRef<string | null>(null);
+  const pendingFullSwipeDelete = useRef(false);
 
   const toggleExpanded = () => {
     if (!hasLog) return;
@@ -201,21 +329,42 @@ function HistoryRow({
 
   return (
     <Swipeable
-      renderRightActions={() => (
-        <Pressable
-          style={styles.deleteAction}
-          onPress={onDelete}
-          accessibilityRole="button"
-          accessibilityLabel="Delete session"
-        >
-          <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
-        </Pressable>
-      )}
-      overshootRight={false}
+      ref={swipeableRef}
+      renderRightActions={(_progress, dragX) => {
+        if (dragListenerId.current) dragX.removeListener(dragListenerId.current);
+        dragListenerId.current = dragX.addListener(({ value }) => {
+          if (value < FULL_SWIPE_DELETE_THRESHOLD && !pendingFullSwipeDelete.current) {
+            pendingFullSwipeDelete.current = true;
+            swipeableRef.current?.close();
+          }
+        });
+        return (
+          <Pressable
+            style={styles.deleteAction}
+            onPress={onDelete}
+            accessibilityRole="button"
+            accessibilityLabel="Delete session"
+          >
+            <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
+          </Pressable>
+        );
+      }}
+      onSwipeableClose={() => {
+        if (pendingFullSwipeDelete.current) {
+          pendingFullSwipeDelete.current = false;
+          onDelete();
+        }
+      }}
+      overshootRight
     >
       <Pressable
         onPress={toggleExpanded}
-        style={[styles.entryRow, !isLast && styles.entryRowDivider, { backgroundColor: colors.surface }]}
+        style={[
+          styles.entryRow,
+          !isLast && styles.entryRowDivider,
+          { backgroundColor: colors.surface },
+          isTarget && styles.entryRowTarget,
+        ]}
       >
         <View style={styles.entryRowTop}>
           <View style={styles.entryDateRow}>
@@ -286,6 +435,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       flex: 1,
       backgroundColor: colors.background,
     },
+    fadeLayer: {
+      flex: 1,
+    },
     headerRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -302,8 +454,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     headerTitle: {
       color: colors.text,
-      fontSize: 16,
-      fontFamily: 'Geist-SemiBold',
+      fontSize: Type.headerTitle,
+      letterSpacing: -0.2,
+      fontFamily: 'Geist-Bold',
     },
     scrollContent: {
       paddingHorizontal: 20,
@@ -325,14 +478,14 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     summaryValue: {
       color: colors.text,
-      fontSize: 24,
+      fontSize: Type.display,
       letterSpacing: -0.4,
       fontFamily: 'Geist-Black',
     },
     summaryLabel: {
       marginTop: 4,
       color: colors.textTertiary,
-      fontSize: 10.5,
+      fontSize: Type.micro,
       letterSpacing: 0.4,
       textTransform: 'uppercase',
       fontFamily: 'Geist-Medium',
@@ -342,7 +495,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     sectionKicker: {
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       letterSpacing: 1,
       fontFamily: 'Geist-SemiBold',
     },
@@ -352,6 +505,40 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       borderColor: colors.surfaceBorder,
       backgroundColor: colors.surface,
       overflow: 'hidden',
+    },
+    monthList: {
+      gap: 12,
+    },
+    monthHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+    },
+    monthHeaderLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    monthHeaderLabel: {
+      color: colors.text,
+      fontSize: Type.body,
+      fontFamily: 'Geist-SemiBold',
+    },
+    monthHeaderRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    monthHeaderCount: {
+      color: colors.textTertiary,
+      fontSize: Type.secondary,
+      fontFamily: 'Geist-SemiBold',
+    },
+    monthBody: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.surfaceDivider,
     },
     emptyCard: {
       borderRadius: 16,
@@ -366,7 +553,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     emptyText: {
       color: colors.textTertiary,
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
       lineHeight: 18,
       textAlign: 'center',
@@ -383,7 +570,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     entryNote: {
       marginTop: 6,
       color: colors.textTertiary,
-      fontSize: 11.5,
+      fontSize: Type.caption,
       lineHeight: 16,
       fontFamily: 'Geist-Regular',
       fontStyle: 'italic',
@@ -396,7 +583,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     logToggleText: {
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
     },
     logList: {
@@ -411,7 +598,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     logExerciseName: {
       flex: 1,
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
     },
     logExerciseNameSkipped: {
@@ -421,6 +608,12 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     entryRowDivider: {
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.surfaceDivider,
+    },
+    // Marks the one row someone arrived here to see (tapped from Progress's
+    // own calendar) — subtle enough not to look like a new permanent state,
+    // just enough to be findable at a glance in a longer list.
+    entryRowTarget: {
+      backgroundColor: 'rgba(95,190,132,0.1)',
     },
     deleteAction: {
       width: 72,
@@ -435,12 +628,12 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     entryDate: {
       color: colors.text,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
     },
     retroactiveTag: {
       color: colors.textTertiary,
-      fontSize: 10,
+      fontSize: Type.micro,
       fontStyle: 'italic',
       fontFamily: 'Geist-Regular',
     },
@@ -451,7 +644,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     entryStatusText: {
       color: colors.iconFaint,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     entryStatusTextDone: {

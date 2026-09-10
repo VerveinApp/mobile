@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Platform } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import Purchases, {
   LOG_LEVEL,
   PURCHASES_ERROR_CODE,
@@ -12,11 +13,18 @@ import { getDevPremiumOverride } from '@/lib/dev-premium-override';
 import { supabase } from '@/lib/supabase';
 
 // iOS-only for now, same scoping as health-kit.ts — this app doesn't ship
-// Android yet. The Test Store key below is sandbox-only (no real store
-// connected in RevenueCat yet); swap for the real Apple key once RevenueCat's
-// iOS app configuration + real App Store Connect subscription products exist.
-// See .env.local's own comment on this key.
-const API_KEY = process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_IOS;
+// Android yet. EXPO_PUBLIC_REVENUECAT_API_KEY_IOS is the real key, wired to
+// the real App Store Connect app (see .env.local's own comment) — that
+// never resolves real offerings/pricing in the Simulator, since Simulator
+// can't talk to real StoreKit. __DEV__ builds use the separate Test Store
+// key instead: a RevenueCat-hosted mock app with its own fake products, so
+// pricing/purchases work in Simulator (and on device) without ever touching
+// the real store. Falls back to the real key if the Test Store one isn't
+// set, so an unconfigured dev env fails the same honest way it always did
+// rather than silently picking undefined.
+const API_KEY = __DEV__
+  ? process.env.EXPO_PUBLIC_REVENUECAT_TEST_STORE_KEY_IOS || process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_IOS
+  : process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_IOS;
 
 // Matches the entitlement identifier configured in the RevenueCat dashboard
 // exactly (including the space) — VerveIn Plus, not a slug. RevenueCat
@@ -25,6 +33,21 @@ const API_KEY = process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_IOS;
 export const PREMIUM_ENTITLEMENT_ID = 'VerveIn Plus';
 
 let configured = false;
+
+export type BillingMode = 'test-store' | 'production' | 'unconfigured';
+
+/**
+ * Which key API_KEY above actually resolved to — surfaced in Settings' own
+ * Developer section so it's never ambiguous which backend a build is
+ * talking to (the exact confusion that led to a "couldn't load pricing"
+ * paywall in the Simulator: the app was silently on the real production key,
+ * which can't resolve in Simulator at all).
+ */
+export function getBillingMode(): BillingMode {
+  if (!API_KEY) return 'unconfigured';
+  if (__DEV__ && process.env.EXPO_PUBLIC_REVENUECAT_TEST_STORE_KEY_IOS) return 'test-store';
+  return 'production';
+}
 
 /**
  * Call once at app startup (see _layout.tsx). Safe to call more than once —
@@ -119,23 +142,33 @@ export async function hasPremiumEntitlement(): Promise<boolean> {
  * initial check is in flight, distinct from `false` — lets a caller show a
  * neutral loading state instead of flashing the locked teaser for a moment
  * on every screen focus before the real (often already-true) answer lands.
- * Re-checks on every mount rather than caching across the app's lifetime —
- * cheap (the SDK's own CustomerInfo cache backs this), and correct the
- * instant a purchase completes in the very same session (the paywall
- * screen's own success path calls router.back(), remounting whatever gated
- * section sent the user there).
+ *
+ * BUG FIX: this used to re-check only on mount (a plain useEffect with an
+ * empty dependency array), not on every focus. That's correct for a screen
+ * that's genuinely remounted after a purchase (the paywall's own success
+ * path calls router.back(), remounting whatever gated section sent the user
+ * there) — but a tab screen stays mounted in the background when you switch
+ * tabs, so flipping the Settings dev-premium-override toggle and returning
+ * to an already-visited tab never re-ran this check; it kept showing
+ * whatever answer it got the first time that tab was ever opened. Real
+ * RevenueCat state can also actually change between visits to the same
+ * still-mounted tab (a purchase completing, a subscription expiring), not
+ * just the dev override — useFocusEffect (re-checks on mount AND on every
+ * return to focus) is correct for both.
  */
 export function usePremiumEntitlement(): boolean | null {
   const [isPremium, setIsPremium] = useState<boolean | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    hasPremiumEntitlement().then((value) => {
-      if (!cancelled) setIsPremium(value);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      hasPremiumEntitlement().then((value) => {
+        if (!cancelled) setIsPremium(value);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [])
+  );
   return isPremium;
 }
 
@@ -189,5 +222,39 @@ export async function restorePurchases(): Promise<RestoreOutcome> {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Couldn't restore purchases right now.";
     return { kind: 'error', message };
+  }
+}
+
+export type ResetPurchaserResult = 'reset' | 'already-anonymous' | 'not-configured' | 'error';
+
+/**
+ * ⚠️ DEV-ONLY — Settings' Developer section, "Reset VerveIn Plus Sub" only.
+ *
+ * IMPORTANT SCOPE NOTE: this can only ever detach the SDK from its current
+ * RevenueCat identity (Purchases.logOut(), RevenueCat's own documented way
+ * to test a paywall repeatedly) — it cannot revoke or expire a real
+ * entitlement, which only RevenueCat's server-side dashboard/API (gated by a
+ * secret key that must never ship in this client bundle) can do. Concretely:
+ * a Test Store purchase made under this device's current identity really is
+ * granted server-side, tied to that app_user_id (syncIdentityWithSupabaseAuth
+ * deliberately keeps that stable = the Supabase user id, so a real install
+ * never loses a real purchase) — logOut() only switches to a fresh anonymous
+ * id with no purchase history for the REST OF THIS APP SESSION. The next
+ * app restart re-runs syncIdentityWithSupabaseAuth's own INITIAL_SESSION
+ * handler, which logs back into the same still-signed-in Supabase user id
+ * and pulls the same entitlement right back. Good enough for "let me see the
+ * paywall/free tier again without restarting"; not a real, permanent
+ * revocation — that has to happen in the RevenueCat dashboard itself
+ * (Customers → find the subscriber → expire/revoke the entitlement).
+ */
+export async function resetPurchaserIdentityForTesting(): Promise<ResetPurchaserResult> {
+  if (!configured) return 'not-configured';
+  try {
+    await Purchases.logOut();
+    return 'reset';
+  } catch (error) {
+    const code = (error as { code?: PURCHASES_ERROR_CODE })?.code;
+    if (code === PURCHASES_ERROR_CODE.LOG_OUT_ANONYMOUS_USER_ERROR) return 'already-anonymous';
+    return 'error';
   }
 }

@@ -16,6 +16,8 @@ function makeValidPayload(overrides: Partial<BackupPayload> = {}): BackupPayload
     notes: [],
     bodyMeasurements: [],
     conditionLog: [],
+    sleepLog: [],
+    nutritionLog: [],
     ...overrides,
   };
 }
@@ -114,20 +116,35 @@ describe('parseBackupPayload', () => {
     payload.conditionLog = 'not an array';
     expect(parseBackupPayload(JSON.stringify(payload)).ok).toBe(false);
   });
+
+  it('rejects a non-array sleepLog', () => {
+    const payload = makeValidPayload();
+    // @ts-expect-error deliberately malformed for the test
+    payload.sleepLog = 'not an array';
+    expect(parseBackupPayload(JSON.stringify(payload)).ok).toBe(false);
+  });
+
+  it('rejects a non-array nutritionLog', () => {
+    const payload = makeValidPayload();
+    // @ts-expect-error deliberately malformed for the test
+    payload.nutritionLog = 'not an array';
+    expect(parseBackupPayload(JSON.stringify(payload)).ok).toBe(false);
+  });
 });
 
 describe('BACKUP_VERSION guard', () => {
   // Every past field addition to BackupPayload (exercisePerformance, notes,
-  // bodyMeasurements, conditionLog) bumped BACKUP_VERSION alongside it — see
-  // data-backup.ts's own version-history comment. That pairing is a human
-  // convention, not something TypeScript enforces, so it's easy to add a
-  // field to the type/buildBackupPayload/parseBackupPayload without
-  // remembering the version bump — exactly the silent-gap pattern
-  // data-backup.ts's header comment already calls out for other stores.
-  // This pins the exact field set BACKUP_VERSION 5 expects: adding, removing,
-  // or renaming a BackupPayload field fails this test until the list below
-  // is updated to match — which is the prompt to also bump BACKUP_VERSION
-  // and add a version-history line, not just silence this assertion.
+  // bodyMeasurements, conditionLog, sleepLog, nutritionLog) bumped
+  // BACKUP_VERSION alongside it — see data-backup.ts's own version-history
+  // comment. That pairing is a human convention, not something TypeScript
+  // enforces, so it's easy to add a field to the type/buildBackupPayload/
+  // parseBackupPayload without remembering the version bump — exactly the
+  // silent-gap pattern data-backup.ts's header comment already calls out
+  // for other stores. This pins the exact field set BACKUP_VERSION 6
+  // expects: adding, removing, or renaming a BackupPayload field fails this
+  // test until the list below is updated to match — which is the prompt to
+  // also bump BACKUP_VERSION and add a version-history line, not just
+  // silence this assertion.
   it(`version ${BACKUP_VERSION}'s payload has exactly the fields this version was bumped for — update this list AND bump BACKUP_VERSION together`, () => {
     expect(Object.keys(makeValidPayload()).sort()).toEqual(
       [
@@ -145,6 +162,8 @@ describe('BACKUP_VERSION guard', () => {
         'notes',
         'bodyMeasurements',
         'conditionLog',
+        'sleepLog',
+        'nutritionLog',
       ].sort()
     );
   });

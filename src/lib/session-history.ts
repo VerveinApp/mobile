@@ -1,13 +1,18 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
 import type { EnergyScore } from '@/components/home/energy-gauge';
 import type { FeedbackResponse } from '@/lib/engine/types';
+import { getAccountStartDate } from '@/lib/onboarding-draft';
+import { WEEKDAY_NAMES } from '@/lib/profile-labels';
+import { ROLLING_WINDOW_DAYS } from '@/lib/rolling-window';
+import { clearStoredValue, readJsonList, writeJsonValue } from '@/lib/storage/json-storage';
 import type { CompletionStatus } from '@/lib/workout-log';
 
 import { localDateStr } from './local-date';
 
 const KEY = 'vervein.sessionHistory.v1';
-const MAX_ENTRIES = 30; // a rolling month is plenty for a 7-day weekly view
+// See rolling-window.ts's own doc comment for why this is shared, not a
+// local constant — a rolling month is plenty for this store's own 7-day
+// weekly view.
+const MAX_ENTRIES = ROLLING_WINDOW_DAYS;
 
 export type SessionHistoryEntry = {
   /** YYYY-MM-DD. */
@@ -46,41 +51,46 @@ export type SessionHistoryEntry = {
    * session-reminders.ts to personalize reminder timing once enough real
    * samples exist; absent for entries logged before this field existed. */
   checkedInAtHour?: number;
+  /** calorie-estimate.ts's real per-session estimate, persisted so
+   * getWeeklyCaloriesBurned below can sum across days without re-deriving it
+   * from workout-log.ts's exercises (which don't carry the bodyweight this
+   * needs, and may since have been trimmed). Absent whenever check-in.tsx
+   * itself had no honest estimate to give (no weightKg on the profile) — see
+   * estimateCaloriesBurned's own doc comment — and for entries logged before
+   * this field existed. Never set for a skipped session. */
+  caloriesBurned?: number;
 };
 
-const WEEKDAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-
-async function readAll(): Promise<SessionHistoryEntry[]> {
-  try {
-    const raw = await AsyncStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as SessionHistoryEntry[]) : [];
-  } catch {
-    return [];
-  }
-}
-
 /** Records (or updates) today's completion state — safe to call more than once per day (check-in.tsx calls this both when a session starts, with completionStatus 'skipped' as the honest starting point, and again at finish with the real final status). `energy` is optional so callers that don't have it don't need a fake value. */
-export async function recordSessionCompletion(completed: boolean, energy?: EnergyScore, completionStatus?: CompletionStatus) {
-  try {
-    const date = localDateStr();
-    const entries = await readAll();
-    // Merged, not replaced — a call after notes/feedback were already
-    // attached (saveSessionNote/saveSessionFeedback) must not silently wipe
-    // them; only the fields this function actually owns get overwritten.
-    const existingToday = entries.find((e) => e.date === date);
-    const withoutToday = entries.filter((e) => e.date !== date);
-    // Keeps whichever hour was already recorded for today (the start-of-
-    // check-in call) rather than letting the later finish-of-session call
-    // overwrite it with a much noisier "when did they finish" hour — see
-    // checkedInAtHour's own doc comment.
-    const checkedInAtHour = existingToday?.checkedInAtHour ?? new Date().getHours();
-    const next = [...withoutToday, { ...existingToday, date, completed, energy, completionStatus, checkedInAtHour }].slice(
-      -MAX_ENTRIES
-    );
-    await AsyncStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    // Worst case the weekly view just reads a little sparse — never a crash.
-  }
+export async function recordSessionCompletion(
+  completed: boolean,
+  energy?: EnergyScore,
+  completionStatus?: CompletionStatus,
+  caloriesBurned?: number
+) {
+  const date = localDateStr();
+  const entries = await readJsonList<SessionHistoryEntry>(KEY);
+  // Merged, not replaced — a call after notes/feedback were already
+  // attached (saveSessionNote/saveSessionFeedback) must not silently wipe
+  // them; only the fields this function actually owns get overwritten.
+  const existingToday = entries.find((e) => e.date === date);
+  const withoutToday = entries.filter((e) => e.date !== date);
+  // Keeps whichever hour was already recorded for today (the start-of-
+  // check-in call) rather than letting the later finish-of-session call
+  // overwrite it with a much noisier "when did they finish" hour — see
+  // checkedInAtHour's own doc comment.
+  const checkedInAtHour = existingToday?.checkedInAtHour ?? new Date().getHours();
+  // BUG FIX (found in a later full-app audit): this used to write
+  // `caloriesBurned` unconditionally from the parameter, unlike
+  // checkedInAtHour just above — a call with no 4th argument (undefined)
+  // would silently overwrite an already-recorded real value with nothing.
+  // Same existingToday-preserving fallback pattern checkedInAtHour uses.
+  const resolvedCaloriesBurned = caloriesBurned ?? existingToday?.caloriesBurned;
+  const next = [
+    ...withoutToday,
+    { ...existingToday, date, completed, energy, completionStatus, checkedInAtHour, caloriesBurned: resolvedCaloriesBurned },
+  ].slice(-MAX_ENTRIES);
+  await writeJsonValue(KEY, next);
 }
 
 /**
@@ -102,40 +112,28 @@ export async function recordPastSessionCompletion(
   completionStatus?: CompletionStatus,
   soreness?: EnergyScore
 ) {
-  try {
-    const entries = await readAll();
-    const withoutDate = entries.filter((e) => e.date !== date);
-    const next = [
-      ...withoutDate,
-      { date, completed, energy, completionStatus, soreness, loggedRetroactively: true },
-    ].slice(-MAX_ENTRIES);
-    await AsyncStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    // Worst case the weekly view just reads a little sparse — never a crash.
-  }
+  const entries = await readJsonList<SessionHistoryEntry>(KEY);
+  const withoutDate = entries.filter((e) => e.date !== date);
+  const next = [
+    ...withoutDate,
+    { date, completed, energy, completionStatus, soreness, loggedRetroactively: true },
+  ].slice(-MAX_ENTRIES);
+  await writeJsonValue(KEY, next);
 }
 
 export async function clearSessionHistory() {
-  try {
-    await AsyncStorage.removeItem(KEY);
-  } catch {
-    // Best-effort — same as never having a history.
-  }
+  await clearStoredValue(KEY);
 }
 
 /** Removes a single logged entry by date — the per-row swipe-to-delete on Progress & History. */
 export async function deleteSessionHistoryEntry(date: string) {
-  try {
-    const entries = await readAll();
-    await AsyncStorage.setItem(KEY, JSON.stringify(entries.filter((e) => e.date !== date)));
-  } catch {
-    // Worst case the entry reappears next load — never a crash.
-  }
+  const entries = await readJsonList<SessionHistoryEntry>(KEY);
+  await writeJsonValue(KEY, entries.filter((e) => e.date !== date));
 }
 
 /** Every stored entry, most recent first — the real log behind Settings' Progress & History. */
 export async function getSessionHistory(): Promise<SessionHistoryEntry[]> {
-  const entries = await readAll();
+  const entries = await readJsonList<SessionHistoryEntry>(KEY);
   return [...entries].sort((a, b) => (a.date < b.date ? 1 : -1));
 }
 
@@ -144,12 +142,8 @@ export async function getSessionHistory(): Promise<SessionHistoryEntry[]> {
  * so a restore can't exceed the log's normal rolling-window size even if
  * the exported payload somehow held more. */
 export async function restoreSessionHistory(entries: SessionHistoryEntry[]): Promise<void> {
-  try {
-    const trimmed = [...entries].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-MAX_ENTRIES);
-    await AsyncStorage.setItem(KEY, JSON.stringify(trimmed));
-  } catch {
-    // Worst case this one field doesn't restore — the rest of the backup still applies independently.
-  }
+  const trimmed = [...entries].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-MAX_ENTRIES);
+  await writeJsonValue(KEY, trimmed);
 }
 
 /**
@@ -159,41 +153,38 @@ export async function restoreSessionHistory(entries: SessionHistoryEntry[]): Pro
  * a session that was actually logged, never fabricated on its own.
  */
 export async function saveSessionNote(date: string, notes: string) {
-  try {
-    const entries = await readAll();
-    const trimmed = notes.trim();
-    const next = entries.map((e) => (e.date === date ? { ...e, notes: trimmed || undefined } : e));
-    await AsyncStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    // Worst case the note doesn't stick — the session itself is still recorded either way.
-  }
+  const entries = await readJsonList<SessionHistoryEntry>(KEY);
+  const trimmed = notes.trim();
+  const next = entries.map((e) => (e.date === date ? { ...e, notes: trimmed || undefined } : e));
+  await writeJsonValue(KEY, next);
 }
 
 /** The note for a single day, if one was saved — prefills the field when reopening an already-finished session. */
 export async function getSessionNote(date: string): Promise<string | undefined> {
-  const entries = await readAll();
+  const entries = await readJsonList<SessionHistoryEntry>(KEY);
   return entries.find((e) => e.date === date)?.notes;
 }
 
 /** Records which post-session feedback button was tapped for a day — same no-op-if-no-entry-yet contract as saveSessionNote. The calibration update itself happens separately, in calibration.ts's submitSessionFeedback; this is just the "did I already ask today" record. */
 export async function saveSessionFeedback(date: string, feedback: FeedbackResponse) {
-  try {
-    const entries = await readAll();
-    const next = entries.map((e) => (e.date === date ? { ...e, feedback } : e));
-    await AsyncStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    // Worst case the feedback prompt reappears next load — never a crash, and calibration.ts's own write already landed independently.
-  }
+  const entries = await readJsonList<SessionHistoryEntry>(KEY);
+  const next = entries.map((e) => (e.date === date ? { ...e, feedback } : e));
+  await writeJsonValue(KEY, next);
 }
 
 /** The feedback given for a single day, if any — lets check-in.tsx skip re-asking when reopening an already-finished session. */
 export async function getSessionFeedback(date: string): Promise<FeedbackResponse | undefined> {
-  const entries = await readAll();
+  const entries = await readJsonList<SessionHistoryEntry>(KEY);
   return entries.find((e) => e.date === date)?.feedback;
 }
 
 export type WeekDay = {
   weekday: string;
+  /** YYYY-MM-DD — the real calendar date this cell represents. Added so
+   * callers can label a specific date (Progress's own month grid otherwise
+   * has no way to say which real week a row is) or navigate to that day's
+   * detail, not just its weekday name. */
+  date: string;
   /** null = in the future, OR a past scheduled day with no recorded entry at
    * all (see isFuture below for how to tell those two apart — they used to
    * be indistinguishable here, which was a real bug: recordSessionCompletion
@@ -221,8 +212,16 @@ export async function getWeekActivity(scheduledDays: string[] | null): Promise<{
   completedCount: number;
   scheduledCount: number;
 }> {
-  const entries = await readAll();
+  const entries = await readJsonList<SessionHistoryEntry>(KEY);
   const byDate = new Map(entries.map((e) => [e.date, e.completed]));
+  // BUG FIX: a day is only real "scheduled" if the account actually existed
+  // yet — without this floor, a brand-new account whose weekly pattern
+  // includes, say, Monday–Thursday saw those same-week days rendered as
+  // missed red dots the moment it was created on a Friday, despite the
+  // account (and its plan) not existing on any of them yet. Null (no
+  // account-start recorded at all) never excludes anything — same as
+  // before this fix existed.
+  const accountStartDate = await getAccountStartDate();
 
   const now = new Date();
   const todayIndex = now.getDay(); // 0=Sunday
@@ -236,11 +235,13 @@ export async function getWeekActivity(scheduledDays: string[] | null): Promise<{
     d.setDate(monday.getDate() + i);
     const dateStr = localDateStr(d);
     const weekday = WEEKDAY_NAMES[d.getDay()];
-    const isScheduled = scheduledDays?.includes(weekday) ?? false;
+    const isScheduled =
+      (scheduledDays?.includes(weekday) ?? false) && (!accountStartDate || dateStr >= accountStartDate);
     const todayStr = localDateStr(now);
     const isFuture = dateStr > todayStr;
     return {
       weekday,
+      date: dateStr,
       completed: isFuture ? null : (byDate.get(dateStr) ?? null),
       isToday: dateStr === todayStr,
       isScheduled,
@@ -255,14 +256,59 @@ export async function getWeekActivity(scheduledDays: string[] | null): Promise<{
 }
 
 /**
+ * Sum of calorie-estimate.ts's real per-session estimates across this
+ * calendar week (Monday–Sunday, same boundary as getWeekActivity) — the
+ * data behind the Home weekly card's "X of Y kcal this week" line once a
+ * weeklyCalorieBurnGoal is set. Entries logged before caloriesBurned existed,
+ * or with no honest estimate available at the time (no weightKg on the
+ * profile), simply contribute 0 rather than breaking the sum — an
+ * undercount for old data is honest; a crash isn't.
+ */
+export async function getWeeklyCaloriesBurned(): Promise<number> {
+  const entries = await readJsonList<SessionHistoryEntry>(KEY);
+  const now = new Date();
+  const todayIndex = now.getDay();
+  const mondayOffset = (todayIndex + 6) % 7;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - mondayOffset);
+  const mondayStr = localDateStr(monday);
+  const todayStr = localDateStr(now);
+  return entries
+    .filter((e) => e.date >= mondayStr && e.date <= todayStr)
+    .reduce((sum, e) => sum + (e.caloriesBurned ?? 0), 0);
+}
+
+export type WeeklyCaloriesBurned = { kcal: number; isEstimate: boolean };
+
+/**
+ * Combines this week's real HealthKit active-energy total (health-kit.ts's
+ * getWeeklyActiveEnergyKcal — real measured activity, not just VerveIn
+ * sessions) with the on-device MET-formula estimate getWeeklyCaloriesBurned
+ * above computes. HealthKit's real total is preferred whenever connected;
+ * the on-device estimate is the same honest fallback check-in.tsx already
+ * labels "estimated" elsewhere. Pure, same shape as weight-log.ts's own
+ * resolveCurrentWeightKg — callers fetch both sources themselves — so every
+ * screen showing this number (Home's weekly card, Profile's Goals ring)
+ * resolves it exactly the same way instead of each reimplementing the
+ * priority independently and silently drifting apart.
+ */
+export function resolveWeeklyCaloriesBurned(diskKcal: number, healthKitKcal: number | null): WeeklyCaloriesBurned {
+  return healthKitKcal !== null ? { kcal: healthKitKcal, isEstimate: false } : { kcal: diskKcal, isEstimate: true };
+}
+
+/**
  * Same shape as getWeekActivity but for the last `weekCount` calendar weeks
  * (oldest first, current week last) — the data behind Progress's consistency
  * grid. Every cell is still cross-referenced against scheduledDays, so an
- * unscheduled day reads as "no dot," not a missed session.
+ * unscheduled day reads as "no dot," not a missed session — same
+ * account-start floor as getWeekActivity above, and more visible here: a
+ * brand-new account's own MONTH_WEEK_COUNT-week grid used to render entire
+ * calendar weeks from before the account existed as rows of missed cells.
  */
 export async function getRecentWeeks(scheduledDays: string[] | null, weekCount = 4): Promise<WeekDay[][]> {
-  const entries = await readAll();
+  const entries = await readJsonList<SessionHistoryEntry>(KEY);
   const byDate = new Map(entries.map((e) => [e.date, e.completed]));
+  const accountStartDate = await getAccountStartDate();
 
   const now = new Date();
   const todayIndex = now.getDay();
@@ -280,10 +326,12 @@ export async function getRecentWeeks(scheduledDays: string[] | null, weekCount =
       d.setDate(monday.getDate() + i);
       const dateStr = localDateStr(d);
       const weekday = WEEKDAY_NAMES[d.getDay()];
-      const isScheduled = scheduledDays?.includes(weekday) ?? false;
+      const isScheduled =
+        (scheduledDays?.includes(weekday) ?? false) && (!accountStartDate || dateStr >= accountStartDate);
       const isFuture = dateStr > todayStr;
       return {
         weekday,
+        date: dateStr,
         completed: isFuture ? null : (byDate.get(dateStr) ?? null),
         isToday: dateStr === todayStr,
         isScheduled,

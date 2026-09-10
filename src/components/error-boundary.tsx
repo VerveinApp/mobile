@@ -1,6 +1,8 @@
 import { Component, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View, useColorScheme } from 'react-native';
 
+import { Type } from '@/constants/theme';
+
 type Props = { children: ReactNode };
 type State = { error: Error | null };
 
@@ -76,12 +78,12 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   title: {
-    fontSize: 18,
+    fontSize: Type.stat,
     fontWeight: '700',
     textAlign: 'center',
   },
   body: {
-    fontSize: 14,
+    fontSize: Type.bodyLarge,
     lineHeight: 20,
     textAlign: 'center',
   },
@@ -93,7 +95,7 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#ffffff',
-    fontSize: 14,
+    fontSize: Type.bodyLarge,
     fontWeight: '600',
   },
 });

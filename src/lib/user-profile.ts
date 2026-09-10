@@ -38,10 +38,33 @@ export type UserProfile = {
   sex?: string;
   heightCm?: string;
   weightKg?: string;
+  /** Same health-consent-gated, optional-at-onboarding-or-later convention
+   * as sex/heightCm/weightKg above — added specifically to make an honest
+   * Mifflin-St Jeor maintenance-calorie estimate possible (calorie-estimate.ts's
+   * estimateMaintenanceCalories), which needs age and can't substitute
+   * anything else for it. Never collected before this; undefined for every
+   * existing profile until filled in, same as any other optional field. */
+  age?: string;
   /** Self-reported, from lib/conditions.ts's fixed list — collected only, per the Chief Architect Audit's C3 finding. Nothing in plan-preview.ts or onboarding-to-engine.ts reads this field; it exists for the user's own record and for a future validation process, not to gate exercise selection today. */
   conditions?: string[];
   /** Self-reported, from lib/movement-restrictions.ts's fixed list — unlike `conditions`, this one IS read (onboarding-to-engine.ts passes it straight through to the engine's real, already-wired movementRestrictions exclusion). `undefined` = never answered; `[]` = explicitly answered "none of these." */
   movementRestrictions?: string[];
+  /** Self-reported from Settings' Goals sheet — never derived. This app
+   * deliberately doesn't model BMR/TDEE or calorie intake (see
+   * calorie-estimate.ts's own doc comment), so there's no honest way to
+   * compute "what your target should be." Asking directly avoids fabricating
+   * a number from data (height/age/intake) this app doesn't have — undefined
+   * = no goal set, same "optional, never assumed" contract as weightKg. */
+  targetWeightKg?: string;
+  /** Self-reported target for one exercise, from Settings' Goals sheet —
+   * compared against exercise-performance.ts's own real logged
+   * estimatedOneRepMax history for that exercise, never a projection or a
+   * fabricated formula result. Replaces an earlier weekly calorie-burn goal
+   * (removed: it mostly just re-measured session completion, dressed up in
+   * kcal, and didn't fit a strength-programming app's own identity). Set
+   * together or not at all — undefined = no goal set. */
+  targetLiftExercise?: string;
+  targetLiftWeightKg?: string;
 };
 
 export async function saveProfile(profile: UserProfile) {
@@ -98,7 +121,17 @@ export function withHealthConsent(consent: 'true' | 'false'): Pick<UserProfile, 
 export async function finishOnboarding(
   answers: Pick<
     UserProfile,
-    'name' | 'goal' | 'experience' | 'environment' | 'duration' | 'commitmentLevel' | 'days' | 'sex' | 'heightCm' | 'weightKg'
+    | 'name'
+    | 'goal'
+    | 'experience'
+    | 'environment'
+    | 'duration'
+    | 'commitmentLevel'
+    | 'days'
+    | 'sex'
+    | 'heightCm'
+    | 'weightKg'
+    | 'age'
   > & { healthConsent?: string },
   email: string
 ) {
@@ -115,6 +148,7 @@ export async function finishOnboarding(
     sex: answers.sex,
     heightCm: answers.heightCm,
     weightKg: answers.weightKg,
+    age: answers.age,
   });
   await markOnboardingComplete();
 }

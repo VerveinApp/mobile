@@ -1,10 +1,14 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
 import type { MinimalDecisionTrace } from '@/lib/engine/training-state';
 import type { PolicyApplicationRecord } from '@/lib/engine/types';
+import { ROLLING_WINDOW_DAYS } from '@/lib/rolling-window';
+import { clearStoredValue, readJsonList, writeJsonValue } from '@/lib/storage/json-storage';
 
 const KEY = 'vervein.decisionTraceLog.v1';
-const MAX_ENTRIES = 30; // matches session-history.ts's rolling window; comfortably above LEDGER_WINDOW_N (14)
+// BUG FIX (found in a later full-app audit): this used to be its own local
+// `30`, matching session-history.ts's by convention/comment only — nothing
+// enforced it. Single-sourced now; see rolling-window.ts's own doc comment.
+// Still comfortably above LEDGER_WINDOW_N (14).
+const MAX_ENTRIES = ROLLING_WINDOW_DAYS;
 
 export type StoredTrace = MinimalDecisionTrace & {
   date: string;
@@ -23,15 +27,6 @@ export type StoredTrace = MinimalDecisionTrace & {
  * session actually finishes (see check-in.tsx's handleFinishSession), not
  * on every plan-preview.ts call.
  */
-async function readAll(): Promise<StoredTrace[]> {
-  try {
-    const raw = await AsyncStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as StoredTrace[]) : [];
-  } catch {
-    return [];
-  }
-}
-
 export async function recordDecisionTrace(
   date: string,
   trace: {
@@ -41,35 +36,31 @@ export async function recordDecisionTrace(
     policyApplications: PolicyApplicationRecord[];
   }
 ) {
-  try {
-    const entries = await readAll();
-    const withoutToday = entries.filter((e) => e.date !== date);
-    const stored: StoredTrace = {
-      date,
-      fallbackFired: trace.fallbackFired,
-      gate1Exclusions: trace.gate1Exclusions,
-      policyApplications: trace.policyApplications,
-      output: {
-        exercises: trace.deliveredExercises.map((e) => ({
-          exerciseId: e.exerciseId,
-          adapted_sets: e.adapted_sets ?? undefined,
-        })),
-      },
-    };
-    // Sorted by date before trimming, not insertion order — every write
-    // today uses localDateStr() so the two currently always agree, but that
-    // was an implicit assumption, not a guarantee (a future backfill/sync
-    // write could violate it silently).
-    const next = [...withoutToday, stored].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-MAX_ENTRIES);
-    await AsyncStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    // Worst case Stimulus Ledger/Debt read a little sparse — never a crash, and the session itself is still recorded via workout-log.ts.
-  }
+  const entries = await readJsonList<StoredTrace>(KEY);
+  const withoutToday = entries.filter((e) => e.date !== date);
+  const stored: StoredTrace = {
+    date,
+    fallbackFired: trace.fallbackFired,
+    gate1Exclusions: trace.gate1Exclusions,
+    policyApplications: trace.policyApplications,
+    output: {
+      exercises: trace.deliveredExercises.map((e) => ({
+        exerciseId: e.exerciseId,
+        adapted_sets: e.adapted_sets ?? undefined,
+      })),
+    },
+  };
+  // Sorted by date before trimming, not insertion order — every write
+  // today uses localDateStr() so the two currently always agree, but that
+  // was an implicit assumption, not a guarantee (a future backfill/sync
+  // write could violate it silently).
+  const next = [...withoutToday, stored].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-MAX_ENTRIES);
+  await writeJsonValue(KEY, next);
 }
 
 /** Every stored trace, oldest first — matches compileTrainingState's expected ordering. */
 export async function getDecisionTraceLog(): Promise<StoredTrace[]> {
-  const entries = await readAll();
+  const entries = await readJsonList<StoredTrace>(KEY);
   return [...entries].sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
@@ -81,21 +72,13 @@ export async function getDecisionTraceLog(): Promise<StoredTrace[]> {
  * actually powers those two cards, so it's worth restoring on its own
  * merits, not just for completeness. */
 export async function restoreDecisionTraceLog(entries: StoredTrace[]): Promise<void> {
-  try {
-    const trimmed = [...entries].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-MAX_ENTRIES);
-    await AsyncStorage.setItem(KEY, JSON.stringify(trimmed));
-  } catch {
-    // Worst case this one field doesn't restore — the rest of the backup still applies independently.
-  }
+  const trimmed = [...entries].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-MAX_ENTRIES);
+  await writeJsonValue(KEY, trimmed);
 }
 
 /** Wipes the whole log — Settings' "Delete My Data"/"Delete Account" flows
  * only. Same disclosed gap as workout-log.ts's clearWorkoutLog: this store
  * postdates handleDeleteData's original clear-list. */
 export async function clearDecisionTraceLog() {
-  try {
-    await AsyncStorage.removeItem(KEY);
-  } catch {
-    // Best-effort — same as never having recorded a trace.
-  }
+  await clearStoredValue(KEY);
 }

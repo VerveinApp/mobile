@@ -1,13 +1,15 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView } from '@/components/ui/app-symbol';
 
+import { Type } from '@/constants/theme';
 import { useHoverFade } from '@/lib/button-interactions';
 import { hapticImpactLight } from '@/lib/haptics';
 import { deleteNote, getNote, saveNote } from '@/lib/notes';
 import { useAppColors } from '@/lib/theme-context';
+import { SkeletonBlock } from '@/components/ui/skeleton';
 
 const AUTOSAVE_DELAY_MS = 600;
 
@@ -30,6 +32,15 @@ export default function NoteEditorScreen() {
   const [text, setText] = useState('');
   const [loaded, setLoaded] = useState(false);
   const textRef = useRef('');
+  // BUG FIX: the cleanup effect below used to check textRef.current alone —
+  // but textRef only gets the real note's text once the mount effect's
+  // async getNote(id) actually resolves. Navigating away before that read
+  // finishes left textRef still '', so the cleanup read that as "left
+  // empty" and deleted the real, already-saved note on disk, even though
+  // the user never saw or touched it. A ref (not the `loaded` state) since
+  // the cleanup closure below only ever sees whatever `loaded` was at
+  // mount — same staleness reason textRef itself exists instead of `text`.
+  const loadedRef = useRef(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -37,6 +48,7 @@ export default function NoteEditorScreen() {
       const existing = id ? await getNote(id) : null;
       setText(existing?.text ?? '');
       textRef.current = existing?.text ?? '';
+      loadedRef.current = true;
       setLoaded(true);
     })();
   }, [id]);
@@ -48,7 +60,7 @@ export default function NoteEditorScreen() {
   useEffect(() => {
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      if (!id) return;
+      if (!id || !loadedRef.current) return;
       const trimmed = textRef.current.trim();
       if (trimmed.length === 0) {
         deleteNote(id);
@@ -76,7 +88,13 @@ export default function NoteEditorScreen() {
   };
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top + 8 }]}>
+    // BUG FIX (found in a later full-app audit): this screen's note input
+    // has no keyboard-avoidance at all — same fix as settings/index.tsx
+    // already has.
+    <KeyboardAvoidingView
+      style={[styles.root, { paddingTop: insets.top + 8 }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <View style={styles.headerRow}>
         <Pressable
           onPress={() => router.back()}
@@ -110,12 +128,28 @@ export default function NoteEditorScreen() {
           placeholder="Note"
           placeholderTextColor={colors.textTertiary}
           multiline
+          // BUG FIX (found in a later full-app audit): unlike every other
+          // free-text field in this app (profile name: 25, referral code:
+          // 6), this had no length limit at all — a very large pasted
+          // block could hit AsyncStorage's own size ceiling on write, which
+          // notes.ts's silent try/catch would swallow with zero indication
+          // the note didn't actually save. Generous (several pages of
+          // text), not restrictive — this is about ruling out a pathological
+          // paste, not limiting a normal note.
+          maxLength={20000}
           autoFocus={text.length === 0}
           textAlignVertical="top"
           maxFontSizeMultiplier={1.3}
         />
-      ) : null}
-    </View>
+      ) : (
+        <View style={styles.skeletonWrap}>
+          <SkeletonBlock width="70%" height={18} borderRadius={4} />
+          <SkeletonBlock width="100%" height={14} borderRadius={4} style={styles.skeletonLine} />
+          <SkeletonBlock width="90%" height={14} borderRadius={4} style={styles.skeletonLine} />
+          <SkeletonBlock width="60%" height={14} borderRadius={4} style={styles.skeletonLine} />
+        </View>
+      )}
+    </KeyboardAvoidingView>
   );
 }
 
@@ -145,9 +179,16 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       paddingTop: 8,
       paddingBottom: 24,
       color: colors.text,
-      fontSize: 15,
+      fontSize: Type.bodyLarge,
       lineHeight: 22,
       fontFamily: 'Geist-Regular',
+    },
+    skeletonWrap: {
+      paddingHorizontal: 20,
+      paddingTop: 8,
+    },
+    skeletonLine: {
+      marginTop: 12,
     },
   });
 }

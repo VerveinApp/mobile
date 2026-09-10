@@ -41,6 +41,17 @@ export async function pushProfileToRemote(profile: UserProfile): Promise<void> {
       weight_kg: profile.weightKg ?? null,
       conditions: profile.conditions ?? null,
       movement_restrictions: profile.movementRestrictions ?? null,
+      // BUG FIX (found in a later full-app audit): these were added to
+      // UserProfile for the Goals feature but never wired into either sync
+      // direction here, so a target weight or lift target set locally
+      // silently never reached a new device or a post-reinstall restore —
+      // see 20260907000000_profile_goals_fields.sql and
+      // 20260909000000_profile_target_lift_fields.sql for the matching
+      // column migrations this needs deployed to actually work.
+      age: profile.age ?? null,
+      target_weight_kg: profile.targetWeightKg ?? null,
+      target_lift_exercise: profile.targetLiftExercise ?? null,
+      target_lift_weight_kg: profile.targetLiftWeightKg ?? null,
       updated_at: new Date().toISOString(),
     });
   } catch {
@@ -83,6 +94,10 @@ export async function pullProfileFromRemote(): Promise<UserProfile | null> {
       weightKg: data.weight_kg ?? undefined,
       conditions: data.conditions ?? undefined,
       movementRestrictions: data.movement_restrictions ?? undefined,
+      age: data.age ?? undefined,
+      targetWeightKg: data.target_weight_kg ?? undefined,
+      targetLiftExercise: data.target_lift_exercise ?? undefined,
+      targetLiftWeightKg: data.target_lift_weight_kg ?? undefined,
     };
   } catch {
     return null;

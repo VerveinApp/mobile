@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { getCoachingInsightNote } from '@/lib/coaching-insights';
+import { getCoachingInsightNote, markCoachingInsightShown } from '@/lib/coaching-insights';
 import { localDateStr } from '@/lib/local-date';
 import type { SessionHistoryEntry } from '@/lib/session-history';
 
@@ -81,10 +81,20 @@ describe('getCoachingInsightNote', () => {
     expect(await getCoachingInsightNote(entriesBroken)).toBeNull();
   });
 
-  it('respects the cooldown — the same pattern does not fire again immediately', async () => {
+  it('respects the cooldown — the same pattern does not fire again immediately once marked shown', async () => {
     const entries = Array.from({ length: 10 }, (_, i) => makeEntry(i, { feedback: 'just_right' }));
     expect(await getCoachingInsightNote(entries)).not.toBeNull();
+    await markCoachingInsightShown();
     expect(await getCoachingInsightNote(entries)).toBeNull();
+  });
+
+  it('is read-only — computing the note alone (no markCoachingInsightShown call) never starts the cooldown', async () => {
+    // The exact bug this split fixed: reopening an already-completed
+    // session used to recompute-and-mark in one step, burning the cooldown
+    // even when nothing was newly shown.
+    const entries = Array.from({ length: 10 }, (_, i) => makeEntry(i, { feedback: 'just_right' }));
+    expect(await getCoachingInsightNote(entries)).not.toBeNull();
+    expect(await getCoachingInsightNote(entries)).not.toBeNull();
   });
 
   it('surfaces the underselling-energy note when that pattern is real', async () => {

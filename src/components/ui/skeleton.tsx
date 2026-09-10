@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { StyleSheet, View, type DimensionValue } from 'react-native';
 import ReanimatedAnimated, {
-  Easing,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
@@ -10,6 +9,7 @@ import ReanimatedAnimated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { MOTION_DURATION, MOTION_EASING } from '@/lib/motion';
 import { useAppColors } from '@/lib/theme-context';
 
 type SkeletonBlockProps = {
@@ -35,8 +35,8 @@ export function SkeletonBlock({ width = '100%', height = 14, borderRadius = 6, s
     if (reducedMotion) return;
     pulse.value = withRepeat(
       withSequence(
-        withTiming(0.85, { duration: 700, easing: Easing.inOut(Easing.quad) }),
-        withTiming(0.4, { duration: 700, easing: Easing.inOut(Easing.quad) })
+        withTiming(0.85, { duration: MOTION_DURATION.pulse, easing: MOTION_EASING.pulse }),
+        withTiming(0.4, { duration: MOTION_DURATION.pulse, easing: MOTION_EASING.pulse })
       ),
       -1,
       false
