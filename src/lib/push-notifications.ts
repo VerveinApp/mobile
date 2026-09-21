@@ -6,11 +6,10 @@ import { getModule } from '@/lib/session-reminders';
  * Remote push token registration — the client half of remote push. This
  * only gets a real Expo push token and stores it in `push_tokens` (see
  * supabase/migrations/20260916000000_push_tokens.sql); it does not send
- * anything by itself. Actually sending a remote push still needs its own
- * trigger (a scheduled Edge Function, a database webhook off some real
- * event) reading tokens from that table and POSTing to Expo's push API —
- * that doesn't exist yet, deliberately: there's no defined send-worthy
- * event yet to build a sender around.
+ * anything by itself. Two real senders read from that table and POST to
+ * Expo's push API: supabase/functions/redeem-referral (on a referral
+ * redemption) and supabase/functions/send-reengagement-pushes (a daily
+ * cron, cooldown-limited per user — see notification_state.sql).
  *
  * Reuses session-reminders.ts's own `getModule()` rather than a fresh
  * lazy-require of expo-notifications — see that function's own comment for
