@@ -86,14 +86,14 @@ const BENEFITS: { icon: Parameters<typeof SymbolView>[0]['name']; title: string;
     // new capability being sold.
     subtitle: "Your logs older than a week are still there — Plus is what lets you see them again.",
   },
-  // BUG FIX (found in a later full-app audit): "The Log quick-access hub"
-  // used to be listed here as a Plus benefit — no longer true. log.tsx's
-  // hub itself was blanket-hiding most of its rows for free accounts
-  // (a bug, not a real gate — see that file's own fix), which is what this
-  // entry was actually describing. Every row there is unconditional now;
-  // each destination screen enforces its own real access level instead.
-  // Not replaced with a different entry — padding the list back to 7 with
-  // something else would be the same kind of overclaim this just removed.
+  {
+    icon: 'clock.arrow.circlepath',
+    title: 'Log',
+    // log.tsx's own POLICY CHANGE comment: the whole backfill hub (past
+    // session, weigh-in, etc.) is gated behind Plus as a single unit again,
+    // not just deeper history — this entry was missing that reversal.
+    subtitle: 'Backfill a session you forgot to log, or record a weigh-in for a day that already happened.',
+  },
 ];
 
 /**
