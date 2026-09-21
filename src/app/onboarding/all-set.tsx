@@ -9,7 +9,7 @@ import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticImpactLight } from '@/lib/haptics';
 import { MOTION_DURATION, ONBOARDING_REVEAL_DELAY_MS, ONBOARDING_REVEAL_STAGGER_MS } from '@/lib/motion';
 import { useFadeInEntering } from '@/lib/screen-transitions';
-import { Type } from '@/constants/theme';
+import { AndroidRippleOnAccent, Type } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 import {
   ArrowUpIconGraphic,
@@ -82,6 +82,7 @@ export default function OnboardingAllSetScreen() {
           onHoverOut={ctaHover.onHoverOut}
           onPressIn={ctaPress.onPressIn}
           onPressOut={ctaPress.onPressOut}
+          android_ripple={AndroidRippleOnAccent}
         >
           <Animated.View style={[styles.primaryButtonVisual, { transform: [{ scale: ctaPress.scale }] }]}>
             <Animated.View

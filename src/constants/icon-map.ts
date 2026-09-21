@@ -33,6 +33,7 @@ export const ANDROID_ICON_MAP: Partial<Record<SFSymbol, AndroidSymbol>> = {
   calendar: 'calendar_month',
   'calendar.badge.plus': 'calendar_add_on',
   camera: 'photo_camera',
+  'creditcard.fill': 'credit_card',
   'chart.bar.fill': 'bar_chart',
   'chart.bar.xaxis': 'bar_chart',
   'chart.line.uptrend.xyaxis': 'trending_up',

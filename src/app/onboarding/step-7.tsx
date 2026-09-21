@@ -10,7 +10,7 @@ import { hapticImpactLight } from '@/lib/haptics';
 import { MOTION_DURATION } from '@/lib/motion';
 import { goBack } from '@/lib/onboarding-nav';
 import { useFadeInEntering } from '@/lib/screen-transitions';
-import { Type } from '@/constants/theme';
+import { AndroidRippleOnAccent, Type } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 import {
   LogoMarkAccentGraphic,
@@ -171,6 +171,7 @@ export default function OnboardingCommitmentScreen() {
           onHoverOut={continueHover.onHoverOut}
           onPressIn={continuePress.onPressIn}
           onPressOut={continuePress.onPressOut}
+          android_ripple={AndroidRippleOnAccent}
         >
           <Animated.View
             style={[
@@ -246,6 +247,15 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       left: 33.83,
       top: 0,
     },
+    // CONFIRMED INTENTIONAL (checked in a later full-app audit, previously
+    // flagged and left unresolved): steps 2-6 all match exactly on title
+    // size/weight (Type.headerTitle, Geist-SemiBold, no letterSpacing).
+    // This step diverges on three properties at once — larger (Type.heading),
+    // bolder (Geist-Bold), and tighter tracking (letterSpacing: -0.4) — which
+    // is what deliberate emphasis looks like, not drift (drift is usually
+    // one stray value, not three coordinated ones). This is the final
+    // onboarding step, right before "Build my plan" — the extra weight here
+    // is the climactic-moment treatment, not an inconsistency to fix.
     title: {
       position: 'absolute',
       left: 0,

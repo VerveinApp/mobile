@@ -6,16 +6,26 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "channel": "development"
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "channel": "preview"
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "channel": "production"
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "ascAppId": "6804788807",
+        "ascApiKeyPath": "/Users/fuzaylmuhammad/Downloads/AuthKey_3YTKY6XQN4.p8",
+        "ascApiKeyIssuerId": "9ddf089d-b348-4e78-bfba-5b8f1bde608e",
+        "ascApiKeyId": "3YTKY6XQN4"
+      }
+    }
   }
 }

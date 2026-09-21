@@ -151,5 +151,31 @@ export const Type = {
 // only to a value standing alone as the thing being read.
 export const TabularNums: Pick<TextStyle, 'fontVariant'> = { fontVariant: ['tabular-nums'] };
 
+// Android's own native ripple feedback (Pressable's `android_ripple` prop) —
+// a no-op object on iOS, since iOS's Pressable implementation never reads
+// this prop at all. Tinted with the brand green rather than left as
+// Android's own default gray, so the one interaction cue every single
+// tappable surface produces still reads as VerveIn's own, not a generic
+// Material app's. `borderless: false` (the default) lets the ripple clip to
+// whatever border-radius the pressable's own container already has.
+export const AndroidRipple = { color: 'rgba(95,190,132,0.24)' };
+
+// Same brand-green logic as AndroidRipple, one level darker/more opaque —
+// for a ripple over a surface that's already tinted green itself (a primary
+// CTA), where the lighter default ripple reads as barely-there.
+export const AndroidRippleOnAccent = { color: 'rgba(255,255,255,0.2)' };
+
+// Android-only elevation (the `elevation` style prop) replacing this app's
+// iOS-native hairline-border card convention — RN's `elevation` has no
+// effect on iOS at all (iOS reads shadowColor/shadowOffset/shadowOpacity/
+// shadowRadius instead, untouched here), so spreading this into a card
+// style is safe by construction, not something that needs its own
+// Platform.OS guard. Low values on purpose (Material's own scale goes to
+// 24dp for dialogs) — this app's existing look is quiet and flat, and a
+// heavy drop shadow would read as a generic Material template rather than
+// this app's own restrained aesthetic.
+export const AndroidCardElevation = { elevation: 3 };
+export const AndroidRaisedElevation = { elevation: 6 };
+
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;

@@ -13,7 +13,7 @@ import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
 import { goBack } from '@/lib/onboarding-nav';
 import { useFadeInEntering } from '@/lib/screen-transitions';
-import { Type } from '@/constants/theme';
+import { AndroidRippleOnAccent, Type } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 import {
   ArrowUpIconGraphic,
@@ -146,6 +146,7 @@ export default function OnboardingFirstLookScreen() {
           onHoverOut={ctaHover.onHoverOut}
           onPressIn={ctaPress.onPressIn}
           onPressOut={ctaPress.onPressOut}
+          android_ripple={AndroidRippleOnAccent}
         >
           <Animated.View style={[styles.primaryButtonVisual, { transform: [{ scale: ctaPress.scale }] }]}>
             <Animated.View

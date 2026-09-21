@@ -123,17 +123,41 @@ export async function getCurrentOffering(): Promise<PurchasesOffering | null> {
  *
  * ⚠️ TEMPORARY: checks dev-premium-override.ts's local, client-side-only
  * override FIRST — see that file's own header comment for what this is and
- * why it must be removed before the real App Store submission. Never
- * touches RevenueCat itself, so it can't fake or grant a real purchase.
+ * why it must be removed before the real App Store submission. Gated behind
+ * __DEV__ so a release bundle (including any TestFlight/App Store build,
+ * which is never __DEV__) can never read or honor it regardless of what's
+ * sitting in AsyncStorage — same belt-and-suspenders posture as the
+ * Developer section in settings/index.tsx that's the only real way to set
+ * this override in the first place. Never touches RevenueCat itself, so it
+ * can't fake or grant a real purchase.
  */
 export async function hasPremiumEntitlement(): Promise<boolean> {
-  if (await getDevPremiumOverride()) return true;
+  if (__DEV__ && (await getDevPremiumOverride())) return true;
   if (!configured) return false;
   try {
     const info = await Purchases.getCustomerInfo();
     return info.entitlements.active[PREMIUM_ENTITLEMENT_ID]?.isActive === true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * The store's own subscription-management page (App Store or Play Store,
+ * whichever the active subscription is actually on) — RevenueCat's
+ * `CustomerInfo.managementURL` already resolves to the right one, so this
+ * doesn't need its own platform branch. Null whenever there's nothing real
+ * to manage: not configured, the dev-premium-override is what's granting
+ * access (there's no real subscription behind it to open), or RevenueCat
+ * itself reports no management URL (e.g. no active subscription).
+ */
+export async function getSubscriptionManagementUrl(): Promise<string | null> {
+  if (!configured) return null;
+  try {
+    const info = await Purchases.getCustomerInfo();
+    return info.managementURL;
+  } catch {
+    return null;
   }
 }
 

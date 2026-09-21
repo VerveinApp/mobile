@@ -1,4 +1,5 @@
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
+import * as Sentry from '@sentry/react-native';
 import { useFonts } from 'expo-font';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -11,13 +12,19 @@ import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { OfflineBanner } from '@/components/offline-banner';
 import { AppLockGate } from '@/components/security/app-lock-gate';
+import { initErrorMonitoring } from '@/lib/error-monitoring';
 import { initPurchases } from '@/lib/purchases';
+import { registerForRemotePushNotifications } from '@/lib/push-notifications';
 import { refreshSessionReminders } from '@/lib/session-reminders';
 import { AppThemeProvider, useAppTheme } from '@/lib/theme-context';
 
 SplashScreen.preventAutoHideAsync();
+// Module scope, not inside a useEffect — this needs to be active before
+// React's very first render pass, not after it, so a crash during that
+// first render is still caught rather than happening before Sentry exists.
+initErrorMonitoring();
 
-export default function RootLayout() {
+function RootLayout() {
   // Geist app-wide (every text style, not just buttons) — the logo is a
   // vector graphic, not a font glyph, so it's unaffected. Gating on this
   // keeps the native splash up (already held by preventAutoHideAsync above)
@@ -38,6 +45,17 @@ export default function RootLayout() {
   // the API key or platform isn't right, per its own doc comment.
   useEffect(() => {
     initPurchases();
+  }, []);
+
+  // Re-registers on every cold launch, not just once ever — an Expo push
+  // token can legitimately change (reinstall, OS-level reset), and Expo's
+  // own guidance is to treat registration as idempotent and safe to repeat
+  // rather than a one-time setup step. No-ops entirely for a signed-out
+  // user or one who hasn't granted the permission yet — see
+  // push-notifications.ts's own doc comment for the full list of safe
+  // no-op cases.
+  useEffect(() => {
+    registerForRemotePushNotifications();
   }, []);
 
   // Smart-reminder foreground refresh (Vervein addition — see session-
@@ -142,3 +160,9 @@ function RootNavigator() {
     </ThemeProvider>
   );
 }
+
+// Sentry.wrap (not a plain export) — enables the SDK's native crash capture
+// and automatic navigation/performance tracing, which a bare Sentry.init()
+// call above doesn't turn on by itself. No-ops cleanly if EXPO_PUBLIC_
+// SENTRY_DSN is unset, same as initErrorMonitoring itself.
+export default Sentry.wrap(RootLayout);

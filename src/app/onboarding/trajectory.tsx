@@ -14,7 +14,7 @@ import { MOTION_DURATION, ONBOARDING_REVEAL_DELAY_MS, ONBOARDING_REVEAL_STAGGER_
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
 import { useFadeInEntering } from '@/lib/screen-transitions';
-import { Type } from '@/constants/theme';
+import { AndroidRippleOnAccent, Type } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
 import {
@@ -67,6 +67,12 @@ export default function OnboardingTrajectoryScreen() {
 
   const handleContinue = () => {
     hapticImpactLight();
+    // dismissAll() first — this is the true end of the whole onboarding
+    // chain (welcome → ... → trajectory), all still one flat root Stack, so
+    // replace() alone would leave every prior step reachable with repeated
+    // edge-swipe-backs. Same fix as auth/verify.tsx's and create-account.tsx's
+    // matching (tabs) landings.
+    router.dismissAll();
     router.replace('/(tabs)' as never);
   };
 
@@ -132,6 +138,7 @@ export default function OnboardingTrajectoryScreen() {
           onHoverOut={ctaHover.onHoverOut}
           onPressIn={ctaPress.onPressIn}
           onPressOut={ctaPress.onPressOut}
+          android_ripple={AndroidRippleOnAccent}
         >
           <Animated.View
             style={[

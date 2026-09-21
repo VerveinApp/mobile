@@ -2,7 +2,7 @@ import type { BottomSheetModal } from '@gorhom/bottom-sheet';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import ReanimatedAnimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
@@ -11,7 +11,7 @@ import type { SFSymbol } from 'sf-symbols-typescript';
 import appConfig from '../../../app.json';
 import { deleteAccount } from '@/lib/account';
 import { isAppLockEnabled, setAppLockEnabled } from '@/lib/app-lock';
-import { Type } from '@/constants/theme';
+import { AndroidCardElevation, AndroidRipple, Type } from '@/constants/theme';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { buildBackupPayload, clearAllLocalData, parseBackupPayload, restoreBackupPayload, type BackupPayload } from '@/lib/data-backup';
 import {
@@ -22,7 +22,12 @@ import {
   setDevPremiumUnlocked,
 } from '@/lib/dev-premium-override';
 import { seedFakeSessionHistory, seedFakeStrengthProgress } from '@/lib/dev-seed';
-import { getBillingMode, resetPurchaserIdentityForTesting, usePremiumEntitlement } from '@/lib/purchases';
+import {
+  getBillingMode,
+  getSubscriptionManagementUrl,
+  resetPurchaserIdentityForTesting,
+  usePremiumEntitlement,
+} from '@/lib/purchases';
 import { hapticError, hapticImpactLight, hapticSuccess, hapticWarning, isHapticsEnabled, setHapticsEnabled } from '@/lib/haptics';
 import {
   disconnectHealthKit,
@@ -31,6 +36,7 @@ import {
   isHealthKitAvailable,
   requestHealthKitAccess,
 } from '@/lib/health-kit';
+import { CONTACT_EMAIL } from '@/lib/legal/terms-content';
 import { localDateStr } from '@/lib/local-date';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import {
@@ -49,6 +55,7 @@ import { AdjustPlanSheet } from '@/components/settings/adjust-plan-sheet';
 import { BiometricsSheet } from '@/components/settings/biometrics-sheet';
 import { ConditionsSheet } from '@/components/settings/conditions-sheet';
 import { GoalsSheet } from '@/components/settings/goals-sheet';
+import { PremiumGate } from '@/components/premium-gate';
 import { MovementRestrictionsSheet } from '@/components/settings/movement-restrictions-sheet';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 
@@ -81,13 +88,12 @@ const APPEARANCE_OPTIONS: { id: ThemePreference; label: string }[] = [
  * a device with no local profile instead of forcing onboarding again. What
  * remains genuinely local-only: session history, workout logs, and
  * calibration — none of that syncs to the account anywhere yet, so a new
- * device gets a real profile back but starts that history fresh. Delete Account (see
- * account.ts) is real client code calling a real, written Edge Function
- * (supabase/functions/delete-account) — but that function may not be
- * deployed to this project yet, since deploying requires the developer's
- * own Supabase CLI login. If it isn't, deleteAccount() reports that
- * honestly (an inline error in the confirm modal, distinguishable from a
- * generic failure) rather than pretending the account was deleted.
+ * device gets a real profile back but starts that history fresh. Delete
+ * Account (see account.ts) is real client code calling a real Edge Function
+ * (supabase/functions/delete-account), deployed 2026-09-13 and verified live.
+ * deleteAccount() still distinguishes a "not deployed" failure from a
+ * generic one in its result type, as a defensive fallback rather than dead
+ * code — see that function's own comment.
  */
 /** Settings' own "Last synced" line — see getLastRestingHeartRateSyncDate's
  * doc comment for why this exists here specifically. UTC-midnight date-diff,
@@ -236,8 +242,12 @@ export default function SettingsScreen() {
           data: { session },
         } = await supabase.auth.getSession();
         setAccountEmail(session?.user?.email ?? null);
-        setDevUnlocked(await isDevPremiumUnlocked());
-        setDevOverrideOn(await getDevPremiumOverride());
+        // __DEV__-gated same as the Section below — a release bundle should
+        // never even read these, not just fail to render them.
+        if (__DEV__) {
+          setDevUnlocked(await isDevPremiumUnlocked());
+          setDevOverrideOn(await getDevPremiumOverride());
+        }
         setLoaded(true);
       })();
     }, [])
@@ -255,6 +265,7 @@ export default function SettingsScreen() {
   const weightHistoryHover = useHoverFade();
   const goalsHover = useHoverFade();
   const referralHover = useHoverFade();
+  const manageSubscriptionHover = useHoverFade();
   const adjustPlanHover = useHoverFade();
   const conditionsHover = useHoverFade();
   const movementRestrictionsHover = useHoverFade();
@@ -386,7 +397,24 @@ export default function SettingsScreen() {
     hapticImpactLight();
     await supabase.auth.signOut();
     setAccountEmail(null);
+    // dismissAll() first, not just replace() — this whole app lives in one
+    // flat root Stack (see app/_layout.tsx's own comment), so replace() on
+    // its own only swaps the current screen and leaves everything pushed
+    // before it (including (tabs), fully alive with local data that
+    // sign-out never touches) reachable with a single edge-swipe-back.
+    router.dismissAll();
     router.replace('/onboarding/create-account' as never);
+  };
+
+  // Opens the App Store's/Play Store's own subscription-management page —
+  // same silent-no-op-on-failure convention as this app's other
+  // non-critical external calls (see health-kit.ts) rather than an error
+  // alert over what's ultimately just a navigation shortcut; the user can
+  // always reach the same place through the OS Settings app directly.
+  const handleManageSubscription = async () => {
+    hapticImpactLight();
+    const url = await getSubscriptionManagementUrl();
+    if (url) Linking.openURL(url);
   };
 
   const handleOpenEditName = () => {
@@ -487,7 +515,26 @@ export default function SettingsScreen() {
     hapticWarning();
     await clearAllLocalData();
     setDeletingData(false);
-    router.replace('/onboarding/welcome' as never);
+    router.dismissAll();
+    // BUG FIX: this used to always land on Welcome, which — since Delete My
+    // Data never signs out or touches the real account (that's Delete
+    // Account's own, separate confirm flow) — made it look like the account
+    // itself was gone. A first attempt at fixing that pulled the synced
+    // profile back down and dropped straight into (tabs), but that silently
+    // undid the deletion for anyone with a synced profile — the opposite
+    // problem, and a direct contradiction of this feature's own "permanently
+    // clears... can't be undone" promise in the confirm modal above. Neither
+    // extreme is right: still signed in (accountEmail) means no re-verification
+    // is needed, so this carries the email forward as the exact same
+    // verifiedEmail route param auth/verify.tsx's own "no local profile,
+    // nothing to restore" branch already uses — into the real questionnaire
+    // to genuinely rebuild a profile, not Welcome's "create an account" framing
+    // and not a silent restore.
+    if (accountEmail) {
+      router.replace({ pathname: '/onboarding', params: { verifiedEmail: accountEmail } } as never);
+    } else {
+      router.replace('/onboarding/welcome' as never);
+    }
   };
 
   const handleOpenDeleteAccount = () => {
@@ -522,6 +569,9 @@ export default function SettingsScreen() {
     setShowDeleteAccountModal(false);
     setDeletingAccount(false);
     hapticWarning();
+    // Same dismissAll()-then-replace() fix as handleSignOut above, for the
+    // same reason — otherwise (tabs) is still one edge-swipe-back away.
+    router.dismissAll();
     router.replace('/onboarding/welcome' as never);
   };
 
@@ -638,8 +688,12 @@ export default function SettingsScreen() {
               colors={colors}
               icon="scalemass"
               label="Weight History"
-              onPress={() => router.push('/settings/weight-history' as never)}
+              // Same Plus gate as the DATA section and log.tsx's Log hub
+              // (its own matching "Weight" row) — this row is the third,
+              // otherwise-free door to the same feature those two now lock.
+              onPress={() => (isPremium ? router.push('/settings/weight-history' as never) : router.push('/paywall' as never))}
               hover={weightHistoryHover}
+              locked={!isPremium}
             />
             <NavRow
               styles={styles}
@@ -729,16 +783,17 @@ export default function SettingsScreen() {
           </View>
         </Section>
 
-        {/* Units and Apple Health moved out (TRAINING and APP respectively)
-            — with every row here Plus-only and hidden outright for a free
-            account, this whole section used to survive as a two-item stub
-            still labeled DATA even though neither remaining row was really
-            "data." Now it only ever renders for Plus, over real content,
-            never sparse or mislabeled. isPremium === null (entitlement
-            still resolving) also hides it, the same safe default
-            PremiumGate itself uses elsewhere. */}
-        {isPremium ? (
+        {/* POLICY CHANGE (explicit product decision, not a bug fix): this
+            whole section is now gated behind VerveIn Plus as a single unit,
+            same PremiumGate teaser as every other Plus-only section in this
+            app — never hides that it exists, just swaps the row list for a
+            locked card that routes to the paywall. This deliberately
+            overrides the per-row nuance this section used to have (see
+            log.tsx's own matching change, made at the same time, for the
+            full history of why that nuance existed and was intentionally
+            given up here). */}
         <Section styles={styles} title="DATA">
+          <PremiumGate isPremium={isPremium} label="Data">
           <View style={styles.card}>
             <NavRow
               styles={styles}
@@ -790,11 +845,21 @@ export default function SettingsScreen() {
               last
             />
           </View>
+          </PremiumGate>
         </Section>
-        ) : null}
 
         <Section styles={styles} title="VERVEIN PLUS">
           <View style={styles.card}>
+            {isPremium ? (
+              <NavRow
+                styles={styles}
+                colors={colors}
+                icon="creditcard.fill"
+                label="Manage Subscription"
+                onPress={handleManageSubscription}
+                hover={manageSubscriptionHover}
+              />
+            ) : null}
             <NavRow
               styles={styles}
               colors={colors}
@@ -1170,108 +1235,120 @@ export default function SettingsScreen() {
               <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>Privacy Policy</Text>
               <SymbolView name="chevron.right" size={12} tintColor={colors.iconFaint} />
             </Pressable>
-            <ComingSoonRow styles={styles} colors={colors} icon="questionmark.circle" label="Help & Feedback" subtitle="No support channel yet" last />
+            <Pressable
+              style={styles.aboutRow}
+              onPress={() => {
+                hapticImpactLight();
+                Linking.openURL(`mailto:${CONTACT_EMAIL}`);
+              }}
+            >
+              <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>Help & Feedback</Text>
+              <Text style={styles.comingSoonSubtitle} maxFontSizeMultiplier={1.2}>{CONTACT_EMAIL}</Text>
+            </Pressable>
           </View>
         </Section>
 
         <Text style={styles.footer} maxFontSizeMultiplier={1.3}>VerveIn v{appConfig.expo?.version ?? '1.0.0'}</Text>
 
-        {/* ⚠️ TEMPORARY — remove this whole Section before the real App
-            Store submission, same reminder as the privacy policy check (see
+        {/* ⚠️ TEMPORARY — this whole Section is __DEV__-gated so it can never
+            render in a release bundle (TestFlight or App Store — neither is
+            ever __DEV__), same reminder as the privacy policy check (see
             dev-premium-override.ts's own header comment). Deliberately kept
             all the way at the bottom, past everything a real user would
             ever need to scroll through. */}
-        <Section styles={styles} title="DEVELOPER">
-          <View style={styles.card}>
-            {devUnlocked ? (
-              <>
-                <View style={[styles.aboutRow, styles.rowDivider]}>
-                  <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>VerveIn Plus (Dev Override)</Text>
-                  <Switch value={devOverrideOn} onValueChange={handleToggleDevOverride} />
-                </View>
-                <View style={[styles.aboutRow, styles.rowDivider]}>
-                  <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>RevenueCat Billing</Text>
-                  <Text style={styles.devValueText} maxFontSizeMultiplier={1.2}>
-                    {{ 'test-store': 'Test Store', production: 'Production', unconfigured: 'Unconfigured' }[getBillingMode()]}
-                  </Text>
-                </View>
-                <Pressable
-                  style={[styles.aboutRow, styles.rowDivider]}
-                  disabled={seedingHistory}
-                  onPress={handleSeedFakeHistory}
-                >
-                  <View>
-                    <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>Seed Fake Session History</Text>
-                    {seedResult === 'no-schedule' ? (
-                      <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>No training days set — finish onboarding first.</Text>
-                    ) : null}
+        {__DEV__ ? (
+          <Section styles={styles} title="DEVELOPER">
+            <View style={styles.card}>
+              {devUnlocked ? (
+                <>
+                  <View style={[styles.aboutRow, styles.rowDivider]}>
+                    <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>VerveIn Plus (Dev Override)</Text>
+                    <Switch value={devOverrideOn} onValueChange={handleToggleDevOverride} />
                   </View>
-                  {seedingHistory ? (
-                    <ActivityIndicator size="small" color={colors.iconFaint} />
-                  ) : seedResult === 'seeded' ? (
-                    <SymbolView name="checkmark" size={14} tintColor="#5FBE84" />
-                  ) : (
-                    <SymbolView name="arrow.clockwise" size={14} tintColor={colors.iconFaint} />
-                  )}
-                </Pressable>
-                <Pressable
-                  style={[styles.aboutRow, styles.rowDivider]}
-                  disabled={seedingStrength}
-                  onPress={handleSeedFakeStrength}
-                >
-                  <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>Seed Fake Strength Progress</Text>
-                  {seedingStrength ? (
-                    <ActivityIndicator size="small" color={colors.iconFaint} />
-                  ) : strengthSeeded ? (
-                    <SymbolView name="checkmark" size={14} tintColor="#5FBE84" />
-                  ) : (
-                    <SymbolView name="arrow.clockwise" size={14} tintColor={colors.iconFaint} />
-                  )}
-                </Pressable>
-                <Pressable
-                  style={styles.aboutRow}
-                  disabled={resettingSub}
-                  onPress={handleResetSubscription}
-                >
-                  <View>
-                    <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>Reset VerveIn Plus Sub</Text>
-                    {subResetResult === 'already-anonymous' ? (
-                      <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>Already on a fresh identity.</Text>
-                    ) : subResetResult === 'not-configured' ? (
-                      <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>RevenueCat isn&apos;t configured.</Text>
-                    ) : subResetResult === 'error' ? (
-                      <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>Couldn&apos;t reset — try again.</Text>
+                  <View style={[styles.aboutRow, styles.rowDivider]}>
+                    <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>RevenueCat Billing</Text>
+                    <Text style={styles.devValueText} maxFontSizeMultiplier={1.2}>
+                      {{ 'test-store': 'Test Store', production: 'Production', unconfigured: 'Unconfigured' }[getBillingMode()]}
+                    </Text>
+                  </View>
+                  <Pressable
+                    style={[styles.aboutRow, styles.rowDivider]}
+                    disabled={seedingHistory}
+                    onPress={handleSeedFakeHistory}
+                  >
+                    <View>
+                      <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>Seed Fake Session History</Text>
+                      {seedResult === 'no-schedule' ? (
+                        <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>No training days set — finish onboarding first.</Text>
+                      ) : null}
+                    </View>
+                    {seedingHistory ? (
+                      <ActivityIndicator size="small" color={colors.iconFaint} />
+                    ) : seedResult === 'seeded' ? (
+                      <SymbolView name="checkmark" size={14} tintColor="#5FBE84" />
+                    ) : (
+                      <SymbolView name="arrow.clockwise" size={14} tintColor={colors.iconFaint} />
+                    )}
+                  </Pressable>
+                  <Pressable
+                    style={[styles.aboutRow, styles.rowDivider]}
+                    disabled={seedingStrength}
+                    onPress={handleSeedFakeStrength}
+                  >
+                    <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>Seed Fake Strength Progress</Text>
+                    {seedingStrength ? (
+                      <ActivityIndicator size="small" color={colors.iconFaint} />
+                    ) : strengthSeeded ? (
+                      <SymbolView name="checkmark" size={14} tintColor="#5FBE84" />
+                    ) : (
+                      <SymbolView name="arrow.clockwise" size={14} tintColor={colors.iconFaint} />
+                    )}
+                  </Pressable>
+                  <Pressable
+                    style={styles.aboutRow}
+                    disabled={resettingSub}
+                    onPress={handleResetSubscription}
+                  >
+                    <View>
+                      <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>Reset VerveIn Plus Sub</Text>
+                      {subResetResult === 'already-anonymous' ? (
+                        <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>Already on a fresh identity.</Text>
+                      ) : subResetResult === 'not-configured' ? (
+                        <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>RevenueCat isn&apos;t configured.</Text>
+                      ) : subResetResult === 'error' ? (
+                        <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>Couldn&apos;t reset — try again.</Text>
+                      ) : subResetResult === 'reset' ? (
+                        <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>
+                          Fresh identity for this session — restarting the app re-syncs your real account.
+                        </Text>
+                      ) : null}
+                    </View>
+                    {resettingSub ? (
+                      <ActivityIndicator size="small" color={colors.iconFaint} />
                     ) : subResetResult === 'reset' ? (
-                      <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>
-                        Fresh identity for this session — restarting the app re-syncs your real account.
-                      </Text>
-                    ) : null}
-                  </View>
-                  {resettingSub ? (
-                    <ActivityIndicator size="small" color={colors.iconFaint} />
-                  ) : subResetResult === 'reset' ? (
-                    <SymbolView name="checkmark" size={14} tintColor="#5FBE84" />
-                  ) : (
-                    <SymbolView name="arrow.clockwise" size={14} tintColor={colors.iconFaint} />
-                  )}
-                </Pressable>
-              </>
-            ) : (
-              <View style={styles.aboutRow}>
-                <TextInput
-                  style={styles.devKeyInput}
-                  value={devKeyInput}
-                  onChangeText={handleDevKeyChange}
-                  placeholder="Unlock key"
-                  placeholderTextColor={colors.textTertiary}
-                  secureTextEntry
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-              </View>
-            )}
-          </View>
-        </Section>
+                      <SymbolView name="checkmark" size={14} tintColor="#5FBE84" />
+                    ) : (
+                      <SymbolView name="arrow.clockwise" size={14} tintColor={colors.iconFaint} />
+                    )}
+                  </Pressable>
+                </>
+              ) : (
+                <View style={styles.aboutRow}>
+                  <TextInput
+                    style={styles.devKeyInput}
+                    value={devKeyInput}
+                    onChangeText={handleDevKeyChange}
+                    placeholder="Unlock key"
+                    placeholderTextColor={colors.textTertiary}
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
+              )}
+            </View>
+          </Section>
+        ) : null}
       </ScrollView>
       </ReanimatedAnimated.View>
       )}
@@ -1331,6 +1408,7 @@ function NavRow({
       }}
       onHoverIn={hover.onHoverIn}
       onHoverOut={hover.onHoverOut}
+      android_ripple={AndroidRipple}
       accessibilityRole="button"
       accessibilityLabel={
         locked
@@ -1484,11 +1562,17 @@ function createStyles(colors: Record<string, string>) {
       fontFamily: 'Geist-SemiBold',
     },
     card: {
-      borderRadius: 16,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
+      // Android gets a soft raised surface (tonal elevation, no border) in
+      // place of iOS's flat hairline-bordered card — Material's own depth
+      // cue instead of a borrowed iOS convention. `elevation` needs an
+      // opaque backgroundColor to actually render a shadow, already true
+      // here on both platforms.
+      borderRadius: Platform.OS === 'android' ? 20 : 16,
       backgroundColor: colors.surface,
       paddingHorizontal: 16,
+      ...(Platform.OS === 'android'
+        ? AndroidCardElevation
+        : { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.surfaceBorder }),
     },
     rowDivider: {
       borderBottomWidth: StyleSheet.hairlineWidth,

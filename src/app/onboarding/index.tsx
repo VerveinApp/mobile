@@ -19,7 +19,7 @@ import { hapticError, hapticImpactLight } from '@/lib/haptics';
 import { MOTION_DURATION } from '@/lib/motion';
 import { goBack } from '@/lib/onboarding-nav';
 import { useFadeInEntering } from '@/lib/screen-transitions';
-import { Type } from '@/constants/theme';
+import { AndroidRippleOnAccent, Type } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 import {
   ArrowUpIconGraphic,
@@ -154,6 +154,7 @@ export default function OnboardingNameScreen() {
           onHoverOut={continueHover.onHoverOut}
           onPressIn={continuePress.onPressIn}
           onPressOut={continuePress.onPressOut}
+          android_ripple={AndroidRippleOnAccent}
         >
           <Animated.View
             style={[

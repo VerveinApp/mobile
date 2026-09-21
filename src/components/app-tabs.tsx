@@ -14,7 +14,17 @@ export default function AppTabs() {
   return (
     <NativeTabs
       backgroundColor={colors.background}
-      indicatorColor={colors.backgroundElement}
+      // indicatorColor/rippleColor/tintColor are Android-only concepts (the
+      // Material "active pill" behind a selected icon, and native ripple
+      // feedback) — expo-router's iOS appearance builder never reads any of
+      // these three fields, so setting them here cannot change anything
+      // about the current iOS tab bar. Left as Android's own dynamic
+      // Material color by default otherwise, which reads as generic —
+      // tinting both toward the brand green is the single most-visible
+      // touch available, since this bar is on every screen.
+      indicatorColor="rgba(95,190,132,0.18)"
+      rippleColor="rgba(95,190,132,0.28)"
+      tintColor="#5FBE84"
       labelStyle={{ selected: { color: colors.text } }}>
       <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Label>Summary</NativeTabs.Trigger.Label>

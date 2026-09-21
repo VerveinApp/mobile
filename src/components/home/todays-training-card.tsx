@@ -1,8 +1,8 @@
 import { router } from 'expo-router';
 import { useMemo } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { Type } from '@/constants/theme';
+import { AndroidRaisedElevation, AndroidRipple, Type } from '@/constants/theme';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticImpactLight } from '@/lib/haptics';
 import { useAppColors } from '@/lib/theme-context';
@@ -54,7 +54,12 @@ export function TodaysTrainingCard({
         <Text style={styles.cardKicker} maxFontSizeMultiplier={1.2}>TODAY</Text>
         <Text style={styles.cardTitle} maxFontSizeMultiplier={1.2}>Rest Day</Text>
         <Text style={styles.cardMeta} maxFontSizeMultiplier={1.3}>Recovery is part of the plan.</Text>
-        <Pressable onPress={handlePress} onHoverIn={hover.onHoverIn} onHoverOut={hover.onHoverOut}>
+        <Pressable
+          onPress={handlePress}
+          onHoverIn={hover.onHoverIn}
+          onHoverOut={hover.onHoverOut}
+          android_ripple={AndroidRipple}
+        >
           <Text style={styles.cardLinkText} maxFontSizeMultiplier={1.2}>Check in anyway</Text>
         </Pressable>
       </View>
@@ -70,6 +75,7 @@ export function TodaysTrainingCard({
       onHoverOut={hover.onHoverOut}
       onPressIn={press.onPressIn}
       onPressOut={press.onPressOut}
+      android_ripple={AndroidRipple}
     >
       <Animated.View style={[styles.card, { transform: [{ scale: press.scale }] }]}>
         <View pointerEvents="none" style={styles.cardSheen} />
@@ -94,11 +100,12 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
   return StyleSheet.create({
     card: {
       padding: 20,
-      borderRadius: 20,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
+      borderRadius: Platform.OS === 'android' ? 24 : 20,
       backgroundColor: colors.surface,
       overflow: 'hidden',
+      ...(Platform.OS === 'android'
+        ? AndroidRaisedElevation
+        : { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.surfaceBorder }),
     },
     cardSheen: {
       position: 'absolute',

@@ -1,12 +1,12 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AppState, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppState, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import ReanimatedAnimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
 import { TodaysTrainingCard } from '@/components/home/todays-training-card';
-import { Type } from '@/constants/theme';
+import { AndroidCardElevation, Type } from '@/constants/theme';
 import { BODY_AREA_LABELS, BODY_AREA_ORDER } from '@/lib/body-area-labels';
 import { getCalibration } from '@/lib/calibration';
 import { DEFAULT_CALIBRATION } from '@/lib/engine/personal-calibration';
@@ -429,19 +429,21 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       textAlign: 'center',
     },
     card: {
-      borderRadius: 16,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
+      borderRadius: Platform.OS === 'android' ? 20 : 16,
       backgroundColor: colors.surface,
       paddingHorizontal: 16,
+      ...(Platform.OS === 'android'
+        ? AndroidCardElevation
+        : { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.surfaceBorder }),
     },
     emptyCard: {
-      borderRadius: 16,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
+      borderRadius: Platform.OS === 'android' ? 20 : 16,
       backgroundColor: colors.surface,
       padding: 20,
       alignItems: 'center',
+      ...(Platform.OS === 'android'
+        ? AndroidCardElevation
+        : { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.surfaceBorder }),
     },
     emptyIcon: {
       marginBottom: 10,

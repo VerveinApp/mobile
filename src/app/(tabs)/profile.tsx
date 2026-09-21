@@ -8,7 +8,7 @@ import { SymbolView } from '@/components/ui/app-symbol';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
 import { useHoverFade } from '@/lib/button-interactions';
-import { TabularNums, Type } from '@/constants/theme';
+import { AndroidCardElevation, AndroidRipple, TabularNums, Type } from '@/constants/theme';
 import { hapticImpactLight, hapticSuccess } from '@/lib/haptics';
 import {
   DURATION_LABELS,
@@ -318,6 +318,7 @@ export default function ProfileScreen() {
             onPress={() => router.push('/log' as never)}
             onHoverIn={logHover.onHoverIn}
             onHoverOut={logHover.onHoverOut}
+            android_ripple={AndroidRipple}
             accessibilityRole="button"
             accessibilityLabel="Log. Backfill a past session or weigh-in"
           >
@@ -343,6 +344,7 @@ export default function ProfileScreen() {
             onPress={() => goalsSheetRef.current?.present()}
             onHoverIn={goalsHover.onHoverIn}
             onHoverOut={goalsHover.onHoverOut}
+            android_ripple={AndroidRipple}
             accessibilityRole="button"
             accessibilityLabel="Goals. Set a target weight and a target lift"
           >
@@ -537,12 +539,13 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors']) {
       fontFamily: 'Geist-SemiBold',
     },
     card: {
-      borderRadius: 16,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
+      borderRadius: Platform.OS === 'android' ? 20 : 16,
       backgroundColor: colors.surface,
       paddingHorizontal: 16,
       overflow: 'hidden',
+      ...(Platform.OS === 'android'
+        ? AndroidCardElevation
+        : { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.surfaceBorder }),
     },
     cardSheen: {
       position: 'absolute',

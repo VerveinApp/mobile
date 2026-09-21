@@ -1,13 +1,14 @@
 import { router } from 'expo-router';
 import { useCallback, useRef } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { SFSymbol } from 'expo-symbols';
 import { BottomSheetModal } from '@gorhom/bottom-sheet';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SymbolView } from '@/components/ui/app-symbol';
 import { LogPastSessionSheet } from '@/components/settings/log-past-session-sheet';
-import { Type } from '@/constants/theme';
+import { PremiumGate } from '@/components/premium-gate';
+import { AndroidCardElevation, AndroidRipple, Type } from '@/constants/theme';
 import { useHoverFade } from '@/lib/button-interactions';
 import { hapticImpactLight } from '@/lib/haptics';
 import { usePremiumEntitlement } from '@/lib/purchases';
@@ -15,19 +16,19 @@ import { useAppColors } from '@/lib/theme-context';
 
 /**
  * A quick-access hub for backfilling things about a day that already
- * happened. Weight and Notes stay free, same as their own Settings
- * screens — everything else here (Past Session, Sleep, Nutrition,
- * Progress Photo, Body Measurements, Condition Log) is VerveIn Plus,
- * hidden outright rather than shown locked, matching Settings' own DATA
- * section gating for the exact same features.
+ * happened.
  *
- * PRIOR HISTORY: this whole screen used to be Plus-gated, then had that
- * gate removed entirely on the theory that every action here was already
- * free via Settings — true at the time, but Settings' own gating later
- * changed (these same six actions became Plus there) without this screen
- * being revisited to match. Rather than re-gate the whole screen (Weight
- * and Notes still have nothing to protect), each row now mirrors whatever
- * its own Settings equivalent actually does.
+ * POLICY CHANGE (explicit product decision, not a bug fix): this whole hub
+ * is now gated behind VerveIn Plus as a single unit, via the same
+ * PremiumGate teaser every other Plus-only section in this app uses — never
+ * hides that it exists, just swaps the row list for a locked card that
+ * routes to the paywall on tap. This deliberately overrides the per-row
+ * nuance the hub used to have (Weight/Notes/Past Session were reachable
+ * free, Sleep/Nutrition logged free with only deeper history behind Plus,
+ * and the consent-gated three had no premium check at all) — those
+ * individual screens' own access logic is untouched and still reachable a
+ * different way (e.g. Settings' own DATA section), only this hub's own
+ * front door is now Plus-only.
  */
 export default function LogScreen() {
   const insets = useSafeAreaInsets();
@@ -51,6 +52,7 @@ export default function LogScreen() {
           onHoverOut={backHover.onHoverOut}
           hitSlop={10}
           style={styles.backButton}
+          android_ripple={{ ...AndroidRipple, borderless: true }}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
@@ -66,17 +68,16 @@ export default function LogScreen() {
           substitute for today&apos;s real check-in.
         </Text>
 
+        <PremiumGate isPremium={isPremium} label="Log">
         <View style={styles.card}>
-          {isPremium ? (
-            <LogRow
-              styles={styles}
-              colors={colors}
-              icon="figure.strengthtraining.traditional"
-              label="Past Session"
-              subtitle="Which areas you trained, for a day you missed"
-              onPress={handleOpenPastSession}
-            />
-          ) : null}
+          <LogRow
+            styles={styles}
+            colors={colors}
+            icon="figure.strengthtraining.traditional"
+            label="Past Session"
+            subtitle="Which areas you trained, for a day you missed"
+            onPress={handleOpenPastSession}
+          />
           <LogRow
             styles={styles}
             colors={colors}
@@ -85,56 +86,46 @@ export default function LogScreen() {
             subtitle="Add today's or a past weigh-in"
             onPress={() => router.push('/settings/weight-history' as never)}
           />
-          {isPremium ? (
-            <LogRow
-              styles={styles}
-              colors={colors}
-              icon="bed.double"
-              label="Sleep"
-              subtitle="Add tonight's or a past night's sleep"
-              onPress={() => router.push('/settings/sleep-history' as never)}
-            />
-          ) : null}
-          {isPremium ? (
-            <LogRow
-              styles={styles}
-              colors={colors}
-              icon="fork.knife"
-              label="Nutrition"
-              subtitle="Add today's or a past day's calories"
-              onPress={() => router.push('/settings/nutrition-history' as never)}
-            />
-          ) : null}
-          {isPremium ? (
-            <LogRow
-              styles={styles}
-              colors={colors}
-              icon="photo.on.rectangle"
-              label="Progress Photo"
-              subtitle="Add today's or a past photo"
-              onPress={() => router.push('/settings/progress-photos' as never)}
-            />
-          ) : null}
-          {isPremium ? (
-            <LogRow
-              styles={styles}
-              colors={colors}
-              icon="ruler"
-              label="Body Measurements"
-              subtitle="Waist, chest, and other numbers, for today or a past day"
-              onPress={() => router.push('/settings/body-measurements' as never)}
-            />
-          ) : null}
-          {isPremium ? (
-            <LogRow
-              styles={styles}
-              colors={colors}
-              icon="list.bullet.clipboard"
-              label="Condition Log"
-              subtitle="A symptom or condition worth recording, for today or a past day"
-              onPress={() => router.push('/settings/condition-log' as never)}
-            />
-          ) : null}
+          <LogRow
+            styles={styles}
+            colors={colors}
+            icon="bed.double"
+            label="Sleep"
+            subtitle="Add tonight's or a past night's sleep"
+            onPress={() => router.push('/settings/sleep-history' as never)}
+          />
+          <LogRow
+            styles={styles}
+            colors={colors}
+            icon="fork.knife"
+            label="Nutrition"
+            subtitle="Add today's or a past day's calories"
+            onPress={() => router.push('/settings/nutrition-history' as never)}
+          />
+          <LogRow
+            styles={styles}
+            colors={colors}
+            icon="photo.on.rectangle"
+            label="Progress Photo"
+            subtitle="Add today's or a past photo"
+            onPress={() => router.push('/settings/progress-photos' as never)}
+          />
+          <LogRow
+            styles={styles}
+            colors={colors}
+            icon="ruler"
+            label="Body Measurements"
+            subtitle="Waist, chest, and other numbers, for today or a past day"
+            onPress={() => router.push('/settings/body-measurements' as never)}
+          />
+          <LogRow
+            styles={styles}
+            colors={colors}
+            icon="list.bullet.clipboard"
+            label="Condition Log"
+            subtitle="A symptom or condition worth recording, for today or a past day"
+            onPress={() => router.push('/settings/condition-log' as never)}
+          />
           <LogRow
             styles={styles}
             colors={colors}
@@ -145,6 +136,7 @@ export default function LogScreen() {
             last
           />
         </View>
+        </PremiumGate>
       </ScrollView>
 
       <LogPastSessionSheet ref={logPastSessionSheetRef} />
@@ -179,6 +171,7 @@ function LogRow({
       }}
       onHoverIn={hover.onHoverIn}
       onHoverOut={hover.onHoverOut}
+      android_ripple={AndroidRipple}
       accessibilityRole="button"
       accessibilityLabel={`${label}. ${subtitle}`}
     >
@@ -232,11 +225,12 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       fontFamily: 'Geist-Regular',
     },
     card: {
-      borderRadius: 16,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
+      borderRadius: Platform.OS === 'android' ? 20 : 16,
       backgroundColor: colors.surface,
       overflow: 'hidden',
+      ...(Platform.OS === 'android'
+        ? AndroidCardElevation
+        : { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.surfaceBorder }),
     },
     row: {
       flexDirection: 'row',

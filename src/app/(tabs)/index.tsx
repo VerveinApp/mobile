@@ -1,11 +1,11 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AppState, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { AppState, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import ReanimatedAnimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
-import { TabularNums, Type } from '@/constants/theme';
+import { AndroidCardElevation, AndroidRipple, TabularNums, Type } from '@/constants/theme';
 import { getCalibration } from '@/lib/calibration';
 import { getDeloadNudge } from '@/lib/deload';
 import { DEFAULT_CALIBRATION } from '@/lib/engine/personal-calibration';
@@ -27,6 +27,7 @@ import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
 import { SESSION_LABEL_BY_GOAL, WEEKDAY_NAMES } from '@/lib/profile-labels';
 import { usePremiumEntitlement } from '@/lib/purchases';
+import { PremiumGate } from '@/components/premium-gate';
 import { getWeekActivity, type WeekDay } from '@/lib/session-history';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
@@ -40,11 +41,25 @@ import { SymbolView } from '@/components/ui/app-symbol';
 
 const WEEKDAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']; // Monday-start, matches session-history.ts
 
+// Same light→dark green ramp energy-gauge.tsx's own MOOD_COLORS already
+// uses for its "Good"/"Great" levels (#8FBF5C, #5FBE84) plus this app's
+// established darker/pressed-state brand green (#438C63) for the third
+// stop — deliberately NOT a red/yellow/green scale. Training Load isn't a
+// pass/fail signal the way WHOOP's Recovery is: a heavier day reflects
+// real effort, not a warning. A single-hue intensity ramp reads as
+// "more," not "worse." Used per-day below (not per-tier anymore since the
+// chart moved from one commitment-level meter to a real day-by-day
+// breakdown) — each bar's own real caloriesBurned, relative to the
+// heaviest real day this week, picks its stop on the ramp.
+const LOAD_METER_COLORS = ['#8FBF5C', '#5FBE84', '#438C63'];
+
 function getGreeting(): string {
   const hour = new Date().getHours();
+  if (hour < 5) return 'Welcome back';
   if (hour < 12) return 'Good morning';
-  if (hour < 18) return 'Good afternoon';
-  return 'Good evening';
+  if (hour < 17) return 'Good afternoon';
+  if (hour < 21) return 'Good evening';
+  return 'Welcome back';
 }
 
 function formatToday(): string {
@@ -90,6 +105,29 @@ export default function SummaryScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [showHealthKitBanner, setShowHealthKitBanner] = useState(false);
   const isPremium = usePremiumEntitlement();
+  // BUG FIX (found in a later full-app audit): `today`/`isRestDay` below are
+  // plain consts recomputed from `new Date()` on every SummaryScreen render
+  // — correct as far as it goes, but nothing here was ever forcing a render
+  // on its own. Header's own clockTick (see below) only re-renders Header
+  // itself, not this parent, so leaving Home mounted across a real midnight
+  // boundary (typically: backgrounded overnight, then resumed) left the
+  // Rest-Day/training-day determination frozen on yesterday even though
+  // Header's own greeting/date text — refreshed by its own, separate
+  // mechanism — correctly showed today. Same interval+AppState pattern,
+  // lifted here so the one tick drives both this screen's own day logic and
+  // (via the normal prop re-render, Header isn't memoized) Header's text,
+  // instead of two independent, easy-to-desync copies of the same fix.
+  const [, setClockTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => setClockTick((t) => t + 1), 60 * 1000);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') setClockTick((t) => t + 1);
+    });
+    return () => {
+      clearInterval(interval);
+      subscription.remove();
+    };
+  }, []);
   // BUG FIX: the HealthKit-informed trim is a VerveIn Plus benefit —
   // check-in.tsx already gates it this exact way (its own
   // effectiveHealthReadinessModifier), but this screen was applying the raw,
@@ -414,6 +452,7 @@ export default function SummaryScreen() {
               hapticSelect();
               router.push('/home/check-in' as never);
             }}
+            android_ripple={AndroidRipple}
           >
             <View style={styles.deloadBannerRow}>
               <SymbolView name="moon.zzz.fill" size={15} tintColor={colors.textSecondary} />
@@ -465,6 +504,7 @@ export default function SummaryScreen() {
           todaySession={todaySession}
           weekActivity={weekActivity}
           calibration={calibration}
+          isPremium={isPremium}
         />
       </ScrollView>
       </ReanimatedAnimated.View>
@@ -485,26 +525,13 @@ function Header({
   const press = useLiquidPress();
   const initial = firstName ? firstName[0].toUpperCase() : '·';
 
-  // Neither getGreeting() nor formatToday() below have any other reason to
-  // re-run once this component mounts — without this, leaving Home open
-  // across an hour (or day) boundary freezes both at whatever they were on
-  // the last render, e.g. still "Good morning" well into the afternoon.
-  // Re-ticking every minute keeps them live; the AppState listener catches
-  // the larger jump from being backgrounded for a while immediately rather
-  // than waiting up to a minute for the interval to fire (JS timers don't
-  // run in the background on iOS, so the interval alone only catches up
-  // once the app resumes anyway).
-  const [, setClockTick] = useState(0);
-  useEffect(() => {
-    const interval = setInterval(() => setClockTick((t) => t + 1), 60 * 1000);
-    const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') setClockTick((t) => t + 1);
-    });
-    return () => {
-      clearInterval(interval);
-      subscription.remove();
-    };
-  }, []);
+  // getGreeting()/formatToday() below stay fresh via SummaryScreen's own
+  // clock-tick (see there) — Header isn't memoized, so every re-render its
+  // parent gets, this gets too. Used to have its own separate copy of the
+  // same interval+AppState mechanism, but that only ever re-rendered this
+  // component, not the parent's own today/isRestDay logic, which could
+  // still go stale across a real midnight boundary even while this text
+  // looked fine. One shared tick instead of two independent ones.
 
   return (
     <View style={styles.header}>
@@ -527,6 +554,7 @@ function Header({
         onHoverOut={hover.onHoverOut}
         onPressIn={press.onPressIn}
         onPressOut={press.onPressOut}
+        android_ripple={{ ...AndroidRipple, borderless: true }}
       >
         <View style={styles.avatarVisual}>
           <Text style={styles.avatarText} maxFontSizeMultiplier={1.15}>{initial}</Text>
@@ -595,6 +623,7 @@ function WeeklyActivity({
             onHoverOut={shareHover.onHoverOut}
             onPressIn={sharePress.onPressIn}
             onPressOut={sharePress.onPressOut}
+            android_ripple={AndroidRipple}
           >
             <SymbolView name="square.and.arrow.up" size={13} tintColor={colors.textSecondary} />
             <Text style={styles.weekShareText} maxFontSizeMultiplier={1.2}>
@@ -613,20 +642,17 @@ function YourFitness({
   todaySession,
   weekActivity,
   calibration,
+  isPremium,
 }: {
   styles: ReturnType<typeof createStyles>;
   profile: UserProfile | null;
   todaySession: TodaySession | null;
-  weekActivity: { completedCount: number; scheduledCount: number };
+  weekActivity: { days: WeekDay[]; completedCount: number; scheduledCount: number };
   calibration: UserCalibration | null;
+  isPremium: boolean | null;
 }) {
   const commitment = Number(profile?.commitmentLevel) || 4;
   const loadLabel = commitment <= 3 ? 'Light' : commitment <= 6 ? 'Moderate' : 'High';
-  // Same three buckets loadLabel already reads off commitment — a level
-  // meter reads at a glance the way the word alone doesn't, same instrument-
-  // style legibility weekRow's own dot strip and EnergyGauge's segmented bar
-  // already use elsewhere in this app, not a new visual language.
-  const loadLevel = commitment <= 3 ? 1 : commitment <= 6 ? 2 : 3;
   const energy = todaySession?.energy;
   const readinessNote =
     energy === undefined
@@ -674,19 +700,51 @@ function YourFitness({
   // shown by default.
   const isQuietWeek = weekActivity.scheduledCount > 0 && ratio < 0.25;
 
+  // Real per-day intensity, not a redraw of loadLevel's own commitment-tier
+  // meter — the same caloriesBurned estimate getWeeklyCaloriesBurned sums
+  // for the week, read per day instead. A day with no real estimate (rest,
+  // future, unscheduled, or an old entry logged before caloriesBurned
+  // existed) draws as an empty track rather than a fabricated bar, per this
+  // app's own no-synthetic-data rule for trend visuals.
+  const maxDailyKcal = Math.max(1, ...weekActivity.days.map((day) => day.caloriesBurned ?? 0));
+
   return (
     <View style={styles.section}>
       <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>YOUR FITNESS</Text>
 
+      {/* POLICY CHANGE (explicit product decision, not a bug fix): Home's
+          own Training Load and Consistency cards are now Plus-gated too,
+          same PremiumGate teaser as Progress tab's Training Balance and
+          consistency calendar — those two are a deeper, per-exercise/
+          per-day breakdown of the same underlying signal this quick
+          glanceable summary shows, so this closes the last free preview of
+          it rather than leaving the headline number reachable for free
+          while its detail view costs Plus. */}
+      <PremiumGate isPremium={isPremium} label="Training Load">
       <View style={styles.fitnessCard}>
         <View style={styles.fitnessCardHeader}>
           <Text style={styles.fitnessCardLabel} maxFontSizeMultiplier={1.3}>Training Load</Text>
           <Text style={styles.fitnessCardValue} maxFontSizeMultiplier={1.2}>{loadLabel}</Text>
         </View>
-        <View style={styles.loadMeter} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-          {[1, 2, 3].map((bar) => (
-            <View key={bar} style={[styles.loadMeterBar, bar <= loadLevel && styles.loadMeterBarFilled]} />
-          ))}
+        <View style={styles.loadChart} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          {weekActivity.days.map((day) => {
+            const kcal = day.caloriesBurned ?? 0;
+            const hasData = kcal > 0;
+            const ratio = hasData ? kcal / maxDailyKcal : 0;
+            const barColor = ratio > 0.66 ? LOAD_METER_COLORS[2] : ratio > 0.33 ? LOAD_METER_COLORS[1] : LOAD_METER_COLORS[0];
+            return (
+              <View key={day.date} style={styles.loadChartTrack}>
+                <View
+                  style={[
+                    styles.loadChartBar,
+                    hasData
+                      ? { height: `${Math.max(ratio, 0.12) * 100}%`, backgroundColor: barColor }
+                      : styles.loadChartBarEmpty,
+                  ]}
+                />
+              </View>
+            );
+          })}
         </View>
         <Text style={styles.fitnessCardNote} maxFontSizeMultiplier={1.4}>{readinessNote}</Text>
         {calibrationNote ? (
@@ -695,7 +753,9 @@ function YourFitness({
           </Text>
         ) : null}
       </View>
+      </PremiumGate>
 
+      <PremiumGate isPremium={isPremium} label="Consistency">
       <View style={styles.fitnessCard}>
         <View style={styles.fitnessCardHeader}>
           <Text style={styles.fitnessCardLabel} maxFontSizeMultiplier={1.3}>Consistency</Text>
@@ -711,6 +771,7 @@ function YourFitness({
           </Text>
         ) : null}
       </View>
+      </PremiumGate>
     </View>
   );
 }
@@ -920,10 +981,11 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     fitnessCard: {
       padding: 16,
-      borderRadius: 16,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
+      borderRadius: Platform.OS === 'android' ? 20 : 16,
       backgroundColor: colors.surface,
+      ...(Platform.OS === 'android'
+        ? AndroidCardElevation
+        : { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.surfaceBorder }),
     },
     fitnessCardHeader: {
       flexDirection: 'row',
@@ -946,19 +1008,25 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
     },
-    loadMeter: {
+    loadChart: {
       marginTop: 10,
+      height: 40,
       flexDirection: 'row',
+      alignItems: 'flex-end',
       gap: 4,
     },
-    loadMeterBar: {
+    loadChartTrack: {
       flex: 1,
-      height: 4,
-      borderRadius: 2,
-      backgroundColor: colors.badgeBg,
+      height: '100%',
+      justifyContent: 'flex-end',
     },
-    loadMeterBarFilled: {
-      backgroundColor: '#5FBE84',
+    loadChartBar: {
+      width: '100%',
+      borderRadius: 2,
+    },
+    loadChartBarEmpty: {
+      height: '12%',
+      backgroundColor: colors.badgeBg,
     },
     fitnessCardNote: {
       marginTop: 6,

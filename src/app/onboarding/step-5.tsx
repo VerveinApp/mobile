@@ -9,7 +9,7 @@ import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { goBack } from '@/lib/onboarding-nav';
 import { useFadeInEntering } from '@/lib/screen-transitions';
-import { Type } from '@/constants/theme';
+import { AndroidRippleOnAccent, Type } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 import {
   ArrowUpIconGraphic,
@@ -414,6 +414,7 @@ export default function OnboardingConsentBiometricsScreen() {
           onHoverOut={continueHover.onHoverOut}
           onPressIn={continuePress.onPressIn}
           onPressOut={continuePress.onPressOut}
+          android_ripple={AndroidRippleOnAccent}
         >
           <Animated.View
             style={[
@@ -513,11 +514,21 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       left: 33.83,
       top: 0,
     },
+    // BUG FIX (found in a later full-app audit): title/subtitle/consentRow
+    // and fieldsBlock (below) were all 20px higher than step-6/7's identical
+    // title+subtitle layout (title top:188, subtitle top:222 there vs. 168/
+    // 202 here) — this screen was likely built before that convention
+    // settled. Shifting only the heading would have shrunk the gap to
+    // consentRow from 30px to 10px; shifting everything below it by the
+    // same +20 instead brings this in line with the convention while
+    // preserving every internal gap exactly (confirmed against the
+    // documented ~80px wheel-to-button gap and the 812pt canvas bottom —
+    // the lowest element still lands 140+px clear of it).
     title: {
       position: 'absolute',
       left: 0,
       right: 0,
-      top: 168,
+      top: 188,
       paddingHorizontal: 44,
       color: colors.text,
       fontSize: Type.headerTitle,
@@ -529,7 +540,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       position: 'absolute',
       left: 0,
       right: 0,
-      top: 202,
+      top: 222,
       paddingHorizontal: 60,
       color: colors.textSecondary,
       fontSize: Type.caption,
@@ -540,7 +551,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
     consentRow: {
       position: 'absolute',
       left: 16,
-      top: 232,
+      top: 252,
       width: 343,
     },
     consentCard: {
@@ -588,7 +599,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
     fieldsBlock: {
       position: 'absolute',
       left: 0,
-      top: 0,
+      top: 20,
       width: CANVAS_WIDTH,
     },
     fieldLabel: {
@@ -704,7 +715,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       // shorter than WheelPicker (160 tall) it replaced here, and this
       // keeps the same ~80px gap below the wheels that the original
       // spacing had.
-      top: 564,
+      top: 584,
       width: 285,
       height: 38,
     },
@@ -735,7 +746,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
     skipButtonHit: {
       position: 'absolute',
       left: 46,
-      top: 612,
+      top: 632,
       width: 285,
       height: 38,
     },

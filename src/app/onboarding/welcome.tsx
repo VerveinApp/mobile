@@ -8,7 +8,7 @@ import ReanimatedAnimated from 'react-native-reanimated';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticImpactLight } from '@/lib/haptics';
 import { useFadeInEntering } from '@/lib/screen-transitions';
-import { Type } from '@/constants/theme';
+import { AndroidRipple, AndroidRippleOnAccent, Type } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 import {
   ArrowUpIconGraphic,
@@ -94,6 +94,7 @@ export default function OnboardingWelcomeScreen() {
           onHoverOut={ctaHover.onHoverOut}
           onPressIn={ctaPress.onPressIn}
           onPressOut={ctaPress.onPressOut}
+          android_ripple={AndroidRippleOnAccent}
         >
           <Animated.View
             style={[styles.primaryButtonVisual, { transform: [{ scale: ctaPress.scale }] }]}
@@ -121,7 +122,7 @@ export default function OnboardingWelcomeScreen() {
           </Animated.View>
         </Pressable>
 
-        <Pressable style={styles.signInHit} onPress={handleSignIn} hitSlop={8}>
+        <Pressable style={styles.signInHit} onPress={handleSignIn} hitSlop={8} android_ripple={AndroidRipple}>
           <Text style={styles.signInText} maxFontSizeMultiplier={1.3}>
             {'Already have an account? '}
             <Text style={styles.signInTextBold}>Sign in</Text>

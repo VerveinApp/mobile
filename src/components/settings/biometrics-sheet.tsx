@@ -1,13 +1,18 @@
 import { BottomSheetBackdrop, type BottomSheetBackdropProps, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
 import { Type } from '@/constants/theme';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
-import { HorizontalRuler } from '@/components/onboarding/horizontal-ruler';
+import {
+  HorizontalRuler,
+  RULER_HEIGHT,
+  RULER_TICK_HEIGHT,
+  RULER_TICK_SPACING,
+} from '@/components/onboarding/horizontal-ruler';
 import { useAppColors } from '@/lib/theme-context';
 import { getUnitSystem, setUnitSystem, type UnitSystem } from '@/lib/unit-preference';
 import { getProfile, updateProfile, withHealthConsent } from '@/lib/user-profile';
@@ -29,14 +34,22 @@ const UNIT_OPTIONS: { id: UnitSystem; label: string }[] = [
 // already-shipped onboarding flow.
 const FEET_ITEMS = Array.from({ length: 5 }, (_, i) => `${i + 3} ft`);
 const INCHES_ITEMS = Array.from({ length: 12 }, (_, i) => `${i} in`);
-const WEIGHT_LB_ITEMS = Array.from({ length: 281 }, (_, i) => `${i + 80} lb`);
+// BUG FIX (found in a later full-app audit): these used to read `"161 lb"`
+// and (below) `".0"` — two big, equally-weighted ruler labels sitting side
+// by side, which reads as two disconnected values ("161 lb" then a stray
+// ".0") rather than one number. Feet+inches legitimately are two separate
+// values (5′ 11″), which is why that pair keeps its own per-item units —
+// weight's whole/decimal split is one number artificially cut in half.
+// Plain digits here; the "." lives once, between the two rulers (see
+// weightWhole/weightSeparator below), and the unit shows once, after.
+const WEIGHT_LB_ITEMS = Array.from({ length: 281 }, (_, i) => `${i + 80}`);
 const HEIGHT_CM_ITEMS = Array.from({ length: 101 }, (_, i) => `${i + 120} cm`);
-const WEIGHT_KG_ITEMS = Array.from({ length: 146 }, (_, i) => `${i + 35} kg`);
+const WEIGHT_KG_ITEMS = Array.from({ length: 146 }, (_, i) => `${i + 35}`);
 // BUG FIX (found by the user): this weight wheel only ever offered whole
 // lb/kg — the only precision this sheet's own profile.weightKg field ever
 // got, unlike weight-history.tsx's log entries, which have supported tenths
 // for a while. Same second, narrow decimal wheel that screen already uses.
-const DECIMAL_ITEMS = Array.from({ length: 10 }, (_, i) => `.${i}`);
+const DECIMAL_ITEMS = Array.from({ length: 10 }, (_, i) => `${i}`);
 // 13-95 — collected only to make calorie-estimate.ts's Mifflin-St Jeor
 // maintenance-calorie estimate possible (see user-profile.ts's age field
 // doc comment); no other part of this app reads it.
@@ -232,8 +245,8 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
       snapPoints={['90%']}
       onChange={handleSheetChange}
       backdropComponent={renderBackdrop}
-      backgroundStyle={{ backgroundColor: colors.background }}
-      handleIndicatorStyle={{ backgroundColor: colors.surfaceBorder }}
+      backgroundStyle={Platform.OS === 'android' ? { backgroundColor: colors.background, borderTopLeftRadius: 28, borderTopRightRadius: 28 } : { backgroundColor: colors.background }}
+      handleIndicatorStyle={{ backgroundColor: Platform.OS === 'android' ? 'rgba(95,190,132,0.5)' : colors.surfaceBorder, width: Platform.OS === 'android' ? 36 : undefined }}
     >
       <View style={styles.headerRow}>
         <Text style={styles.headerTitle} maxFontSizeMultiplier={1.3}>Body & Biometrics</Text>
@@ -367,6 +380,7 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
               {unit === 'imperial' ? (
                 <>
                   <HorizontalRuler
+                    width={RULER_TICK_SPACING * 4}
                     items={WEIGHT_LB_ITEMS}
                     selectedIndex={lbWholeIndex}
                     onChange={(index) => {
@@ -374,7 +388,11 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
                       setHasRealWeight(true);
                     }}
                   />
+                  <View style={styles.weightGlue}>
+                    <Text style={styles.weightSeparator}>.</Text>
+                  </View>
                   <HorizontalRuler
+                    width={RULER_TICK_SPACING * 2}
                     items={DECIMAL_ITEMS}
                     selectedIndex={lbDecimalIndex}
                     onChange={(index) => {
@@ -382,10 +400,14 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
                       setHasRealWeight(true);
                     }}
                   />
+                  <View style={styles.weightGlue}>
+                    <Text style={styles.weightUnit}>lb</Text>
+                  </View>
                 </>
               ) : (
                 <>
                   <HorizontalRuler
+                    width={RULER_TICK_SPACING * 4}
                     items={WEIGHT_KG_ITEMS}
                     selectedIndex={kgWholeIndex}
                     onChange={(index) => {
@@ -393,7 +415,11 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
                       setHasRealWeight(true);
                     }}
                   />
+                  <View style={styles.weightGlue}>
+                    <Text style={styles.weightSeparator}>.</Text>
+                  </View>
                   <HorizontalRuler
+                    width={RULER_TICK_SPACING * 2}
                     items={DECIMAL_ITEMS}
                     selectedIndex={kgDecimalIndex}
                     onChange={(index) => {
@@ -401,6 +427,9 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
                       setHasRealWeight(true);
                     }}
                   />
+                  <View style={styles.weightGlue}>
+                    <Text style={styles.weightUnit}>kg</Text>
+                  </View>
                 </>
               )}
             </View>
@@ -569,6 +598,33 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     wheelRow: {
       flexDirection: 'row',
       gap: 10,
+    },
+    // Bottom-anchored to RULER_TICK_HEIGHT, same as HorizontalRuler's own
+    // tickLabel sits above its tick marks — without this, a plain Text
+    // dropped into wheelRow's row stretches to the row's full height and
+    // top-aligns by RN's own default, landing well above the ruler's actual
+    // big number instead of next to it. Negative margins pull it in past
+    // wheelRow's own gap:10 (shared with the Height row, where that gap is
+    // correct — feet and inches ARE two separate values) so the "." and
+    // unit read as touching the numbers on either side, not floating
+    // between them.
+    weightGlue: {
+      height: RULER_HEIGHT,
+      justifyContent: 'flex-end',
+      paddingBottom: RULER_TICK_HEIGHT,
+      marginHorizontal: -6,
+    },
+    weightSeparator: {
+      color: colors.text,
+      fontSize: Type.stat,
+      fontFamily: 'Geist-SemiBold',
+    },
+    weightUnit: {
+      color: colors.textSecondary,
+      fontSize: Type.secondary,
+      fontFamily: 'Geist-Medium',
+      marginLeft: 2,
+      marginBottom: 2,
     },
     saveButton: {
       marginTop: 8,

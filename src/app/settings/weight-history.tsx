@@ -15,7 +15,12 @@ import { useAppColors } from '@/lib/theme-context';
 import { getUnitSystem, type UnitSystem } from '@/lib/unit-preference';
 import { getProfile, updateProfile } from '@/lib/user-profile';
 import { deleteWeightEntry, getWeightLog, resolveCurrentWeightKg, saveWeightEntry, type WeightLogEntry } from '@/lib/weight-log';
-import { HorizontalRuler } from '@/components/onboarding/horizontal-ruler';
+import {
+  HorizontalRuler,
+  RULER_HEIGHT,
+  RULER_TICK_HEIGHT,
+  RULER_TICK_SPACING,
+} from '@/components/onboarding/horizontal-ruler';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 import { Sparkline } from '@/components/ui/sparkline';
 
@@ -28,12 +33,18 @@ const FULL_SWIPE_DELETE_THRESHOLD = -220;
 // rather than shared so this screen stays independent of that sheet, same
 // reasoning biometrics-sheet.tsx itself gives for not sharing with
 // onboarding/step-5.tsx.
-const WEIGHT_LB_ITEMS = Array.from({ length: 281 }, (_, i) => `${i + 80} lb`);
-const WEIGHT_KG_ITEMS = Array.from({ length: 146 }, (_, i) => `${i + 35} kg`);
+// BUG FIX (found in a later full-app audit): these used to read `"161 lb"`
+// and (below) `".0"` — two big, equally-weighted ruler labels side by side,
+// which read as two disconnected values rather than one number. Plain
+// digits here; the "." lives once, between the two rulers (see
+// weightGlue/weightSeparator in the styles below), and the unit shows once,
+// after — see biometrics-sheet.tsx's own identical fix and comment.
+const WEIGHT_LB_ITEMS = Array.from({ length: 281 }, (_, i) => `${i + 80}`);
+const WEIGHT_KG_ITEMS = Array.from({ length: 146 }, (_, i) => `${i + 35}`);
 // A second, narrow wheel for tenths — this log previously only stored whole
 // kg/lb, which was coarse enough to hide several days of genuine progress
 // between one whole-unit tick and the next.
-const DECIMAL_ITEMS = Array.from({ length: 10 }, (_, i) => `.${i}`);
+const DECIMAL_ITEMS = Array.from({ length: 10 }, (_, i) => `${i}`);
 const DEFAULT_WEIGHT_KG = 73;
 
 function roundTo1(n: number): number {
@@ -246,28 +257,44 @@ export default function WeightHistoryScreen() {
                   {unit === 'imperial' ? (
                     <>
                       <HorizontalRuler
+                        width={RULER_TICK_SPACING * 4}
                         items={WEIGHT_LB_ITEMS}
                         selectedIndex={lbWholeIndex}
                         onChange={(index) => setDraftWeightKg(lbPartsToKg(index, lbDecimalIndex))}
                       />
+                      <View style={styles.weightGlue}>
+                        <Text style={styles.weightSeparator}>.</Text>
+                      </View>
                       <HorizontalRuler
+                        width={RULER_TICK_SPACING * 2}
                         items={DECIMAL_ITEMS}
                         selectedIndex={lbDecimalIndex}
                         onChange={(index) => setDraftWeightKg(lbPartsToKg(lbWholeIndex, index))}
                       />
+                      <View style={styles.weightGlue}>
+                        <Text style={styles.weightUnit}>lb</Text>
+                      </View>
                     </>
                   ) : (
                     <>
                       <HorizontalRuler
+                        width={RULER_TICK_SPACING * 4}
                         items={WEIGHT_KG_ITEMS}
                         selectedIndex={kgWholeIndex}
                         onChange={(index) => setDraftWeightKg(kgPartsToKg(index, kgDecimalIndex))}
                       />
+                      <View style={styles.weightGlue}>
+                        <Text style={styles.weightSeparator}>.</Text>
+                      </View>
                       <HorizontalRuler
+                        width={RULER_TICK_SPACING * 2}
                         items={DECIMAL_ITEMS}
                         selectedIndex={kgDecimalIndex}
                         onChange={(index) => setDraftWeightKg(kgPartsToKg(kgWholeIndex, index))}
                       />
+                      <View style={styles.weightGlue}>
+                        <Text style={styles.weightUnit}>kg</Text>
+                      </View>
                     </>
                   )}
                 </View>
@@ -470,6 +497,25 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     wheelRow: {
       flexDirection: 'row',
       gap: 10,
+    },
+    // Same fix and reasoning as biometrics-sheet.tsx's own weightGlue.
+    weightGlue: {
+      height: RULER_HEIGHT,
+      justifyContent: 'flex-end',
+      paddingBottom: RULER_TICK_HEIGHT,
+      marginHorizontal: -6,
+    },
+    weightSeparator: {
+      color: colors.text,
+      fontSize: Type.stat,
+      fontFamily: 'Geist-SemiBold',
+    },
+    weightUnit: {
+      color: colors.textSecondary,
+      fontSize: Type.secondary,
+      fontFamily: 'Geist-Medium',
+      marginLeft: 2,
+      marginBottom: 2,
     },
     saveButtonHit: {
       width: '100%',

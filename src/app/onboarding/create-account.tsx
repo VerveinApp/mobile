@@ -38,13 +38,24 @@ import {
   WordmarkTextGraphic,
 } from '@/components/auth/create-account-graphics';
 import { BackArrowGraphic } from '@/components/auth/verify-email-graphics';
-import { Type } from '@/constants/theme';
+import { SymbolView } from '@/components/ui/app-symbol';
+import { AndroidRipple, AndroidRippleOnAccent, Type } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 
 const CANVAS_WIDTH = 375;
 const CANVAS_HEIGHT = 812;
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Everything on this screen sits on a hand-authored pixel canvas
+// (CANVAS_WIDTH/HEIGHT above), positioned with fixed `top` offsets rather
+// than flex-based reflow.
+const DIVIDER_TOP = 198;
+const APPLE_BUTTON_TOP = 212;
+const GOOGLE_BUTTON_TOP_IOS = 261;
+const GOOGLE_BUTTON_TOP_OTHER = 212;
+const SOCIAL_NOTICE_TOP = 300;
+const AGE_CHECK_TOP = 718;
 
 // Liquid Glass is otherwise reserved for exactly one place (the EnergyGauge
 // dial) so it reads as a deliberate "this moment matters" cue, not
@@ -108,6 +119,12 @@ export default function CreateAccountScreen() {
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailFocused, setEmailFocused] = useState(false);
   const [sendingCode, setSendingCode] = useState(false);
+  // Real technical enforcement of the Terms' "you must be 16+" eligibility
+  // claim — found in a later full-app audit to have no gate anywhere in
+  // onboarding at all. Gates all three continue paths below (email, Apple,
+  // Google) rather than just the email button, since any of the three is a
+  // full account-creation path.
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   // Real error surface for handleAppleAuth/handleGoogleAuth below — no
   // longer a permanent "not set up yet" notice now that both are wired to
   // real SDK calls, but a real provider/network failure still needs
@@ -153,6 +170,7 @@ export default function CreateAccountScreen() {
   const googlePress = useLiquidPress();
 
   const isEmailEmpty = email.trim().length === 0;
+  const isContinueDisabled = isEmailEmpty || sendingCode;
 
   // Both branches converge on First Look now (see step-7's handleBuildPlan
   // — the consent-only potential-score payoff was cut), so this is always
@@ -161,7 +179,18 @@ export default function CreateAccountScreen() {
     goBack('/onboarding/first-look', onboardingParams);
   };
 
+  // BUG FIX: this and the two social handlers below used to rely entirely
+  // on their Pressable's own `disabled={... || !ageConfirmed}` — a silent
+  // no-op when tapped unchecked, with no way to tell "the button is broken"
+  // from "you still need to check the box below." Checking here instead
+  // (buttons are no longer disabled by ageConfirmed at all) lets an explicit
+  // tap surface a real, visible reason.
   const handleContinue = async () => {
+    if (!ageConfirmed) {
+      hapticError();
+      setEmailError("Please confirm you're at least 16 and agree to the Terms of Service and Privacy Policy below.");
+      return;
+    }
     const trimmed = email.trim();
     if (!trimmed || !EMAIL_PATTERN.test(trimmed)) {
       setEmailError('Enter a valid email address.');
@@ -226,6 +255,11 @@ export default function CreateAccountScreen() {
     if (remoteProfile) {
       await saveProfile(remoteProfile);
       await markOnboardingComplete();
+      // dismissAll() first — same reason as auth/verify.tsx's matching
+      // branch: this app's single flat root Stack means replace() alone
+      // leaves this screen (and whatever's under it) reachable with one
+      // edge-swipe-back after landing on (tabs).
+      router.dismissAll();
       router.replace('/(tabs)' as never);
       return;
     }
@@ -233,6 +267,11 @@ export default function CreateAccountScreen() {
   };
 
   const handleAppleAuth = async () => {
+    if (!ageConfirmed) {
+      hapticError();
+      setSocialAuthNotice("Please confirm you're at least 16 and agree to the Terms of Service and Privacy Policy below.");
+      return;
+    }
     if (isSocialAuthInProgressRef.current) return;
     isSocialAuthInProgressRef.current = true;
     hapticImpactLight();
@@ -252,6 +291,11 @@ export default function CreateAccountScreen() {
   };
 
   const handleGoogleAuth = async () => {
+    if (!ageConfirmed) {
+      hapticError();
+      setSocialAuthNotice("Please confirm you're at least 16 and agree to the Terms of Service and Privacy Policy below.");
+      return;
+    }
     if (isSocialAuthInProgressRef.current) return;
     isSocialAuthInProgressRef.current = true;
     hapticImpactLight();
@@ -368,17 +412,18 @@ export default function CreateAccountScreen() {
           <Pressable
             style={styles.primaryButtonHit}
             onPress={handleContinue}
-            disabled={isEmailEmpty || sendingCode}
+            disabled={isContinueDisabled}
             onHoverIn={continueHover.onHoverIn}
             onHoverOut={continueHover.onHoverOut}
             onPressIn={continuePress.onPressIn}
             onPressOut={continuePress.onPressOut}
+            android_ripple={AndroidRippleOnAccent}
           >
             <Animated.View
               style={[
                 styles.primaryButtonVisual,
                 isGlassAvailable && styles.primaryButtonVisualGlass,
-                (isEmailEmpty || sendingCode) && styles.primaryButtonDisabled,
+                isContinueDisabled && styles.primaryButtonDisabled,
                 { transform: [{ scale: continuePress.scale }] },
               ]}
             >
@@ -478,6 +523,7 @@ export default function CreateAccountScreen() {
             onHoverOut={googleHover.onHoverOut}
             onPressIn={googlePress.onPressIn}
             onPressOut={googlePress.onPressOut}
+            android_ripple={AndroidRipple}
           >
             <Animated.View style={[styles.socialButtonVisual, { transform: [{ scale: googlePress.scale }] }]}>
               {/* This button's own pill — the shared CardFrameGraphic no longer draws it,
@@ -520,31 +566,39 @@ export default function CreateAccountScreen() {
           ) : null}
         </View>
 
-        <Text style={styles.termsText} maxFontSizeMultiplier={1.4}>
-          {'By continuing, you agree to VerveIn’s\n'}
-          <Text
-            style={styles.termsLink}
-            // BUG FIX (found in a later full-app audit): this comment used
-            // to say the route itself doesn't exist — it does (see
-            // legal/terms.tsx / legal/privacy.tsx); only the page's real
-            // content is still a placeholder pending legal review.
-            onPress={() => router.push('/legal/terms' as never)}
-          >
-            Terms of Service
+        <Pressable
+          style={styles.ageCheckRow}
+          onPress={() => setAgeConfirmed((prev) => !prev)}
+          hitSlop={10}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: ageConfirmed }}
+          accessibilityLabel="I'm at least 16 and agree to VerveIn's Terms of Service and Privacy Policy"
+        >
+          <View style={[styles.ageCheckbox, ageConfirmed && styles.ageCheckboxChecked]}>
+            {ageConfirmed ? <SymbolView name="checkmark" size={9} tintColor="#ffffff" weight="bold" /> : null}
+          </View>
+          <Text style={styles.termsText} maxFontSizeMultiplier={1.4}>
+            {'I’m at least 16 and agree to VerveIn’s '}
+            <Text
+              style={styles.termsLink}
+              // Route and content both real — see legal/terms.tsx and
+              // src/lib/legal/terms-content.ts.
+              onPress={() => router.push('/legal/terms' as never)}
+            >
+              Terms of Service
+            </Text>
+            <Text> and </Text>
+            <Text
+              style={styles.termsLink}
+              // Route and content both real — see legal/privacy.tsx and
+              // src/lib/legal/privacy-content.ts.
+              onPress={() => router.push('/legal/privacy' as never)}
+            >
+              Privacy Policy
+            </Text>
+            <Text>.</Text>
           </Text>
-          <Text> and </Text>
-          <Text
-            style={styles.termsLink}
-            // BUG FIX (found in a later full-app audit): this comment used
-            // to say the route itself doesn't exist — it does (see
-            // legal/terms.tsx / legal/privacy.tsx); only the page's real
-            // content is still a placeholder pending legal review.
-            onPress={() => router.push('/legal/privacy' as never)}
-          >
-            Privacy Policy
-          </Text>
-          <Text>.</Text>
-        </Text>
+        </Pressable>
       </View>
     </KeyboardAvoidingView>
   );
@@ -721,7 +775,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     socialNoticeText: {
       position: 'absolute',
       left: 19,
-      top: 300,
+      top: SOCIAL_NOTICE_TOP,
       width: 285,
       textAlign: 'center',
       color: colors.textTertiary,
@@ -775,7 +829,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     dividerRow: {
       position: 'absolute',
       left: 14,
-      top: 198,
+      top: DIVIDER_TOP,
       width: 295,
       flexDirection: 'row',
       alignItems: 'center',
@@ -794,17 +848,17 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     socialButtonHit: {
       position: 'absolute',
       left: 19,
-      top: 212,
+      top: APPLE_BUTTON_TOP,
       width: 285,
       height: 35,
     },
     socialButtonGoogleHit: {
       position: 'absolute',
       left: 19,
-      // Apple's own slot (212) when there's no Apple button above it to
-      // leave a dead gap under — see the Apple Pressable's own Platform.OS
-      // guard just above this in the JSX.
-      top: Platform.OS === 'ios' ? 261 : 212,
+      // Apple's own slot when there's no Apple button above it to leave a
+      // dead gap under — see the Apple Pressable's own Platform.OS guard
+      // just above this in the JSX.
+      top: Platform.OS === 'ios' ? GOOGLE_BUTTON_TOP_IOS : GOOGLE_BUTTON_TOP_OTHER,
       width: 285,
       height: 35,
     },
@@ -828,14 +882,33 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       fontSize: Type.caption,
       letterSpacing: 0.33,
     },
-    termsText: {
+    ageCheckRow: {
       position: 'absolute',
-      left: 0,
-      right: 0,
-      top: 741,
+      left: 26,
+      right: 26,
+      top: AGE_CHECK_TOP,
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 7,
+    },
+    ageCheckbox: {
+      width: 14,
+      height: 14,
+      marginTop: 1,
+      borderRadius: 4,
+      borderWidth: 1,
+      borderColor: colors.surfaceBorder,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    ageCheckboxChecked: {
+      borderColor: '#438C63',
+      backgroundColor: '#438C63',
+    },
+    termsText: {
+      flex: 1,
       color: colors.textTertiary,
       fontSize: 9.261,
-      textAlign: 'center',
       lineHeight: 14,
       fontFamily: 'Geist-Regular',
     },

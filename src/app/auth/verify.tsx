@@ -173,6 +173,13 @@ export default function VerifyEmailScreen() {
     // mid-onboarding path should touch the profile — the other two must not
     // fall into saveProfile with a batch of undefined fields.
     if (await hasCompletedOnboarding()) {
+      // dismissAll() first — this app's whole flow lives in one flat root
+      // Stack (see app/_layout.tsx's own comment), so replace() alone only
+      // swaps this screen and leaves create-account/welcome underneath it
+      // reachable with a single edge-swipe-back, landing on a screen that
+      // looks like signing in did nothing. Same fix as settings/index.tsx's
+      // handleSignOut/handleConfirmDeleteAccount/handleConfirmDeleteData.
+      router.dismissAll();
       router.replace('/(tabs)' as never);
       return;
     }
@@ -189,6 +196,8 @@ export default function VerifyEmailScreen() {
       if (remoteProfile) {
         await saveProfile(remoteProfile);
         await markOnboardingComplete();
+        // Same dismissAll() fix as the branch above — see that comment.
+        router.dismissAll();
         router.replace('/(tabs)' as never);
         return;
       }
@@ -287,7 +296,15 @@ export default function VerifyEmailScreen() {
                   onBlur={() => setFocusedIndex((current) => (current === index ? null : current))}
                   keyboardType="number-pad"
                   autoFocus={index === 0}
-                  maxLength={1}
+                  // No maxLength here — `value={digit}` above already keeps
+                  // each box's display to one character regardless of what
+                  // the native field momentarily holds, and a real paste
+                  // needs the FULL pasted string to reach handleDigitChange
+                  // uncut so its own distribute-across-boxes branch (paste
+                  // delivers all 6 digits into whichever box has focus) can
+                  // fire at all — maxLength={1} was truncating the paste to
+                  // a single character before onChangeText ever saw it.
+                  textContentType="oneTimeCode"
                   textAlign="center"
                   returnKeyType={index === CODE_LENGTH - 1 ? 'done' : 'next'}
                   onSubmitEditing={index === CODE_LENGTH - 1 ? handleContinue : undefined}

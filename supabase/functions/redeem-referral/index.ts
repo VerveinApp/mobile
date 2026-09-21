@@ -36,6 +36,7 @@
 // checks the React Native app, so this import is expected to show a type
 // error here while being completely valid at actual deploy/runtime.
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { sendExpoPushToUser } from '../_shared/expo-push.ts';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -203,6 +204,20 @@ Deno.serve(async (req: Request) => {
       .update({ reward_granted_at: new Date().toISOString() })
       .eq('referred_id', user.id);
   }
+
+  // Awaited, not fire-and-forget-unawaited: an Edge Function's execution
+  // context can be torn down as soon as its response is returned, so a
+  // bare un-awaited promise here risks the push never actually completing
+  // before the runtime cuts it off. Safe to await regardless of outcome —
+  // sendExpoPushToUser already swallows every error internally and never
+  // rejects, so this can't turn a failed push into a failed redemption
+  // response the way letting an exception propagate here would.
+  await sendExpoPushToUser(
+    adminClient,
+    referralCode.user_id,
+    '🎉 New training partner!',
+    'Someone just joined VerveIn using your invite.'
+  );
 
   return jsonResponse({ success: true, rewardGranted: bothGranted }, 200);
 });

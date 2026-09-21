@@ -14,8 +14,9 @@ import { hapticSelect } from '@/lib/haptics';
 import { useAppTheme } from '@/lib/theme-context';
 
 export const RULER_TICK_SPACING = 26;
-const RULER_HEIGHT = 68;
-const TICK_HEIGHT = 24;
+export const RULER_HEIGHT = 68;
+export const RULER_TICK_HEIGHT = 24;
+const TICK_HEIGHT = RULER_TICK_HEIGHT;
 const LABEL_BAND_HEIGHT = 26;
 // Ticks stay at least partially visible out to ±4 neighbors rather than
 // fading to near-zero — the same "raised floor" fix WheelPicker needed after
@@ -123,19 +124,21 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width }: Horiz
             outputRange: [0.3, 1, 0.3],
             extrapolate: 'clamp',
           });
+          // BUG FIX: this used to fade across a full tick spacing on each
+          // side, so two neighboring labels (e.g. "5 ft" and "6 ft") were
+          // simultaneously partway visible for the whole distance between
+          // them — wide enough that both rendered legibly at once, reading
+          // as garbled overlapping text mid-swipe. Halving the fade distance
+          // means a label reaches 0 opacity exactly where its neighbor's own
+          // fade-in starts, so only one is ever meaningfully visible.
           const labelRange = [
-            (index - 1) * RULER_TICK_SPACING,
+            (index - 0.5) * RULER_TICK_SPACING,
             index * RULER_TICK_SPACING,
-            (index + 1) * RULER_TICK_SPACING,
+            (index + 0.5) * RULER_TICK_SPACING,
           ];
           const labelOpacity = scrollX.interpolate({
             inputRange: labelRange,
             outputRange: [0, 1, 0],
-            extrapolate: 'clamp',
-          });
-          const labelScale = scrollX.interpolate({
-            inputRange: labelRange,
-            outputRange: [0.7, 1, 0.7],
             extrapolate: 'clamp',
           });
           return (
@@ -143,9 +146,18 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width }: Horiz
               {/* Absolutely positioned and centered on its own tick slot so
                   it never nudges neighboring ticks apart while animating —
                   same reason WheelPicker keeps its scale/opacity animation
-                  on a wrapping view rather than the Text node directly. */}
+                  on a wrapping view rather than the Text node directly.
+                  BUG FIX: this used to also animate `transform: [{ scale }]`
+                  on the Text node itself (0.7 → 1 → 0.7, same range as the
+                  opacity fade) — scaling a rasterized text layer mid-motion
+                  is exactly the kind of transform iOS doesn't always
+                  re-rasterize crisply for, and swiping is when a label
+                  spends the most time at an intermediate, blurry-looking
+                  scale value rather than settled at a clean 1.0 or 0. Opacity
+                  alone gives the same "coming into focus" feel without ever
+                  touching how the glyphs themselves are rendered. */}
               <Animated.Text
-                style={[styles.tickLabel, { opacity: labelOpacity, transform: [{ scale: labelScale }] }]}
+                style={[styles.tickLabel, { opacity: labelOpacity }]}
                 maxFontSizeMultiplier={1.15}
                 numberOfLines={1}
               >

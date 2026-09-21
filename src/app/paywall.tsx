@@ -1,18 +1,20 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Animated,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Animated, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { useCanvasScale } from '@/lib/canvas-scale';
-import ReanimatedAnimated, { FadeIn } from 'react-native-reanimated';
+import ReanimatedAnimated, {
+  Easing,
+  Extrapolation,
+  FadeIn,
+  interpolate,
+  runOnJS,
+  type SharedValue,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 import type { PurchasesOffering, PurchasesPackage } from 'react-native-purchases';
@@ -21,9 +23,10 @@ import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight, hapticSelect, hapticSuccess } from '@/lib/haptics';
 import { MOTION_DURATION } from '@/lib/motion';
 import { useFadeInEntering } from '@/lib/screen-transitions';
-import { Type } from '@/constants/theme';
+import { AndroidCardElevation, AndroidRipple, AndroidRippleOnAccent, Type } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 import { getCurrentOffering, purchasePackage, restorePurchases } from '@/lib/purchases';
+import { supabase } from '@/lib/supabase';
 import { getLoggedSessionCount } from '@/lib/workout-log';
 import {
   ArrowUpIconGraphic,
@@ -83,23 +86,79 @@ const BENEFITS: { icon: Parameters<typeof SymbolView>[0]['name']; title: string;
     // new capability being sold.
     subtitle: "Your logs older than a week are still there — Plus is what lets you see them again.",
   },
-  {
-    icon: 'clock.arrow.circlepath',
-    title: 'The Log quick-access hub',
-    subtitle: 'One tap to backfill a past session, weigh-in, photo, or note — everything is still free from Settings.',
-  },
+  // BUG FIX (found in a later full-app audit): "The Log quick-access hub"
+  // used to be listed here as a Plus benefit — no longer true. log.tsx's
+  // hub itself was blanket-hiding most of its rows for free accounts
+  // (a bug, not a real gate — see that file's own fix), which is what this
+  // entry was actually describing. Every row there is unconditional now;
+  // each destination screen enforces its own real access level instead.
+  // Not replaced with a different entry — padding the list back to 7 with
+  // something else would be the same kind of overclaim this just removed.
 ];
+
+/**
+ * One card in the benefits pager — its own component (not inlined in a
+ * `.map()` inside PaywallScreen) because `useAnimatedStyle` is a hook, and
+ * every card needs its own instance tracking its own distance from center.
+ * Neighboring cards ease back in scale/opacity as they move off-center —
+ * the same "coverflow" language a real swipe reads as fluid, not just a
+ * hard cut between pages.
+ */
+function BenefitCarouselCard({
+  benefit,
+  index,
+  translateX,
+  cardWidth,
+  styles,
+}: {
+  benefit: (typeof BENEFITS)[number];
+  index: number;
+  translateX: SharedValue<number>;
+  cardWidth: number;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  const animatedStyle = useAnimatedStyle(() => {
+    const distance = Math.abs(-translateX.value / cardWidth - index);
+    return {
+      transform: [{ scale: interpolate(distance, [0, 1], [1, 0.92], Extrapolation.CLAMP) }],
+      opacity: interpolate(distance, [0, 1], [1, 0.5], Extrapolation.CLAMP),
+    };
+  });
+
+  return (
+    <View style={{ width: cardWidth }}>
+      {/* shouldRasterizeIOS: without it, scaling this view's text content
+          live (not just a wheel-picker-style plain Text glyph-ghost,
+          already avoided above) re-rasterizes the glyphs every frame as the
+          scale interpolates, reading as text "glitching" mid-swipe.
+          Rasterizing once lets the GPU transform a cached bitmap instead of
+          re-drawing text each frame. */}
+      <ReanimatedAnimated.View shouldRasterizeIOS style={[styles.benefitCard, animatedStyle]}>
+        <View style={styles.benefitCardIcon}>
+          <SymbolView name={benefit.icon} size={30} tintColor="#5FBE84" />
+        </View>
+        <Text style={styles.benefitCardTitle} maxFontSizeMultiplier={1.3}>{benefit.title}</Text>
+        <Text style={styles.benefitCardSubtitle} maxFontSizeMultiplier={1.4}>{benefit.subtitle}</Text>
+      </ReanimatedAnimated.View>
+    </View>
+  );
+}
 
 /**
  * VerveIn Plus — presented as a modal (see _layout.tsx's Stack.Screen entry),
  * either automatically after the third real check-in (paywall-trigger.ts) or
  * manually from Settings. The core adaptive engine (check-in, the daily
  * plan) is never gated here or anywhere else, per the founder's own "core
- * loop free, premium analytics" split. BUG FIX: this comment used to also
- * claim "basic history" was never gated — no longer true since log.tsx's
- * own Log quick-access hub became Plus-only; every action it links to is
- * still separately free through Settings, so the underlying capability is
- * intact, just not that one faster entry point.
+ * loop free, premium analytics" split. Basic history (Weight, Notes, Sleep/
+ * Nutrition logging, Progress Photos, Body Measurements, Condition Log,
+ * backfilling a past session) is free too, from both Settings and log.tsx's
+ * hub — only looking back further than the last week (Sleep/Nutrition) and
+ * the Progress-tab insight views (Training Balance, Consistency Calendar,
+ * Strength Progress) are actually Plus. BUG FIX: this comment (and log.tsx's
+ * hub, and Settings' own DATA section) used to claim otherwise — a blanket
+ * Plus gate had drifted in ahead of what each screen's own code actually
+ * enforces, hiding real free-tier logic behind an outer gate that didn't
+ * match it. See log.tsx's and settings/index.tsx's own fix comments.
  */
 export default function PaywallScreen() {
   const scale = useCanvasScale();
@@ -126,23 +185,65 @@ export default function PaywallScreen() {
   // full-width card lines up with everything else on this fixed CANVAS_WIDTH
   // canvas instead of needing its own separate measurement.
   const benefitCardWidth = CANVAS_WIDTH - 60;
-  // Native-driven so the per-card scale/opacity below tracks the actual
-  // touch in real time (not just once a swipe settles) with no JS-thread
-  // lag. useState (not useRef), same pattern wheel-picker.tsx's own
-  // scrollY uses — reading a ref's .current during render is what React's
-  // hooks lint rule (and eventually the compiler) flags as unsafe; the
-  // value itself is still a stable Animated.Value across re-renders either
-  // way, since the initializer only runs once.
-  const [benefitScrollX] = useState(() => new Animated.Value(0));
-  const handleBenefitScrollEvent = Animated.event(
-    [{ nativeEvent: { contentOffset: { x: benefitScrollX } } }],
-    { useNativeDriver: true, listener: (e: NativeSyntheticEvent<NativeScrollEvent>) => handleBenefitScroll(e) }
+  // BUG FIX (found in a later full-app audit): this carousel used to be a
+  // real horizontal Animated.ScrollView nested inside this screen's outer
+  // vertical ScrollView. That combination — confirmed by stripping every
+  // other variable (Animated vs plain, pagingEnabled, onScroll, height,
+  // shouldRasterizeIOS, the ancestor canvas's overflow:hidden — none of it
+  // was the cause) — silently broke the OUTER ScrollView's ability to
+  // render anything after it: benefitDotsRow, personalizedStat, and the
+  // entire checklistWrap stopped painting, confirmed both with the real
+  // components and with bare hardcoded-size colored Views standing in for
+  // them. Nesting any ScrollView inside this one was the actual trigger.
+  // Replaced with a gesture-driven pager (same Gesture.Pan + runOnJS +
+  // useAnimatedStyle idiom energy-gauge.tsx and before-after-slider.tsx
+  // already use) — no nested ScrollView at all, so the outer one measures
+  // its content correctly again.
+  const benefitTranslateX = useSharedValue(0);
+  const benefitDragStartX = useSharedValue(0);
+  const setActiveBenefitIndexOnJS = (index: number) => setActiveBenefitIndex(index);
+  const benefitPanGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        // Horizontal-only activation — without this, Pan claims any drag
+        // that starts within the carousel's bounds, including a mostly-
+        // vertical one meant for the outer ScrollView, which then never
+        // sees the touch at all. activeOffsetX lets it become the
+        // recognized gesture once horizontal movement passes ±10, while
+        // failOffsetY hands off to the ScrollView (or whatever's next in
+        // the responder chain) the moment vertical movement passes ±10
+        // first — same either/or race gesture-handler's own docs recommend
+        // for a horizontal control living inside a vertical scroller.
+        .activeOffsetX([-10, 10])
+        .failOffsetY([-10, 10])
+        .onBegin(() => {
+          benefitDragStartX.value = benefitTranslateX.value;
+        })
+        .onUpdate((e) => {
+          benefitTranslateX.value = benefitDragStartX.value + e.translationX;
+        })
+        .onEnd((e) => {
+          // Velocity factored in as a bit of extra projected distance, not a
+          // separate physics simulation — enough for a fast flick to carry
+          // past the halfway point to the next card without needing a real
+          // decay curve for what's still a fixed, snap-to-page destination.
+          const projected = benefitTranslateX.value + e.velocityX * 0.15;
+          const targetIndex = Math.max(
+            0,
+            Math.min(BENEFITS.length - 1, Math.round(-projected / benefitCardWidth))
+          );
+          benefitTranslateX.value = withTiming(-targetIndex * benefitCardWidth, {
+            duration: 260,
+            easing: Easing.out(Easing.cubic),
+          });
+          runOnJS(setActiveBenefitIndexOnJS)(targetIndex);
+        }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [benefitCardWidth]
   );
-
-  const handleBenefitScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const index = Math.round(e.nativeEvent.contentOffset.x / benefitCardWidth);
-    setActiveBenefitIndex(Math.max(0, Math.min(BENEFITS.length - 1, index)));
-  };
+  const benefitRowAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: benefitTranslateX.value }],
+  }));
   const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // BUG FIX: handlePurchase/handleRestore both await a network call, then act
   // on the result (set state, schedule a close, or call router.back()
@@ -223,6 +324,21 @@ export default function PaywallScreen() {
     if (!selectedPackage || isPurchasing) return;
     setIsPurchasing(true);
     setPurchaseError(null);
+    // A purchase needs a real account to attach the entitlement to — without
+    // one there's nothing for RevenueCat to sync Plus status against on a
+    // reinstall or a second device, and this screen should be unreachable
+    // while signed out anyway (see (tabs)/_layout.tsx's own session guard),
+    // so hitting this means that guard was somehow bypassed. Fail loudly
+    // here rather than let StoreKit run and silently orphan the purchase.
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) {
+      setIsPurchasing(false);
+      hapticError();
+      setPurchaseError('Sign in to your account before purchasing VerveIn Plus.');
+      return;
+    }
     const outcome = await purchasePackage(selectedPackage);
     if (!isMountedRef.current) return;
     setIsPurchasing(false);
@@ -245,6 +361,19 @@ export default function PaywallScreen() {
     if (isRestoring) return;
     hapticImpactLight();
     setIsRestoring(true);
+    // Same reasoning as handlePurchase above — restoring while signed out
+    // would reattach RevenueCat's entitlement to the anonymous device ID,
+    // not the account, which is exactly the "not linked to their account"
+    // gap this whole guard exists to close.
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) {
+      setIsRestoring(false);
+      hapticError();
+      setPurchaseError('Sign in to your account before restoring purchases.');
+      return;
+    }
     const outcome = await restorePurchases();
     if (!isMountedRef.current) return;
     setIsRestoring(false);
@@ -319,11 +448,18 @@ export default function PaywallScreen() {
                 before, just not buried behind the free-tier caveat first.
                 The second sentence is now explicit reciprocity, not just a
                 caveat: the whole reason the core loop is free first is
-                stated outright, not left implicit. */}
+                stated outright, not left implicit.
+                BUG FIX (found in a later full-app audit, "doesn't look
+                compelling" feedback): the original wording described its
+                own vagueness ("the deeper view," "insight beyond your daily
+                plan") rather than naming an actual thing you get. Naming
+                the real screens (strength curve, consistency, recovery)
+                does the same honest job with something concrete to picture
+                instead of an abstraction. */}
             <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>
-              Unlock the deeper view of your own training — full history, real trends, and insight beyond your daily
-              plan. Everything that makes your plan actually work — the check-in, the adaptive engine — stays free,
-              always. Plus is what&apos;s layered on top of it.
+              See the real shape behind every session — your strength curve, your consistency, your recovery — not
+              just today&apos;s plan. The check-in and adaptive engine stay free, always; Plus is the deeper view
+              layered on top.
             </Text>
 
             {/* Moved above the carousel — price was previously the last
@@ -396,63 +532,53 @@ export default function PaywallScreen() {
               </Text>
             ) : null}
 
+            {/* BUG FIX (found in a later full-app audit, "doesn't look
+                compelling" feedback): this used to come AFTER the carousel,
+                so the first thing anyone saw post-pricing was a single
+                benefit card and a lot of empty canvas below it — the full
+                value prop was a scroll away. Reordered so the comprehensive,
+                all-6-at-once view leads (its own original purpose, per this
+                comment's prior home above the old carousel: "guaranteed
+                visible without a single swipe" — now also guaranteed
+                visible without a scroll). The carousel below is the richer
+                per-item deep-dive for anyone who keeps going, not the sole
+                way to see what's included. */}
+            <View style={styles.checklistWrap}>
+              {BENEFITS.map((benefit) => (
+                <View key={benefit.title} style={styles.checklistRow}>
+                  <SymbolView name={benefit.icon} size={15} tintColor="#5FBE84" />
+                  <Text style={styles.checklistLabel} maxFontSizeMultiplier={1.3}>{benefit.title}</Text>
+                </View>
+              ))}
+              {/* Genuinely true, not a filler line: Goals (see profile.tsx's
+                  own PremiumGate) and PR celebrations (check-in.tsx) are
+                  real Plus features not itemized above — a soft closer
+                  gesturing at that rather than a 7th identical-looking
+                  claim, muted on purpose so it doesn't read as its own
+                  specific promise the way the 6 checked items above do. */}
+              <View style={styles.checklistRow}>
+                <SymbolView name="plus" size={15} tintColor={colors.textTertiary} />
+                <Text style={styles.checklistMoreLabel} maxFontSizeMultiplier={1.3}>& more</Text>
+              </View>
+            </View>
+
             <View style={styles.benefitsCarouselWrap}>
-              <Animated.ScrollView
-                horizontal
-                pagingEnabled
-                showsHorizontalScrollIndicator={false}
-                decelerationRate="fast"
-                onScroll={handleBenefitScrollEvent}
-                scrollEventThrottle={16}
-                style={{ width: benefitCardWidth }}
-              >
-                {BENEFITS.map((benefit, index) => {
-                  // Neighboring cards ease back in scale/opacity as they
-                  // scroll off-center — the same "coverflow" language a real
-                  // swipe gesture reads as fluid, not just a hard cut between
-                  // pages. Centered content (not top-anchored) is what
-                  // actually fixed the "mostly empty card" look — the icon
-                  // and copy now read as a deliberate focal point with real
-                  // breathing room around it, not text stranded at the top
-                  // of a tall empty box.
-                  const inputRange = [
-                    (index - 1) * benefitCardWidth,
-                    index * benefitCardWidth,
-                    (index + 1) * benefitCardWidth,
-                  ];
-                  const scale = benefitScrollX.interpolate({
-                    inputRange,
-                    outputRange: [0.92, 1, 0.92],
-                    extrapolate: 'clamp',
-                  });
-                  const opacity = benefitScrollX.interpolate({
-                    inputRange,
-                    outputRange: [0.5, 1, 0.5],
-                    extrapolate: 'clamp',
-                  });
-                  return (
-                    <View key={benefit.title} style={{ width: benefitCardWidth }}>
-                      {/* shouldRasterizeIOS: without it, scaling this view's
-                          text content live (not just a wheel-picker-style
-                          plain Text glyph-ghost, already avoided above)
-                          re-rasterizes the glyphs every frame as the scale
-                          interpolates, reading as text "glitching" mid-swipe.
-                          Rasterizing once lets the GPU transform a cached
-                          bitmap instead of re-drawing text each frame. */}
-                      <Animated.View
-                        shouldRasterizeIOS
-                        style={[styles.benefitCard, { transform: [{ scale }], opacity }]}
-                      >
-                        <View style={styles.benefitCardIcon}>
-                          <SymbolView name={benefit.icon} size={30} tintColor="#5FBE84" />
-                        </View>
-                        <Text style={styles.benefitCardTitle} maxFontSizeMultiplier={1.3}>{benefit.title}</Text>
-                        <Text style={styles.benefitCardSubtitle} maxFontSizeMultiplier={1.4}>{benefit.subtitle}</Text>
-                      </Animated.View>
-                    </View>
-                  );
-                })}
-              </Animated.ScrollView>
+              <GestureDetector gesture={benefitPanGesture}>
+                <View style={{ width: benefitCardWidth, height: 200, overflow: 'hidden' }}>
+                  <ReanimatedAnimated.View style={[{ flexDirection: 'row' }, benefitRowAnimatedStyle]}>
+                    {BENEFITS.map((benefit, index) => (
+                      <BenefitCarouselCard
+                        key={benefit.title}
+                        benefit={benefit}
+                        index={index}
+                        translateX={benefitTranslateX}
+                        cardWidth={benefitCardWidth}
+                        styles={styles}
+                      />
+                    ))}
+                  </ReanimatedAnimated.View>
+                </View>
+              </GestureDetector>
               <View style={styles.benefitDotsRow}>
                 {BENEFITS.map((benefit, index) => (
                   <View
@@ -468,20 +594,6 @@ export default function PaywallScreen() {
                 {`You've logged ${loggedSessionCount} session${loggedSessionCount === 1 ? '' : 's'} — Plus is where you see the full pattern behind ${loggedSessionCount === 1 ? 'it' : 'all of them'}.`}
               </Text>
             ) : null}
-
-            {/* A dense, all-at-once list of everything Plus includes —
-                the carousel above is the hero showcase, but relying on it
-                alone means anyone who doesn't swipe through all 6 cards
-                never sees most of the value prop. This is the same 6
-                benefits, just guaranteed visible without a single swipe. */}
-            <View style={styles.checklistWrap}>
-              {BENEFITS.map((benefit) => (
-                <View key={benefit.title} style={styles.checklistRow}>
-                  <SymbolView name={benefit.icon} size={15} tintColor="#5FBE84" />
-                  <Text style={styles.checklistLabel} maxFontSizeMultiplier={1.3}>{benefit.title}</Text>
-                </View>
-              ))}
-            </View>
           </ScrollView>
 
           <View style={styles.footer}>
@@ -506,6 +618,15 @@ export default function PaywallScreen() {
                 {selectedTrial}, then {selectedPackage?.product.priceString}
               </Text>
             ) : null}
+            {/* Real authority, not a fake credential — placed right before
+                the commit moment on purpose (transparency reduces the
+                anxiety that kills conversion right at the point of
+                decision), and grounded in something actually true about
+                this engine (see policy-orchestration.ts's own "surfacing,
+                not hiding" comment) rather than a generic trust badge. */}
+            <Text style={styles.trustText} maxFontSizeMultiplier={1.3}>
+              No black box — every plan change traces back to something you told it.
+            </Text>
             <Pressable
               style={styles.primaryButtonHit}
               onPress={handlePurchase}
@@ -514,6 +635,7 @@ export default function PaywallScreen() {
               onHoverOut={ctaHover.onHoverOut}
               onPressIn={ctaPress.onPressIn}
               onPressOut={ctaPress.onPressOut}
+              android_ripple={AndroidRippleOnAccent}
             >
               <Animated.View
                 style={[
@@ -539,7 +661,7 @@ export default function PaywallScreen() {
                   ]}
                 />
                 <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>
-                  {isPurchasing ? 'Purchasing…' : selectedTrial ? 'Start Free Trial' : 'Continue'}
+                  {isPurchasing ? 'Purchasing…' : selectedTrial ? 'Start Free Trial' : 'Unlock VerveIn Plus'}
                 </Text>
                 {isPurchasing ? null : (
                   <View style={styles.buttonArrow}>
@@ -555,6 +677,7 @@ export default function PaywallScreen() {
               onHoverIn={restoreHover.onHoverIn}
               onHoverOut={restoreHover.onHoverOut}
               hitSlop={8}
+              android_ripple={AndroidRipple}
             >
               <Animated.Text
                 style={[
@@ -779,13 +902,14 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     // which is exactly the dead-space-below-the-text look that kept getting
     // reported. Centering here is what that comment always should have done.
     benefitCard: {
-      borderRadius: 16,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
+      borderRadius: Platform.OS === 'android' ? 24 : 16,
       backgroundColor: colors.surface,
       padding: 20,
       minHeight: 156,
       justifyContent: 'center',
+      ...(Platform.OS === 'android'
+        ? AndroidCardElevation
+        : { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.surfaceBorder }),
     },
     benefitCardIcon: {
       width: 40,
@@ -858,6 +982,11 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       fontSize: Type.body,
       fontFamily: 'Geist-Medium',
     },
+    checklistMoreLabel: {
+      color: colors.textTertiary,
+      fontSize: Type.body,
+      fontFamily: 'Geist-Medium',
+    },
     packageRow: {
       marginTop: 22,
       width: '100%',
@@ -915,6 +1044,14 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       marginBottom: 10,
       color: colors.textSecondary,
       fontSize: 11.5,
+      textAlign: 'center',
+      fontFamily: 'Geist-Regular',
+    },
+    trustText: {
+      marginBottom: 10,
+      color: colors.textTertiary,
+      fontSize: 11.5,
+      lineHeight: 15,
       textAlign: 'center',
       fontFamily: 'Geist-Regular',
     },

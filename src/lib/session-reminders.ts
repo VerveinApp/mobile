@@ -93,8 +93,14 @@ const RESCHEDULE_WINDOW_DAYS = 14;
 // catches the native-module error. Still lazy (never called at module top
 // level) and still cached after the first attempt, same as before; only
 // the loading mechanism changed.
+// Exported so other modules needing expo-notifications (e.g.
+// push-notifications.ts, for a real Expo push token instead of a local
+// schedule) reuse this exact lazy-require, instead of each reimplementing
+// the same fix and risking a subtly different — and untested — version of
+// it. See this function's own comment above for why it must stay a
+// synchronous require(), not a dynamic import().
 let cachedModule: typeof import('expo-notifications') | null | undefined;
-function getModule(): typeof import('expo-notifications') | null {
+export function getModule(): typeof import('expo-notifications') | null {
   if (cachedModule !== undefined) return cachedModule;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports -- see the disclosed fix-history comment above for why this must be a synchronous require(), not a dynamic import().
@@ -173,16 +179,42 @@ async function cancelAllReminders(Notifications: typeof import('expo-notificatio
  * well-rested, not neglected — same signal, readiness framing instead of a
  * ledger of what's owed. States the fact, never a command to go train it.
  */
+// BUG FIX (user's own real device screenshot: the exact same "Whenever
+// works today." fired two days running): one fixed string per case reads as
+// a bot the moment someone notices the repeat, even though the underlying
+// signal is real each time. A random pick per (re)schedule — see
+// buildReminderContent below — fixes the repetition without touching what
+// the notification is actually allowed to claim. Every line here stays in
+// the same readiness framing as the original two (see this function's own
+// doc comment above): no "overdue"/"behind"/"neglected" wording sneaking
+// back in through a new variant.
+const AREA_READY_TEMPLATES: ((label: string) => string)[] = [
+  (label) => `${label} is well-rested and ready.`,
+  (label) => `${label} is fresh — good day for it.`,
+  (label) => `${label}'s had time to recover. Ready when you are.`,
+  (label) => `A good day for ${label}, whenever it fits.`,
+];
+const GENERIC_TEMPLATES: string[] = [
+  'Whenever works today.',
+  'No rush — just whenever fits.',
+  "Today's open. Train whenever works.",
+  'Just a nudge — no specific reason today.',
+];
+
+function pickRandom<T>(items: T[]): T {
+  return items[Math.floor(Math.random() * items.length)];
+}
+
 async function buildReminderContent(): Promise<{ title: string; body: string }> {
   const trainingState = await getTrainingState();
   const area = getMostNeglectedBodyArea(trainingState);
   if (area) {
     return {
       title: 'Training day',
-      body: `${BODY_AREA_PRIORITY_LABEL[area]} is well-rested and ready.`,
+      body: pickRandom(AREA_READY_TEMPLATES)(BODY_AREA_PRIORITY_LABEL[area]),
     };
   }
-  return { title: 'Training day', body: 'Whenever works today.' };
+  return { title: 'Training day', body: pickRandom(GENERIC_TEMPLATES) };
 }
 
 // BUG FIX: scheduleRollingWindow's own cancel-then-reschedule sequence had

@@ -1,13 +1,13 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import ReanimatedAnimated from 'react-native-reanimated';
 import type { SFSymbol } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SymbolView } from '@/components/ui/app-symbol';
 import { RadarChart } from '@/components/onboarding/radar-chart';
-import { TabularNums, Type } from '@/constants/theme';
+import { AndroidCardElevation, AndroidRipple, TabularNums, Type } from '@/constants/theme';
 import { PremiumGate } from '@/components/premium-gate';
 import { Sparkline } from '@/components/ui/sparkline';
 import { BODY_AREA_LABELS, BODY_AREA_ORDER } from '@/lib/body-area-labels';
@@ -340,6 +340,7 @@ export default function ProgressScreen() {
                     hapticSelect();
                     setGridRange(option);
                   }}
+                  android_ripple={AndroidRipple}
                 >
                   <Text
                     style={[styles.rangeOptionText, gridRange === option && styles.rangeOptionTextActive]}
@@ -448,6 +449,7 @@ export default function ProgressScreen() {
                           {day.isScheduled ? (
                             <Pressable
                               disabled={day.completed === null}
+                              android_ripple={{ ...AndroidRipple, borderless: true }}
                               onPress={() => {
                                 hapticSelect();
                                 // Progress & History itself is Plus-only —
@@ -517,6 +519,7 @@ export default function ProgressScreen() {
                 <Pressable
                   key={option}
                   style={[styles.rangeOption, balanceRange === option && styles.rangeOptionActive]}
+                  android_ripple={AndroidRipple}
                   onPress={() => {
                     if (balanceRange === option) return;
                     hapticSelect();
@@ -567,6 +570,7 @@ export default function ProgressScreen() {
                         <Pressable
                           key={option}
                           style={[styles.rangeOption, balanceView === option && styles.rangeOptionActive]}
+                          android_ripple={AndroidRipple}
                           onPress={() => {
                             if (balanceView === option) return;
                             hapticSelect();
@@ -828,11 +832,12 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], isDark: 
       color: colors.text,
     },
     card: {
-      borderRadius: 16,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
+      borderRadius: Platform.OS === 'android' ? 20 : 16,
       backgroundColor: colors.surface,
       padding: 16,
+      ...(Platform.OS === 'android'
+        ? AndroidCardElevation
+        : { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.surfaceBorder }),
     },
     chartCaptionRow: {
       flexDirection: 'row',
@@ -1006,12 +1011,13 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], isDark: 
     },
     summaryCard: {
       flex: 1,
-      borderRadius: 16,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
+      borderRadius: Platform.OS === 'android' ? 20 : 16,
       backgroundColor: colors.surface,
       paddingVertical: 18,
       alignItems: 'center',
+      ...(Platform.OS === 'android'
+        ? AndroidCardElevation
+        : { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.surfaceBorder }),
     },
     summaryValue: {
       color: colors.text,

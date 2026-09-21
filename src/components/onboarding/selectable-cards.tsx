@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 
+import { AndroidCardElevation, AndroidRipple } from '@/constants/theme';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticSelect } from '@/lib/haptics';
 import { useAppTheme } from '@/lib/theme-context';
@@ -123,6 +124,7 @@ function SelectableCard<T extends string>({
       onHoverOut={hover.onHoverOut}
       onPressIn={press.onPressIn}
       onPressOut={press.onPressOut}
+      android_ripple={AndroidRipple}
     >
       <Animated.View
         style={[
@@ -174,7 +176,7 @@ function SelectableCard<T extends string>({
   );
 }
 
-const CARD_RADIUS = 10;
+const CARD_RADIUS = Platform.OS === 'android' ? 16 : 10;
 
 function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColor: string) {
   return StyleSheet.create({
@@ -189,9 +191,10 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       alignItems: 'center',
       paddingHorizontal: 12,
       borderRadius: CARD_RADIUS,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
       backgroundColor: colors.surface,
+      ...(Platform.OS === 'android'
+        ? AndroidCardElevation
+        : { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.surfaceBorder }),
     },
     cardVisualPlain: {
       width: '100%',
@@ -200,9 +203,10 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       paddingHorizontal: 14,
       paddingVertical: 14,
       borderRadius: CARD_RADIUS,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
       backgroundColor: colors.surface,
+      ...(Platform.OS === 'android'
+        ? AndroidCardElevation
+        : { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.surfaceBorder }),
     },
     // A static, subtle top-edge highlight — not the native glass material used
     // on primary buttons (cards were deliberately kept out of that pass), just

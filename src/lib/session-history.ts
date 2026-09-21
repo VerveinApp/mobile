@@ -200,6 +200,14 @@ export type WeekDay = {
    * already happened and nothing was ever logged for it," which reads the
    * same as a real miss, not as still-pending. */
   isFuture: boolean;
+  /** That day's real calorie-estimate.ts session estimate, if any — the
+   * same per-session number getWeeklyCaloriesBurned already sums across the
+   * week. Undefined (not 0) for a future day, a day with no entry, or an
+   * entry logged before caloriesBurned existed — a real "no data" rather
+   * than a false "zero effort," so callers rendering this per-day (Home's
+   * own training-load chart) don't draw a logged rest day and a genuinely
+   * unknown day identically. */
+  caloriesBurned?: number;
 };
 
 /**
@@ -214,6 +222,10 @@ export async function getWeekActivity(scheduledDays: string[] | null): Promise<{
 }> {
   const entries = await readJsonList<SessionHistoryEntry>(KEY);
   const byDate = new Map(entries.map((e) => [e.date, e.completed]));
+  // Full entry too, not just its `completed` flag — Home's training-load
+  // chart needs that day's real caloriesBurned, same field
+  // getWeeklyCaloriesBurned already sums across the week.
+  const entryByDate = new Map(entries.map((e) => [e.date, e]));
   // BUG FIX: a day is only real "scheduled" if the account actually existed
   // yet — without this floor, a brand-new account whose weekly pattern
   // includes, say, Monday–Thursday saw those same-week days rendered as
@@ -246,6 +258,7 @@ export async function getWeekActivity(scheduledDays: string[] | null): Promise<{
       isToday: dateStr === todayStr,
       isScheduled,
       isFuture,
+      caloriesBurned: isFuture ? undefined : entryByDate.get(dateStr)?.caloriesBurned,
     };
   });
 
