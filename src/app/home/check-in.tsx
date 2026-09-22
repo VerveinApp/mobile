@@ -1311,6 +1311,9 @@ export default function EnergyCheckInScreen() {
                       style={[styles.timePill, active && styles.timePillActive]}
                       onPress={() => handleTimeAvailableChange(minutes)}
                       hitSlop={2}
+                      accessibilityRole="button"
+                      accessibilityLabel={TIME_AVAILABLE_LABELS[minutes]}
+                      accessibilityState={{ selected: active }}
                     >
                       <Text
                         style={[styles.timePillText, active && styles.timePillTextActive]}
@@ -1337,6 +1340,9 @@ export default function EnergyCheckInScreen() {
                       style={[styles.timePill, active && styles.timePillActive]}
                       onPress={() => handleEquipmentOverrideChange(environment)}
                       hitSlop={2}
+                      accessibilityRole="button"
+                      accessibilityLabel={ENVIRONMENT_LABELS[environment]}
+                      accessibilityState={{ selected: active }}
                     >
                       <Text
                         style={[styles.timePillText, active && styles.timePillTextActive]}
@@ -1372,6 +1378,9 @@ export default function EnergyCheckInScreen() {
                         style={[styles.timePill, active && styles.timePillActive]}
                         onPress={() => handleBodyAreaChange(area)}
                         hitSlop={2}
+                        accessibilityRole="button"
+                        accessibilityLabel={BODY_AREA_LABELS[area]}
+                        accessibilityState={{ selected: active }}
                       >
                         <Text
                           style={[styles.timePillText, active && styles.timePillTextActive]}
@@ -1397,6 +1406,9 @@ export default function EnergyCheckInScreen() {
                 style={[styles.timePill, finisherAccepted && styles.timePillActive, styles.finisherPill]}
                 onPress={handleFinisherToggle}
                 hitSlop={4}
+                accessibilityRole="button"
+                accessibilityLabel={finisherAccepted ? 'Finisher added' : 'Add a finisher set'}
+                accessibilityState={{ selected: finisherAccepted }}
               >
                 <Text
                   style={[styles.timePillText, finisherAccepted && styles.timePillTextActive]}
@@ -1422,6 +1434,9 @@ export default function EnergyCheckInScreen() {
                           style={[styles.symptomChip, active && styles.symptomChipActive]}
                           onPress={() => toggleSymptomTag(tag)}
                           hitSlop={2}
+                          accessibilityRole="button"
+                          accessibilityLabel={SYMPTOM_TAG_LABELS[tag]}
+                          accessibilityState={{ selected: active }}
                         >
                           <Text
                             style={[styles.symptomChipText, active && styles.symptomChipTextActive]}
@@ -1445,6 +1460,8 @@ export default function EnergyCheckInScreen() {
               onHoverOut={ctaHover.onHoverOut}
               onPressIn={ctaPress.onPressIn}
               onPressOut={ctaPress.onPressOut}
+              accessibilityRole="button"
+              accessibilityLabel="Start session"
             >
               <Animated.View
                 style={[
@@ -1505,6 +1522,8 @@ export default function EnergyCheckInScreen() {
                     setShowReasoning((v) => !v);
                   }}
                   hitSlop={4}
+                  accessibilityRole="button"
+                  accessibilityLabel={showReasoning ? 'Hide full reasoning' : 'See full reasoning'}
                 >
                   <Text style={styles.reasoningToggleText} maxFontSizeMultiplier={1.3}>
                     {showReasoning ? 'Hide full reasoning' : 'See full reasoning'}
@@ -1737,6 +1756,10 @@ export default function EnergyCheckInScreen() {
                           setExpandedExerciseIndex((v) => (v === index ? null : index));
                         }}
                         hitSlop={4}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          isExpanded ? `Hide how-to for ${exercise.name}` : `Show how-to for ${exercise.name}`
+                        }
                       >
                         {row}
                       </Pressable>
@@ -1768,6 +1791,8 @@ export default function EnergyCheckInScreen() {
               onHoverOut={finishHover.onHoverOut}
               onPressIn={finishPress.onPressIn}
               onPressOut={finishPress.onPressOut}
+              accessibilityRole="button"
+              accessibilityLabel={isLastExercise ? 'Finish session' : 'Next exercise'}
             >
               <Animated.View
                 style={[
@@ -1809,6 +1834,8 @@ export default function EnergyCheckInScreen() {
               onHoverOut={skipExerciseHover.onHoverOut}
               onPressIn={skipExercisePress.onPressIn}
               onPressOut={skipExercisePress.onPressOut}
+              accessibilityRole="button"
+              accessibilityLabel="Skip this exercise"
             >
               <Animated.Text
                 style={[styles.skipExerciseText, textDimStyle(skipExerciseHover, skipExercisePress)]}
@@ -1842,6 +1869,8 @@ export default function EnergyCheckInScreen() {
                       onHoverOut={skipCancelHover.onHoverOut}
                       onPressIn={skipCancelPress.onPressIn}
                       onPressOut={skipCancelPress.onPressOut}
+                      accessibilityRole="button"
+                      accessibilityLabel="Keep going"
                     >
                       <PillWash hover={skipCancelHover} press={skipCancelPress} radius={14} styles={styles} />
                       <Text style={styles.skipConfirmCancelText} maxFontSizeMultiplier={1.2}>
@@ -1856,6 +1885,8 @@ export default function EnergyCheckInScreen() {
                       onHoverOut={skipConfirmHover.onHoverOut}
                       onPressIn={skipConfirmPress.onPressIn}
                       onPressOut={skipConfirmPress.onPressOut}
+                      accessibilityRole="button"
+                      accessibilityLabel="Skip anyway"
                     >
                       <Animated.Text
                         style={[styles.skipConfirmConfirmText, textDimStyle(skipConfirmHover, skipConfirmPress)]}
@@ -1887,33 +1918,40 @@ export default function EnergyCheckInScreen() {
                     </Text>
                   ) : (
                     <ScrollView style={styles.swapModalList} showsVerticalScrollIndicator={false}>
-                      {swapModalCandidates.map((candidate, index) => (
-                        <Pressable
-                          key={candidate.id}
-                          style={[
-                            styles.swapModalRow,
-                            index < swapModalCandidates.length - 1 && styles.swapModalRowDivider,
-                          ]}
-                          onPress={() => handleSelectSwap(candidate)}
-                        >
-                          <Text style={styles.swapModalRowName} maxFontSizeMultiplier={1.3}>
-                            {candidate.name}
-                          </Text>
-                          <Text style={styles.swapModalRowStat} maxFontSizeMultiplier={1.3}>
-                            {formatExerciseStat({
-                              sets: candidate.base_sets,
-                              reps: candidate.base_reps,
-                              durationMin: candidate.base_duration_min,
-                            })}
-                          </Text>
-                        </Pressable>
-                      ))}
+                      {swapModalCandidates.map((candidate, index) => {
+                        const candidateStat = formatExerciseStat({
+                          sets: candidate.base_sets,
+                          reps: candidate.base_reps,
+                          durationMin: candidate.base_duration_min,
+                        });
+                        return (
+                          <Pressable
+                            key={candidate.id}
+                            style={[
+                              styles.swapModalRow,
+                              index < swapModalCandidates.length - 1 && styles.swapModalRowDivider,
+                            ]}
+                            onPress={() => handleSelectSwap(candidate)}
+                            accessibilityRole="button"
+                            accessibilityLabel={`${candidate.name}, ${candidateStat}`}
+                          >
+                            <Text style={styles.swapModalRowName} maxFontSizeMultiplier={1.3}>
+                              {candidate.name}
+                            </Text>
+                            <Text style={styles.swapModalRowStat} maxFontSizeMultiplier={1.3}>
+                              {candidateStat}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
                     </ScrollView>
                   )}
                   <Pressable
                     style={styles.swapModalCancelHit}
                     onPress={handleCloseSwap}
                     hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Cancel"
                   >
                     <Text style={styles.swapModalCancelText} maxFontSizeMultiplier={1.2}>
                       Cancel
@@ -1966,6 +2004,8 @@ export default function EnergyCheckInScreen() {
                   router.push('/referral' as never);
                 }}
                 hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel="Bring a training partner along. Invite a friend"
               >
                 <Text style={styles.doneInsightText} maxFontSizeMultiplier={1.3}>
                   Bring a training partner along. <Text style={styles.doneInsightLink}>Invite a friend</Text>
@@ -1994,6 +2034,8 @@ export default function EnergyCheckInScreen() {
                   router.push('/(tabs)/progress' as never);
                 }}
                 hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={`${doneInsight} See Progress`}
               >
                 <Text style={styles.doneInsightText} maxFontSizeMultiplier={1.3}>
                   {doneInsight} <Text style={styles.doneInsightLink}>See Progress</Text>
@@ -2071,6 +2113,8 @@ export default function EnergyCheckInScreen() {
                     onHoverOut={feedbackMuchTooEasyHover.onHoverOut}
                     onPressIn={feedbackMuchTooEasyPress.onPressIn}
                     onPressOut={feedbackMuchTooEasyPress.onPressOut}
+                    accessibilityRole="button"
+                    accessibilityLabel="Way too easy"
                   >
                     <PillWash hover={feedbackMuchTooEasyHover} press={feedbackMuchTooEasyPress} radius={8} styles={styles} />
                     <Text style={styles.feedbackButtonText} maxFontSizeMultiplier={1.2}>Way too easy</Text>
@@ -2082,6 +2126,8 @@ export default function EnergyCheckInScreen() {
                     onHoverOut={feedbackTooEasyHover.onHoverOut}
                     onPressIn={feedbackTooEasyPress.onPressIn}
                     onPressOut={feedbackTooEasyPress.onPressOut}
+                    accessibilityRole="button"
+                    accessibilityLabel="Too easy"
                   >
                     <PillWash hover={feedbackTooEasyHover} press={feedbackTooEasyPress} radius={8} styles={styles} />
                     <Text style={styles.feedbackButtonText} maxFontSizeMultiplier={1.2}>Too easy</Text>
@@ -2093,6 +2139,8 @@ export default function EnergyCheckInScreen() {
                     onHoverOut={feedbackJustRightHover.onHoverOut}
                     onPressIn={feedbackJustRightPress.onPressIn}
                     onPressOut={feedbackJustRightPress.onPressOut}
+                    accessibilityRole="button"
+                    accessibilityLabel="Just right"
                   >
                     <PillWash hover={feedbackJustRightHover} press={feedbackJustRightPress} radius={8} styles={styles} />
                     <Text style={styles.feedbackButtonText} maxFontSizeMultiplier={1.2}>Just right</Text>
@@ -2104,6 +2152,8 @@ export default function EnergyCheckInScreen() {
                     onHoverOut={feedbackTooHardHover.onHoverOut}
                     onPressIn={feedbackTooHardPress.onPressIn}
                     onPressOut={feedbackTooHardPress.onPressOut}
+                    accessibilityRole="button"
+                    accessibilityLabel="Too hard"
                   >
                     <PillWash hover={feedbackTooHardHover} press={feedbackTooHardPress} radius={8} styles={styles} />
                     <Text style={styles.feedbackButtonText} maxFontSizeMultiplier={1.2}>Too hard</Text>
@@ -2115,6 +2165,8 @@ export default function EnergyCheckInScreen() {
                     onHoverOut={feedbackMuchTooHardHover.onHoverOut}
                     onPressIn={feedbackMuchTooHardPress.onPressIn}
                     onPressOut={feedbackMuchTooHardPress.onPressOut}
+                    accessibilityRole="button"
+                    accessibilityLabel="Way too hard"
                   >
                     <PillWash hover={feedbackMuchTooHardHover} press={feedbackMuchTooHardPress} radius={8} styles={styles} />
                     <Text style={styles.feedbackButtonText} maxFontSizeMultiplier={1.2}>Way too hard</Text>
@@ -2146,6 +2198,8 @@ export default function EnergyCheckInScreen() {
               onHoverOut={backToHomeHover.onHoverOut}
               onPressIn={backToHomePress.onPressIn}
               onPressOut={backToHomePress.onPressOut}
+              accessibilityRole="button"
+              accessibilityLabel="Back to Home"
             >
               <PillWash hover={backToHomeHover} press={backToHomePress} radius={6} styles={styles} />
               <Text style={styles.doneBackButtonText} maxFontSizeMultiplier={1.2}>Back to Home</Text>
@@ -2588,6 +2642,8 @@ function ExerciseTimer({
           onHoverOut={startNextHover.onHoverOut}
           onPressIn={startNextPress.onPressIn}
           onPressOut={startNextPress.onPressOut}
+          accessibilityRole="button"
+          accessibilityLabel={nextPhaseButtonLabel ?? undefined}
         >
           <PillWash hover={startNextHover} press={startNextPress} radius={16} styles={styles} />
           <SymbolView name="play.fill" size={12} tintColor="#ffffff" />
@@ -2605,6 +2661,8 @@ function ExerciseTimer({
             onHoverOut={pauseHover.onHoverOut}
             onPressIn={pausePress.onPressIn}
             onPressOut={pausePress.onPressOut}
+            accessibilityRole="button"
+            accessibilityLabel={active ? 'Pause' : 'Resume'}
           >
             <PillWash hover={pauseHover} press={pausePress} radius={14} styles={styles} />
             <SymbolView name={active ? 'pause.fill' : 'play.fill'} size={12} tintColor={colors.text} />
@@ -2621,6 +2679,8 @@ function ExerciseTimer({
               onHoverOut={doneEarlyHover.onHoverOut}
               onPressIn={doneEarlyPress.onPressIn}
               onPressOut={doneEarlyPress.onPressOut}
+              accessibilityRole="button"
+              accessibilityLabel="Done early?"
             >
               <PillWash hover={doneEarlyHover} press={doneEarlyPress} radius={14} styles={styles} />
               <SymbolView name="checkmark" size={11} tintColor={colors.textSecondary} />
