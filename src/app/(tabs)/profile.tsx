@@ -482,7 +482,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors']) {
       justifyContent: 'center',
     },
     avatarText: {
-      color: '#5FBE84',
+      color: colors.accentText,
       fontSize: Type.display,
       fontFamily: 'Geist-Bold',
     },

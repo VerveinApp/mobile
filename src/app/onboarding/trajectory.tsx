@@ -295,7 +295,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       fontFamily: 'Geist-Medium',
     },
     closingLineAccent: {
-      color: '#5FBE84',
+      color: colors.accentText,
       fontFamily: 'Geist-Bold',
     },
     // A few px taller than the standard CTA — this is one of the three

@@ -896,7 +896,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     headerPlusText: {
       marginLeft: 8,
-      color: '#5FBE84',
+      color: colors.accentText,
       fontSize: Type.display,
       letterSpacing: -0.3,
       fontFamily: 'Geist-Bold',
@@ -1183,7 +1183,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     successPlusText: {
       marginLeft: 8,
-      color: '#5FBE84',
+      color: colors.accentText,
       fontSize: Type.display,
       letterSpacing: -0.3,
       fontFamily: 'Geist-Bold',

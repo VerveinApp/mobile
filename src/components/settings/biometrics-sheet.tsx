@@ -542,7 +542,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       fontFamily: 'Geist-SemiBold',
     },
     sexPillTextSelected: {
-      color: '#5FBE84',
+      color: colors.accentText,
     },
     unitPillRow: {
       flexDirection: 'row',
@@ -573,7 +573,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       fontFamily: 'Geist-SemiBold',
     },
     unitPillTextSelected: {
-      color: '#5FBE84',
+      color: colors.accentText,
     },
     wheelCard: {
       // BUG FIX (found by the user, screenshotted with the empty region

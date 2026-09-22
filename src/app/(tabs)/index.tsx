@@ -843,7 +843,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     // real signal, never act on it invisibly.
     deloadBannerAction: {
       alignSelf: 'flex-end',
-      color: '#5FBE84',
+      color: colors.accentText,
       fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
@@ -887,7 +887,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       paddingHorizontal: 4,
     },
     healthKitBannerConnectText: {
-      color: '#5FBE84',
+      color: colors.accentText,
       fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
@@ -914,7 +914,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       justifyContent: 'center',
     },
     avatarText: {
-      color: '#5FBE84',
+      color: colors.accentText,
       fontSize: Type.bodyLarge,
       fontFamily: 'Geist-Bold',
     },

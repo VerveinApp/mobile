@@ -1644,7 +1644,7 @@ function createStyles(colors: Record<string, string>) {
       fontFamily: 'Geist-SemiBold',
     },
     unitPillTextSelected: {
-      color: '#5FBE84',
+      color: colors.accentText,
     },
     comingSoonRow: {
       flexDirection: 'row',
@@ -1697,7 +1697,7 @@ function createStyles(colors: Record<string, string>) {
       marginBottom: 10,
     },
     actionText: {
-      color: '#5FBE84',
+      color: colors.accentText,
       fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },

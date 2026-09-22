@@ -648,7 +648,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       fontFamily: 'Geist-SemiBold',
     },
     entryStatusTextDone: {
-      color: '#5FBE84',
+      color: colors.accentText,
     },
   });
 }

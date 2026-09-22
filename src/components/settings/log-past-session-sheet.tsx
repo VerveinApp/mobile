@@ -417,7 +417,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       fontFamily: 'Geist-SemiBold',
     },
     gridPillTextSelected: {
-      color: '#5FBE84',
+      color: colors.accentText,
     },
     energyRow: {
       flexDirection: 'row',
@@ -447,7 +447,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       fontFamily: 'Geist-SemiBold',
     },
     energyPillTextSelected: {
-      color: '#5FBE84',
+      color: colors.accentText,
     },
     energyReadout: {
       color: colors.textTertiary,

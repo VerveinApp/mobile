@@ -964,7 +964,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], isDark: 
       backgroundColor: '#5FBE84',
     },
     debtValue: {
-      color: '#5FBE84',
+      color: colors.accentText,
       fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
       ...TabularNums,

@@ -431,7 +431,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       fontFamily: 'Geist-SemiBold',
     },
     gridPillTextSelected: {
-      color: '#5FBE84',
+      color: colors.accentText,
     },
     noteInput: {
       minHeight: 70,

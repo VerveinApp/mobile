@@ -120,9 +120,11 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       backgroundColor: colors.surfaceSheen,
     },
     cardKicker: {
-      // Brand green — deliberately fixed across both themes, same as every
-      // other accent usage in this app, not a theme token.
-      color: '#5FBE84',
+      // Brand green, but see Colors.light.accentText's own comment — this
+      // IS a theme token (unlike the background/icon-tint brand-green
+      // literal used elsewhere), specifically because green TEXT needed a
+      // darker light-mode shade to clear WCAG AA contrast.
+      color: colors.accentText,
       fontSize: Type.micro,
       letterSpacing: 1,
       fontFamily: 'Geist-SemiBold',
@@ -149,7 +151,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     cardLinkText: {
       marginTop: 14,
-      color: '#5FBE84',
+      color: colors.accentText,
       fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },

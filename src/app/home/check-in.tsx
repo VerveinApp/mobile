@@ -2906,7 +2906,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       fontFamily: 'Geist-Medium',
     },
     symptomChipTextActive: {
-      color: '#5FBE84',
+      color: colors.accentText,
       fontFamily: 'Geist-SemiBold',
     },
     // A distinct, more solid treatment than the symptom chips above —
@@ -3169,7 +3169,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     // label there.
     timerPhaseLabel: {
       marginTop: 10,
-      color: '#5FBE84',
+      color: colors.accentText,
       fontSize: Type.caption,
       letterSpacing: 0.4,
       textTransform: 'uppercase',
@@ -3248,7 +3248,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     timerDoneText: {
       marginTop: 8,
-      color: '#5FBE84',
+      color: colors.accentText,
       fontSize: Type.caption,
       fontFamily: 'Geist-SemiBold',
     },

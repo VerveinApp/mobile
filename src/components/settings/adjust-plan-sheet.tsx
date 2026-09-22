@@ -376,7 +376,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       textAlign: 'center',
     },
     gridPillTextSelected: {
-      color: '#5FBE84',
+      color: colors.accentText,
     },
     dayRow: {
       flexDirection: 'row',
@@ -402,7 +402,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       fontFamily: 'Geist-SemiBold',
     },
     dayCircleTextSelected: {
-      color: '#5FBE84',
+      color: colors.accentText,
     },
     dialWrap: {
       alignItems: 'center',

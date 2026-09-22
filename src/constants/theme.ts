@@ -15,8 +15,11 @@ import { Platform, type TextStyle } from 'react-native';
  * (softer contrast, matches iOS's own label color). Dark mode is unchanged:
  * near-black page, slightly-lighter-black cards. Brand accent colors
  * (green/red/orange and their translucent tints) are shared literals used
- * directly in every screen's styles — they read fine on both a black card
- * and a white one, so they don't need theme tokens of their own.
+ * directly in every screen's styles for backgrounds/icon tints — those read
+ * fine on both a black card and a white one, so they don't need theme
+ * tokens of their own. TEXT set in the brand green is the one real
+ * exception — see accentText below, added after a WCAG audit found the
+ * literal green fails contrast badly on a white surface.
  */
 export const Colors = {
   light: {
@@ -38,6 +41,16 @@ export const Colors = {
     glassBorder: 'rgba(0,0,0,0.12)',
     iconMuted: '#6b6b6b',
     iconFaint: '#a0a0a0',
+    // WCAG AA FIX (found in an accessibility audit): the brand green
+    // (#5FBE84, still used everywhere else as a background/icon-tint
+    // literal) is only 2.29:1 against a white surface — badly fails AA's
+    // 4.5:1 text-contrast minimum. It was never a theme token before this
+    // (see accentText's own dark-mode comment for why), so every screen
+    // used the literal directly regardless of theme. This darker shade
+    // (4.70:1 against #FFFFFF) is for TEXT set in the brand green only —
+    // backgrounds/icon tints keep the original #5FBE84 literal, since
+    // those aren't subject to the same text-contrast rule.
+    accentText: '#358253',
   },
   dark: {
     text: '#ffffff',
@@ -58,6 +71,10 @@ export const Colors = {
     glassBorder: 'rgba(255,255,255,0.12)',
     iconMuted: '#9a9a9a',
     iconFaint: '#5a5a5a',
+    // The original brand green already passes AA here (8.56:1 against
+    // #0C0C0C) — kept unchanged, so accentText only actually diverges from
+    // the shared literal in light mode.
+    accentText: '#5FBE84',
   },
 } as const;
 

@@ -471,7 +471,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       fontFamily: 'Geist-SemiBold',
     },
     planRowDayToday: {
-      color: '#5FBE84',
+      color: colors.accentText,
     },
     planRowLabel: {
       marginTop: 2,
