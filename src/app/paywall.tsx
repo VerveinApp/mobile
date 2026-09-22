@@ -42,10 +42,13 @@ const CANVAS_HEIGHT = 812;
 // checked against every PremiumGate/isPremium call site (progress.tsx's
 // consistency calendar, training balance, and strength progress; check-
 // in.tsx's symptom tracking, HealthKit-aware readiness trim, and coaching/
-// plan-fit notes; sleep-history.tsx/nutrition-history.tsx's own full-history
-// gate; log.tsx's own whole-screen gate). Strength Progress was missing from
-// this list even though the feature itself already shipped — added rather
-// than left stale.
+// plan-fit notes; settings/index.tsx's own whole-DATA-section gate; log.tsx's
+// whole-screen gate; profile.tsx's Goals gate). Re-verified against a fresh
+// grep of every PremiumGate/isPremium call site — Goals and Symptom tracking
+// were both real, shipped gates missing from this list; the old Sleep &
+// Nutrition entry described a narrower inner gate than the outer DATA-section
+// gate that actually applies. Don't let this list drift from the code again —
+// grep for PremiumGate before trusting it's still complete.
 const BENEFITS: { icon: Parameters<typeof SymbolView>[0]['name']; title: string; subtitle: string }[] = [
   {
     icon: 'chart.bar.fill',
@@ -78,13 +81,17 @@ const BENEFITS: { icon: Parameters<typeof SymbolView>[0]['name']; title: string;
     subtitle: 'Coaching notes and plan-fit callouts, surfaced only when the pattern is real.',
   },
   {
-    icon: 'bed.double.fill',
-    title: 'Full Sleep & Nutrition History',
-    // Loss-framed on purpose (see Consistency calendar's own comment above
-    // for the same reasoning): the older entries are already real, already
-    // logged, already saved — Plus is what lets you see them again, not a
-    // new capability being sold.
-    subtitle: "Your logs older than a week are still there — Plus is what lets you see them again.",
+    icon: 'chart.bar.xaxis',
+    title: 'Data & History',
+    // BUG FIX: this used to be framed as just "logs older than a week are
+    // still there" (a loss-framed nudge for a narrow inner gate on the
+    // Sleep/Nutrition screens specifically). settings/index.tsx's own
+    // POLICY CHANGE comment shows the whole DATA section — Progress &
+    // History, Body Measurements, Condition Log, Progress Photos, Sleep
+    // History, and Nutrition History — is now gated as one bundle; a free
+    // user can't open any of these six screens at all, not just their
+    // older entries. This entry undersold that.
+    subtitle: 'Progress & History, body measurements, progress photos, your condition log, and full sleep & nutrition history — all in one place.',
   },
   {
     icon: 'clock.arrow.circlepath',
@@ -93,6 +100,22 @@ const BENEFITS: { icon: Parameters<typeof SymbolView>[0]['name']; title: string;
     // session, weigh-in, etc.) is gated behind Plus as a single unit again,
     // not just deeper history — this entry was missing that reversal.
     subtitle: 'Backfill a session you forgot to log, or record a weigh-in for a day that already happened.',
+  },
+  {
+    icon: 'target',
+    title: 'Goals',
+    // profile.tsx's own PremiumGate label="Goals" — target lift and target
+    // weight, each with a real progress ring / trend sparkline, not just a
+    // number.
+    subtitle: 'Set a target lift and target weight, and watch real progress rings and trend charts track you there.',
+  },
+  {
+    icon: 'bandage.fill',
+    title: 'Symptom tracking',
+    // check-in.tsx's own PremiumGate label="Symptom tracking" — only
+    // surfaced when energy <= 2, so most users won't see this locked often,
+    // but it's a real gate and belongs on the list like every other one.
+    subtitle: "On a low-energy day, tag what's actually going on — sore, sick, stressed — so today's session can account for it.",
   },
 ];
 
