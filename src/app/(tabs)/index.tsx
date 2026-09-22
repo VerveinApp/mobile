@@ -555,6 +555,8 @@ function Header({
         onPressIn={press.onPressIn}
         onPressOut={press.onPressOut}
         android_ripple={{ ...AndroidRipple, borderless: true }}
+        accessibilityRole="button"
+        accessibilityLabel="Open profile"
       >
         <View style={styles.avatarVisual}>
           <Text style={styles.avatarText} maxFontSizeMultiplier={1.15}>{initial}</Text>
@@ -624,6 +626,8 @@ function WeeklyActivity({
             onPressIn={sharePress.onPressIn}
             onPressOut={sharePress.onPressOut}
             android_ripple={AndroidRipple}
+            accessibilityRole="button"
+            accessibilityLabel="Share this week's activity"
           >
             <SymbolView name="square.and.arrow.up" size={13} tintColor={colors.textSecondary} />
             <Text style={styles.weekShareText} maxFontSizeMultiplier={1.2}>

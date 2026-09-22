@@ -98,7 +98,7 @@ export function AppLockGate() {
       </View>
       <Text style={styles.title} maxFontSizeMultiplier={1.3}>VerveIn is locked</Text>
       <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>Unlock with {biometricLabel} to continue.</Text>
-      <Pressable style={styles.unlockButton} onPress={attemptUnlock}>
+      <Pressable style={styles.unlockButton} onPress={attemptUnlock} accessibilityRole="button" accessibilityLabel="Try Again">
         <Text style={styles.unlockButtonText} maxFontSizeMultiplier={1.15}>Try Again</Text>
       </Pressable>
     </View>

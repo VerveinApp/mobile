@@ -59,6 +59,8 @@ export function TodaysTrainingCard({
           onHoverIn={hover.onHoverIn}
           onHoverOut={hover.onHoverOut}
           android_ripple={AndroidRipple}
+          accessibilityRole="button"
+          accessibilityLabel="Check in anyway"
         >
           <Text style={styles.cardLinkText} maxFontSizeMultiplier={1.2}>Check in anyway</Text>
         </Pressable>
@@ -76,6 +78,8 @@ export function TodaysTrainingCard({
       onPressIn={press.onPressIn}
       onPressOut={press.onPressOut}
       android_ripple={AndroidRipple}
+      accessibilityRole="button"
+      accessibilityLabel={`${sessionLabel}. ${resolved ? '' : 'Estimated '}${exerciseCount} exercises, ${durationMin} minutes. ${resolved ? 'Continue session' : 'Check in and start'}.`}
     >
       <Animated.View style={[styles.card, { transform: [{ scale: press.scale }] }]}>
         <View pointerEvents="none" style={styles.cardSheen} />

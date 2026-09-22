@@ -125,6 +125,9 @@ function SelectableCard<T extends string>({
       onPressIn={press.onPressIn}
       onPressOut={press.onPressOut}
       android_ripple={AndroidRipple}
+      accessibilityRole="button"
+      accessibilityLabel={option.label}
+      accessibilityState={{ selected: isSelected }}
     >
       <Animated.View
         style={[
