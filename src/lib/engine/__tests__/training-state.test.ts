@@ -247,6 +247,48 @@ describe('compileTrainingState', () => {
     expect(state.rollingWindow.value.days[6].date).toBe(dateOffset(REF, -1));
   });
 
+  // REAL BUG, found while closing plan-preview.ts's test-coverage gap — not a
+  // deliberate, disclosed vault gap like FD-3 or the isometric-rounding
+  // formula (see volume-scaling.ts's header comment for those). This one has
+  // no comment anywhere claiming it's intentional: capacityTrend's own tier
+  // is computed as `tierOf(window.length)` (see this function's real
+  // implementation above), and window.length can never exceed ROLLING_WINDOW_N
+  // (7) — but tierOf only reports 'established' at TIER_ESTABLISHED_MIN (10)
+  // or more. 7 < 10, unconditionally, for every possible call. The result:
+  // trainingState.capacityTrend.tier can NEVER be 'established', no matter
+  // how much real history exists — proven directly below with 90 days of
+  // strongly improving history, far more evidence than any other Tiered
+  // field in this module would need to call itself established.
+  //
+  // This is live, currently-shipping dead code, not just a hypothetical: the
+  // one real reader of an 'established' capacityTrend tier is
+  // plan-preview.ts's optional-finisher explanation (its own comment: "only
+  // once capacityTrend has genuinely established an improving direction") —
+  // that specific "you've been trending up, so there's real room for it"
+  // sentence can never actually display to a real user; every finisher
+  // acceptance falls through to the generic "Added a finisher set to each
+  // exercise" line instead, regardless of how consistent someone's real
+  // improvement has been.
+  //
+  // Not fixed here — same reasoning as this codebase's other real engine
+  // gaps: whether the fix is widening ROLLING_WINDOW_N's shared 7-day scope
+  // (which also governs the FE-12 rolling-window sentence's day count, a
+  // separate concern) or giving capacityTrend its own, smaller established
+  // threshold is exactly the kind of numeric engineering call this app's own
+  // Decision Constitution reserves for a real Founder Decision, not an
+  // invented number. Flagged here so it's visible and traceable instead of
+  // silently passing coverage forever.
+  it('capacityTrend.tier can never reach "established" — window.length is capped at ROLLING_WINDOW_N (7), strictly below TIER_ESTABLISHED_MIN (10)', () => {
+    const checkIns = Array.from({ length: 90 }, (_, i) =>
+      checkIn(dateOffset(REF, -(90 - i)), i < 87 ? 2 : 5)
+    );
+    const state = compileTrainingState({ checkIns, traces: [], referenceDate: REF });
+    expect(state.capacityTrend.value).toBe('improving');
+    expect(state.capacityTrend.basis).toBeLessThan(10);
+    expect(state.capacityTrend.tier).toBe('provisional');
+    expect(state.capacityTrend.tier).not.toBe('established');
+  });
+
   it('yesterdayLowEnergy is true only when yesterday has a real logged entry at energy <= 2', () => {
     const low = compileTrainingState({
       checkIns: [checkIn(dateOffset(REF, -1), 2)],

@@ -1,5 +1,6 @@
 import { exerciseLibrary } from '@/lib/engine/exercise-library';
 import { DEFAULT_CALIBRATION } from '@/lib/engine/personal-calibration';
+import { compileTrainingState } from '@/lib/engine/training-state';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview, type EnergyLevel } from '@/lib/plan-preview';
 import { TIME_AVAILABLE_OPTIONS } from '@/lib/time-available';
@@ -374,5 +375,227 @@ describe('computePlanPreview — return-after-absence biases toward simpler exer
     };
     const result = computePlanPreview(beginnerProfile as UserProfile, 4, CALIBRATION);
     expect(result.exerciseCount).toBeGreaterThan(0);
+  });
+});
+
+// reorderByBodyAreaPriority (see plan-preview.ts's own doc comment on that
+// function) is silent until TrainingState has at least provisional evidence
+// on stimulusDebt or recency — same epistemic-humility rule every other
+// TrainingState reader in this codebase follows. These two tests cover both
+// sides of that gate: the early-return with real-but-thin evidence, and the
+// real reorder plus its "well-rested" explanation sentence once evidence is
+// real. FULL_GYM_PROFILE's own baseline+filter order is confirmed (via a
+// throwaway probe against the real filtering pipeline, not guessed) to put
+// an upper-body exercise (ex_105) first — every trainingState below is built
+// around that fixed, known starting order.
+describe('computePlanPreview — reorderByBodyAreaPriority evidence-tier gate', () => {
+  it('leaves the plan unchanged while stimulusDebt and recency are both still insufficient', () => {
+    const thinTrainingState = compileTrainingState({
+      checkIns: [],
+      traces: [
+        {
+          date: '2024-01-09',
+          fallbackFired: false,
+          gate1Exclusions: [],
+          output: { exercises: [{ exerciseId: 'ex_105', adapted_sets: 3 }] },
+        },
+      ],
+      referenceDate: '2024-01-10',
+    });
+    expect(thinTrainingState.stimulusDebt.tier).toBe('insufficient');
+    expect(thinTrainingState.recency.tier).toBe('insufficient');
+
+    const withThinState = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 4, CALIBRATION, [], thinTrainingState);
+    const withoutState = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 4, CALIBRATION);
+    expect(withThinState.exercises.map((e) => e.id)).toEqual(withoutState.exercises.map((e) => e.id));
+  });
+
+  it('leads with a long-untouched body area and names it well-rested once recency evidence is real', () => {
+    // Three real, non-fallback sessions all touching only ex_105 (upper) —
+    // recency's basis (nonFallbackTraces.length) reaches TIER_PROVISIONAL_MIN
+    // (3), while lower/core/full stay at their real, honest `null`
+    // ("never observed" per this field's own doc comment, not a fabricated
+    // 0) — which this module's own bodyAreaPriorityScore formula ranks as
+    // MORE overdue than upper's real 1-day gap, exactly the "recovered, not
+    // neglected" framing this file's line-794 comment describes.
+    const trainingState = compileTrainingState({
+      checkIns: [],
+      traces: [
+        {
+          date: '2024-01-07',
+          fallbackFired: false,
+          gate1Exclusions: [],
+          output: { exercises: [{ exerciseId: 'ex_105', adapted_sets: 3 }] },
+        },
+        {
+          date: '2024-01-08',
+          fallbackFired: false,
+          gate1Exclusions: [],
+          output: { exercises: [{ exerciseId: 'ex_105', adapted_sets: 3 }] },
+        },
+        {
+          date: '2024-01-09',
+          fallbackFired: false,
+          gate1Exclusions: [],
+          output: { exercises: [{ exerciseId: 'ex_105', adapted_sets: 3 }] },
+        },
+      ],
+      referenceDate: '2024-01-10',
+    });
+    expect(trainingState.recency.tier).not.toBe('insufficient');
+    expect(trainingState.recency.value.lower.daysSinceTrained).toBeNull();
+
+    const result = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 4, CALIBRATION, [], trainingState);
+
+    expect(result.exercises[0].bodyArea).toBe('lower');
+    expect(result.explanation).toContain("Started with legs — it's well-rested and ready for more.");
+  });
+});
+
+// Step 4.6's optional finisher (see plan-preview.ts's own comment on
+// finisherApplied) — energy-gated (Energy 5 only) and opt-in
+// (finisherAccepted), never applied silently. +1 set to every exercise that
+// carries a real sets count.
+describe('computePlanPreview — optional finisher set', () => {
+  it('adds exactly one set to every exercise when accepted at Energy 5, and confirms it in the explanation', () => {
+    const withFinisher = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 5, CALIBRATION, [], undefined, 1, undefined, undefined, undefined, true);
+    const withoutFinisher = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 5, CALIBRATION, [], undefined, 1, undefined, undefined, undefined, false);
+
+    expect(withFinisher.exercises.map((e) => e.id)).toEqual(withoutFinisher.exercises.map((e) => e.id));
+    withFinisher.exercises.forEach((ex, i) => {
+      const baseline = withoutFinisher.exercises[i];
+      if (baseline.sets !== null) {
+        expect(ex.sets).toBe(baseline.sets + 1);
+      } else {
+        expect(ex.sets).toBeNull();
+      }
+    });
+    expect(withFinisher.explanation).toContain('Added a finisher set to each exercise.');
+  });
+
+  it('is never applied below Energy 5, even when accepted', () => {
+    const result = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 4, CALIBRATION, [], undefined, 1, undefined, undefined, undefined, true);
+    const baseline = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 4, CALIBRATION);
+    expect(result.exercises.map((e) => e.sets)).toEqual(baseline.exercises.map((e) => e.sets));
+    expect(result.explanation).not.toContain('finisher');
+  });
+});
+
+// healthReadinessModifier (see plan-preview.ts's own comment on
+// healthModifierChangedOutput) — never claims a trim the rounding didn't
+// actually preserve, and names whichever real reason(s) fired (RHR, sleep,
+// or both) instead of crediting a single hardcoded cause.
+describe('computePlanPreview — healthReadinessModifier', () => {
+  it('names the real reason once a sub-1 modifier survives rounding into a visible reduction', () => {
+    const withModifier = computePlanPreview(
+      FULL_GYM_PROFILE as UserProfile,
+      4,
+      CALIBRATION,
+      [],
+      undefined,
+      0.7,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { rhrElevated: true, sleepDeficit: false }
+    );
+    expect(withModifier.explanation).toContain(
+      'Trimmed slightly further — your resting heart rate suggests recovery might not be complete.'
+    );
+  });
+
+  it('names both reasons when both are real', () => {
+    const withBothReasons = computePlanPreview(
+      FULL_GYM_PROFILE as UserProfile,
+      4,
+      CALIBRATION,
+      [],
+      undefined,
+      0.7,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { rhrElevated: true, sleepDeficit: true }
+    );
+    expect(withBothReasons.explanation).toContain(
+      'your resting heart rate suggests recovery might not be complete, and last night was short relative to your usual'
+    );
+  });
+
+  it('says nothing when the modifier is 1 (no reduction to explain)', () => {
+    const result = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 4, CALIBRATION, [], undefined, 1);
+    expect(result.explanation).not.toContain('Trimmed slightly further');
+  });
+});
+
+// Priority-4 disclosed divergence (see plan-preview.ts's own DISCLOSED
+// DIVERGENCE comment) — only ever named when yesterdayEnergy is passed AND
+// the swing is real: a 2+ point change always counts, a bare 1-point wobble
+// only counts once capacityTrend has real evidence for a direction.
+describe('computePlanPreview — yesterday-energy delta sentence', () => {
+  it('names a 2+ point increase from yesterday', () => {
+    const result = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 4, CALIBRATION, [], undefined, 1, 2);
+    expect(result.explanation).toContain("You're up from yesterday, so today asks a little more.");
+  });
+
+  it('names a 2+ point decrease from yesterday', () => {
+    const result = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 2, CALIBRATION, [], undefined, 1, 4);
+    expect(result.explanation).toContain('Lighter than yesterday — your energy dipped, so the plan eased off.');
+  });
+
+  it('stays silent on a bare 1-point wobble with no trend evidence to back it up (hysteresis)', () => {
+    const result = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 4, CALIBRATION, [], undefined, 1, 3);
+    expect(result.explanation).not.toContain('up from yesterday');
+    expect(result.explanation).not.toContain('Lighter than yesterday');
+  });
+
+  it('says nothing when yesterdayEnergy matches today exactly', () => {
+    const result = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 4, CALIBRATION, [], undefined, 1, 4);
+    expect(result.explanation).not.toContain('up from yesterday');
+    expect(result.explanation).not.toContain('Lighter than yesterday');
+  });
+});
+
+// Priority-1 rolling-window streak follow-up (see plan-preview.ts's own
+// comment on this slot) — the vault's own FE-12 sentence plus a Vervein
+// streak-length addendum, gated on rollingWindow evidence being real
+// (tier !== 'insufficient'), not just present.
+describe('computePlanPreview — rolling-window consecutive-low-days streak', () => {
+  it('names the real streak length once rollingWindow evidence is provisional or better', () => {
+    const trainingState = compileTrainingState({
+      checkIns: [
+        { date: '2024-01-07', energyScore: 4, skipped: false },
+        { date: '2024-01-08', energyScore: 2, skipped: false },
+        { date: '2024-01-09', energyScore: 1, skipped: false },
+      ],
+      traces: [],
+      referenceDate: '2024-01-10',
+    });
+    expect(trainingState.rollingWindow.tier).not.toBe('insufficient');
+    expect(trainingState.rollingWindow.value.consecutiveLowDays).toBe(2);
+
+    const result = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 2, CALIBRATION, [], trainingState);
+    expect(result.explanation).toContain('Yesterday you logged low energy too.');
+    expect(result.explanation).toContain("That's 3 low-energy days in a row.");
+  });
+
+  it('names yesterday-only, with no streak follow-up, when the streak is just 1 day', () => {
+    const trainingState = compileTrainingState({
+      checkIns: [
+        { date: '2024-01-06', energyScore: 4, skipped: false },
+        { date: '2024-01-07', energyScore: 4, skipped: false },
+        { date: '2024-01-08', energyScore: 4, skipped: false },
+        { date: '2024-01-09', energyScore: 2, skipped: false },
+      ],
+      traces: [],
+      referenceDate: '2024-01-10',
+    });
+    expect(trainingState.rollingWindow.value.consecutiveLowDays).toBe(1);
+
+    const result = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 2, CALIBRATION, [], trainingState);
+    expect(result.explanation).toContain('Yesterday you logged low energy too.');
+    expect(result.explanation).not.toContain('low-energy days in a row');
   });
 });
