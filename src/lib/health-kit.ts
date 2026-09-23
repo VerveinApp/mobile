@@ -103,6 +103,7 @@ export async function requestHealthKitAccess(): Promise<boolean> {
     granted = false;
   }
   if (granted) {
+    invalidateReadinessCache();
     try {
       await AsyncStorage.setItem(CONNECTED_KEY, 'true');
     } catch {
@@ -113,6 +114,7 @@ export async function requestHealthKitAccess(): Promise<boolean> {
 }
 
 export async function disconnectHealthKit(): Promise<void> {
+  invalidateReadinessCache();
   try {
     await AsyncStorage.removeItem(CONNECTED_KEY);
   } catch {
@@ -323,18 +325,37 @@ const READINESS_MAX_REDUCTION = 0.15;
 /**
  * Both real readiness signals in one place, since getHealthReadinessModifier
  * and getHealthReadinessReasons both need them and neither should silently
- * drift from the other's idea of "what counts as elevated/short." Two
- * independent HealthKit reads either way (this doesn't cache across the two
- * exported calls below) — both are cheap local queries, not network calls,
- * so computing them twice on the rare occasion a caller wants both the
- * modifier and the reasons is a non-issue.
+ * drift from the other's idea of "what counts as elevated/short."
+ *
+ * Shared for READINESS_CACHE_MS. Every caller (Home, Train, check-in) asks
+ * for the modifier AND the reasons in parallel, on every focus — which used
+ * to mean four HealthKit queries (10 days of resting heart rate and sleep,
+ * twice each) per tab switch. Readiness only moves when new Health data
+ * lands, so one computation per half-minute serves every caller; connecting
+ * or disconnecting Health clears it immediately.
  */
+const READINESS_CACHE_MS = 30_000;
+let readinessCache: {
+  at: number;
+  trends: Promise<{ rhrTrend: RestingHeartRateTrend | null; sleepTrend: SleepDebtTrend | null }>;
+} | null = null;
+
+function invalidateReadinessCache(): void {
+  readinessCache = null;
+}
+
 async function getReadinessTrends(): Promise<{
   rhrTrend: RestingHeartRateTrend | null;
   sleepTrend: SleepDebtTrend | null;
 }> {
-  const [rhrTrend, sleepTrend] = await Promise.all([getRestingHeartRateTrend(), getSleepDebtTrend()]);
-  return { rhrTrend, sleepTrend };
+  const now = Date.now();
+  if (readinessCache && now - readinessCache.at < READINESS_CACHE_MS) return readinessCache.trends;
+  const trends = Promise.all([getRestingHeartRateTrend(), getSleepDebtTrend()]).then(([rhrTrend, sleepTrend]) => ({
+    rhrTrend,
+    sleepTrend,
+  }));
+  readinessCache = { at: now, trends };
+  return trends;
 }
 
 /**
