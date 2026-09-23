@@ -286,7 +286,7 @@ export default function ProgressPhotosScreen() {
                       accessibilityLabel={`Photo from ${formatEntryDate(photo.date)}`}
                     >
                       <View>
-                        <Image source={{ uri: progressPhotoUri(photo) }} style={styles.gridImage} contentFit="cover" />
+                        <Image source={{ uri: progressPhotoUri(photo) }} style={styles.gridImage} contentFit="cover" transition={150} />
                         {isDeleteTarget ? (
                           <Pressable
                             style={({ pressed }) => [styles.gridDeleteBadge, pressed && PRESSED_DIM]}
@@ -339,7 +339,7 @@ export default function ProgressPhotosScreen() {
             </Pressable>
           </View>
           {viewing ? (
-            <Image source={{ uri: progressPhotoUri(viewing) }} style={styles.viewerImage} contentFit="contain" />
+            <Image source={{ uri: progressPhotoUri(viewing) }} style={styles.viewerImage} contentFit="contain" transition={150} />
           ) : null}
         </View>
       </Modal>
