@@ -642,6 +642,19 @@ export default function EnergyCheckInScreen() {
   // and it has zero effect on sighted users. The underlying "Check in
   // anyway" tree-registration gap remains genuinely open.
   const [screenReaderEnabled, setScreenReaderEnabled] = useState(false);
+  // Motion for the check-in form's conditional sections — the explanation,
+  // the Energy-5 finisher, the Energy-1/2 symptom picker, the rest-day body
+  // area picker — and the Start button under them. They used to pop in and
+  // out instantly as the gauge moved, jumping Start up and down the screen.
+  // Same spring as the exercise list's own layout transition; skipped for
+  // screen-reader users, same as the rest-day block's fades.
+  const sectionEntering = screenReaderEnabled
+    ? undefined
+    : FadeIn.duration(MOTION_DURATION.base).easing(MOTION_EASING.standard);
+  const sectionExiting = screenReaderEnabled
+    ? undefined
+    : FadeOut.duration(MOTION_DURATION.fast).easing(MOTION_EASING.standard);
+  const sectionLayout = screenReaderEnabled ? undefined : LinearTransition.springify(280).dampingRatio(0.8);
   useEffect(() => {
     AccessibilityInfo.isScreenReaderEnabled().then(setScreenReaderEnabled);
     const subscription = AccessibilityInfo.addEventListener('screenReaderChanged', setScreenReaderEnabled);
@@ -1454,7 +1467,12 @@ export default function EnergyCheckInScreen() {
                 signal doesn't compete with it. See plan-preview.ts's own
                 preferredBodyArea param for how this overrides the reorder. */}
             {isRestDay && showAnyway ? (
-              <View style={styles.timeAvailableSection}>
+              <ReanimatedAnimated.View
+                entering={sectionEntering}
+                exiting={sectionExiting}
+                layout={sectionLayout}
+                style={styles.timeAvailableSection}
+              >
                 <Text style={styles.noteLabel} maxFontSizeMultiplier={1.3}>
                   WHAT DO YOU FEEL LIKE TRAINING? (OPTIONAL)
                 </Text>
@@ -1481,16 +1499,23 @@ export default function EnergyCheckInScreen() {
                     );
                   })}
                 </View>
-              </View>
+              </ReanimatedAnimated.View>
             ) : null}
 
+            {/* Fades in once, when the first level is picked — then its
+                height changes glide (sectionLayout) as the gauge moves. It
+                used to be keyed by energy, which re-mounted AND re-faded it
+                at every level crossed mid-drag; the key now lives on
+                ExplanationBlock alone, which still resets its own
+                Read-more state for each new level without any flicker. */}
             {preview ? (
-              <ReanimatedAnimated.View key={energy} entering={FadeIn.duration(220)} style={styles.checkinExplanationBlock}>
-                <ExplanationBlock explanation={preview.explanation} comparisonText={comparisonText} styles={styles} />
+              <ReanimatedAnimated.View entering={sectionEntering} layout={sectionLayout} style={styles.checkinExplanationBlock}>
+                <ExplanationBlock key={energy} explanation={preview.explanation} comparisonText={comparisonText} styles={styles} />
               </ReanimatedAnimated.View>
             ) : null}
 
             {energy === 5 ? (
+              <ReanimatedAnimated.View entering={sectionEntering} exiting={sectionExiting} layout={sectionLayout}>
               <Pressable
                 style={({ pressed }) => [styles.timePill, finisherAccepted && styles.timePillActive, styles.finisherPill, pressed && PRESSED_DIM]}
                 onPress={handleFinisherToggle}
@@ -1506,10 +1531,16 @@ export default function EnergyCheckInScreen() {
                   {finisherAccepted ? 'Finisher added' : 'Add a finisher set'}
                 </Text>
               </Pressable>
+              </ReanimatedAnimated.View>
             ) : null}
 
             {energy !== null && energy <= 2 ? (
-              <View style={styles.symptomSection}>
+              <ReanimatedAnimated.View
+                entering={sectionEntering}
+                exiting={sectionExiting}
+                layout={sectionLayout}
+                style={styles.symptomSection}
+              >
                 <PremiumGate isPremium={isPremium} label="Symptom tracking">
                   <Text style={styles.noteLabel} maxFontSizeMultiplier={1.3}>
                     ANYTHING GOING ON TODAY? (OPTIONAL)
@@ -1538,9 +1569,12 @@ export default function EnergyCheckInScreen() {
                     })}
                   </View>
                 </PremiumGate>
-              </View>
+              </ReanimatedAnimated.View>
             ) : null}
 
+            {/* Glides to its new spot as the sections above come and go,
+                instead of jumping. */}
+            <ReanimatedAnimated.View layout={sectionLayout}>
             <Pressable
               style={styles.checkinPrimaryButtonHit}
               onPress={handleStartSession}
@@ -1581,6 +1615,7 @@ export default function EnergyCheckInScreen() {
                 </View>
               </Animated.View>
             </Pressable>
+            </ReanimatedAnimated.View>
           </ReanimatedAnimated.ScrollView>
         ) : sessionState === 'resolved' && preview && energy !== null ? (
           <ReanimatedAnimated.ScrollView
