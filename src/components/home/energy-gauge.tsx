@@ -3,13 +3,14 @@ import { Platform, StyleSheet, Text, View } from 'react-native';
 import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import ReanimatedAnimated, {
-  runOnJS,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
   withRepeat,
+  withSequence,
   withTiming,
 } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 
 import { Type } from '@/constants/theme';
 import { hapticSelect } from '@/lib/haptics';
@@ -101,14 +102,24 @@ export function EnergyGauge({ size = 260, canvasScale = 1, value, onChange, prev
   // steady mid-value instead of the loop, still legible as "selected."
   const reducedMotion = useReducedMotion();
   const pulse = useSharedValue(0);
+  // A couple of breaths each time a new level is picked, then it settles at
+  // full strength — the same "one pulse, not a loop" rule check-in.tsx's
+  // rest-day link already follows. It used to breathe forever for as long
+  // as the screen was open, and it animated borderWidth: a layout property,
+  // so every frame of that endless loop went through a full layout pass on
+  // the heaviest screen in the app. Opacity-only now, on a fixed border.
   useEffect(() => {
+    if (value === null) return;
     pulse.value = reducedMotion
-      ? 0.5
-      : withRepeat(withTiming(1, { duration: MOTION_DURATION.pulse, easing: MOTION_EASING.pulse }), -1, true);
-  }, [pulse, reducedMotion]);
+      ? 1
+      : withSequence(
+          withTiming(0, { duration: 0 }),
+          withRepeat(withTiming(1, { duration: MOTION_DURATION.pulse, easing: MOTION_EASING.pulse }), 3, true),
+          withTiming(1, { duration: MOTION_DURATION.pulse, easing: MOTION_EASING.pulse })
+        );
+  }, [pulse, reducedMotion, value]);
   const pulseAnimatedStyle = useAnimatedStyle(() => ({
-    borderWidth: 1.5 + pulse.value * 2.5,
-    opacity: 0.6 + pulse.value * 0.4,
+    opacity: 0.35 + pulse.value * 0.65,
   }));
 
   const lastIndex = useSharedValue(value !== null ? value - 1 : -1);
@@ -123,22 +134,44 @@ export function EnergyGauge({ size = 260, canvasScale = 1, value, onChange, prev
     onChange(LEVELS[idx].score);
   };
 
-  const panGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .onBegin((e) => {
-          const idx = clamp(Math.floor((e.x / effectiveWidth) * SEGMENT_COUNT), 0, SEGMENT_COUNT - 1);
+  // BUG FIX: the pan used to select on onBegin — the instant a finger
+  // touched down, before it was known whether this was a drag across the
+  // gauge or the start of a vertical scroll of the check-in screen. Scrolling
+  // with a thumb that happened to land on the gauge changed today's energy.
+  // Now a pan only claims the touch once it's clearly horizontal (the same
+  // activeOffsetX/failOffsetY pairing the paywall's benefit pager uses), and
+  // a plain tap selects through its own Tap gesture.
+  const gauge = useMemo(
+    () => {
+      const indexAt = (x: number) => {
+        'worklet';
+        return clamp(Math.floor((x / effectiveWidth) * SEGMENT_COUNT), 0, SEGMENT_COUNT - 1);
+      };
+      const pan = Gesture.Pan()
+        .activeOffsetX([-8, 8])
+        .failOffsetY([-10, 10])
+        .onStart((e) => {
+          const idx = indexAt(e.x);
           const changed = idx !== lastIndex.value;
           lastIndex.value = idx;
-          runOnJS(setIndex)(idx, changed);
+          scheduleOnRN(setIndex, idx, changed);
         })
         .onUpdate((e) => {
-          const idx = clamp(Math.floor((e.x / effectiveWidth) * SEGMENT_COUNT), 0, SEGMENT_COUNT - 1);
+          const idx = indexAt(e.x);
           if (idx !== lastIndex.value) {
             lastIndex.value = idx;
-            runOnJS(setIndex)(idx, true);
+            scheduleOnRN(setIndex, idx, true);
           }
-        }),
+        });
+      const tap = Gesture.Tap().onEnd((e, success) => {
+        if (!success) return;
+        const idx = indexAt(e.x);
+        const changed = idx !== lastIndex.value;
+        lastIndex.value = idx;
+        scheduleOnRN(setIndex, idx, changed);
+      });
+      return Gesture.Race(pan, tap);
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [onChange, effectiveWidth]
   );
@@ -155,7 +188,7 @@ export function EnergyGauge({ size = 260, canvasScale = 1, value, onChange, prev
 
   return (
     <View style={styles.container}>
-      <GestureDetector gesture={panGesture}>
+      <GestureDetector gesture={gauge}>
         <View
           style={[styles.track, { width: size, height: trackHeight }]}
           accessible
@@ -244,6 +277,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     segmentOutline: {
       ...StyleSheet.absoluteFill,
       borderRadius: 14,
+      borderWidth: 3,
       borderColor: 'rgba(255,255,255,0.95)',
     },
     previousMarker: {
