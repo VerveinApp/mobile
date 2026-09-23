@@ -33,8 +33,23 @@ THIRD-PARTY SERVICES USED
   rate, sleep, and active energy to inform training readiness; can write
   completed workouts back to Health. Off by default, disconnectable anytime
   in Settings.
-- Expo push notification infrastructure — delivers locally-scheduled
-  workout reminders
+- Expo push notification service — delivers two kinds of remote push
+  (a notice when someone joins with your referral code, and an occasional
+  re-engagement nudge after several days away, at most weekly); workout
+  reminders themselves are scheduled locally on the device. Notification
+  permission is only requested in context (the Settings reminder toggle,
+  or a one-time offer after the user's first completed session), never on
+  launch.
+- Sentry — crash and error reporting.
+
+SUBSCRIPTIONS
+VerveIn Plus (monthly and yearly auto-renewing subscriptions) is offered on
+the paywall, reachable from Settings and from any locked Plus section. The
+paywall states the price and period, that it renews automatically unless
+canceled at least 24 hours before the period ends, and links to the Terms
+of Service and Privacy Policy. A free-trial label only appears when the
+Apple ID is actually eligible for the trial. Restore Purchases is on the
+same screen.
 
 REGIONAL DIFFERENCES
 None. The app's features and content are identical in every region.
