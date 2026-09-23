@@ -36,9 +36,30 @@ import type { LegalSection } from '@/components/legal/legal-document-screen';
  * mandatory consumer protections — rather than silently overreaching into
  * rights those provisions can't actually take away.
  * A lawyer should still review all of this before real submission.
+ *
+ * Revision 2026-09-23 (full-app audit): names the operator; adds Apple's
+ * required minimum end-user terms that were missing (license scope under
+ * Apple's Usage Rules, IP claims, sanctions, developer contact, third-party
+ * terms); parent/guardian language for 16–17-year-olds; the concrete
+ * subscription billing and referral terms; liability carve-outs; an
+ * informal-resolution step, mass-arbitration batching, and a delegation
+ * clause; survival, entire-agreement, venue, change-notice, and automatic
+ * update terms; and Expo/Sentry as dependencies. Mirrored verbatim on
+ * vervein.app/terms (vervein-marketing-site/terms.html) — change both.
  */
 export const CONTACT_EMAIL = 'fuzayl@vervein.app';
-export const TERMS_EFFECTIVE_DATE = 'September 10, 2026';
+/** The individual who operates VerveIn — the same name as the App Store seller. */
+export const OPERATOR_NAME = 'Barkath Mohammed';
+/**
+ * A postal address for legal notices — Apple's minimum end-user terms ask
+ * for one, and the EU storefront's trader rules publish one. A PO box is
+ * fine; it doesn't need to be a home address. Leave empty until there is
+ * one: every document that mentions it simply omits the line.
+ */
+export const MAILING_ADDRESS = '';
+export const TERMS_EFFECTIVE_DATE = 'September 23, 2026';
+
+const CONTACT_LINE = MAILING_ADDRESS ? `${CONTACT_EMAIL} or by mail at ${MAILING_ADDRESS}` : CONTACT_EMAIL;
 
 export const TERMS_INTRO =
   'These Terms of Service ("Terms") govern your use of VerveIn (the "App"), an adaptive strength-training app. ' +
@@ -48,8 +69,8 @@ export const TERMS_SECTIONS: LegalSection[] = [
   {
     heading: '1. Who We Are',
     body: [
-      'VerveIn is developed and operated by an individual developer, not a registered company, at this time. ' +
-        `You can reach us at ${CONTACT_EMAIL}.`,
+      `VerveIn is developed and operated by ${OPERATOR_NAME}, an individual developer (not a registered company) ` +
+        `based in Illinois, USA ("VerveIn", "we", "us"). You can reach us at ${CONTACT_LINE}.`,
     ],
   },
   {
@@ -57,6 +78,9 @@ export const TERMS_SECTIONS: LegalSection[] = [
     body: [
       'You must be at least 16 years old to use VerveIn. By using the App, you confirm that you meet this ' +
         'requirement. VerveIn is not directed at children and we do not knowingly collect information from anyone under 16.',
+      'If you are under 18 (or the age of majority where you live), you may use VerveIn only with the involvement ' +
+        'and permission of a parent or legal guardian, who agrees to these Terms on your behalf and is responsible ' +
+        'for any purchase made through your account.',
     ],
   },
   {
@@ -119,32 +143,43 @@ export const TERMS_SECTIONS: LegalSection[] = [
     heading: '7. License and Ownership',
     body: [
       'Subject to your compliance with these Terms, VerveIn grants you a limited, non-exclusive, non-transferable, ' +
-        'revocable license to install and use the App on your own devices, for your own personal, non-commercial ' +
-        'use. This license is solely for accessing and using the App as intended — it doesn’t give you any right to ' +
-        'copy, modify, distribute, sell, reverse-engineer, or create derivative works from the App itself.',
+        'revocable license to install and use the App for your own personal, non-commercial use on Apple-branded ' +
+        'devices you own or control, as permitted by the Usage Rules in the Apple Media Services Terms and Conditions ' +
+        '(including use by other accounts in your Family Sharing group where the App supports it). This license ' +
+        'doesn’t give you any right to copy, modify, distribute, sell, reverse-engineer, or create derivative works ' +
+        'from the App itself.',
       'The App, including its design, engine, and all content we provide within it (excluding Your Content, see ' +
-        'the next section), is owned by VerveIn or its licensors. Nothing in these Terms transfers any of that ' +
-        'ownership to you.',
-      '© 2026 Barkath Mohammed. All rights reserved.',
+        'Section 9), is owned by VerveIn or its licensors. Nothing in these Terms transfers any of that ownership to you.',
+      'The App may update itself automatically, including over-the-air updates delivered while you use it. These ' +
+        'Terms apply to every version.',
+      `© 2026 ${OPERATOR_NAME}. All rights reserved.`,
     ],
   },
   {
     heading: '8. VerveIn Plus (Subscriptions)',
     body: [
-      'Certain features are available only through VerveIn Plus, a paid subscription billed and managed through ' +
-        'the Apple App Store or Google Play, not directly by us.',
-      '- Subscriptions renew automatically unless canceled at least 24 hours before the end of the current period.',
-      '- You can cancel anytime in your Apple ID or Google Play account settings — canceling in the App only opens ' +
-        'those settings, it does not itself stop billing.',
-      '- If a free trial is offered, any unused portion is forfeited when you purchase a subscription, where ' +
-        'applicable.',
-      '- Refunds are handled by Apple or Google under their own policies, not by us directly.',
+      'Certain features are available only through VerveIn Plus, a paid subscription billed and managed by the ' +
+        'Apple App Store, not directly by us.',
+      '- Payment is charged to your Apple ID account when you confirm the purchase — or, if you start a free ' +
+        'trial, when the trial ends.',
+      '- Your subscription renews automatically at the same price and length (monthly or yearly) unless you cancel ' +
+        'at least 24 hours before the end of the current period. Your account is charged for renewal within the 24 ' +
+        'hours before the period ends.',
+      '- You can manage or cancel anytime in your Apple ID subscription settings. Canceling in the App only opens ' +
+        'those settings — it does not itself stop billing — and deleting your VerveIn account does not cancel a ' +
+        'subscription either.',
+      '- If a free trial is offered, it’s available once per Apple ID, and any unused portion is forfeited when you ' +
+        'purchase a subscription, where applicable.',
+      '- Refunds are handled by Apple under its own policies, not by us directly.',
+      '- If the price changes, Apple notifies you in advance and, where required, asks for your consent before a ' +
+        'renewal at the new price.',
       '- We may change what’s included in VerveIn Plus over time; we’ll make reasonable efforts to communicate ' +
         'material changes in advance.',
-      'VerveIn’s referral program may grant temporary promotional access to VerveIn Plus to both a referrer and a ' +
-        'new user under conditions described in the App. We can change, limit, or end this program at any time, and ' +
-        'may deny or reverse rewards obtained through abuse of the system (for example, self-referral or fraudulent ' +
-        'accounts).',
+      'Referral program: an account less than a week old can redeem one referral code, once. When it does, both ' +
+        'that account and the account that shared the code receive 7 days of VerveIn Plus, as a promotional grant ' +
+        'that ends on its own and doesn’t renew or charge you. Rewards have no cash value and can’t be transferred. ' +
+        'We can change, limit, or end the program at any time, and may deny or reverse rewards obtained through ' +
+        'abuse (for example, self-referral, fake or duplicate accounts, or automated sign-ups).',
     ],
   },
   {
@@ -178,38 +213,52 @@ export const TERMS_SECTIONS: LegalSection[] = [
       'If you choose to connect Apple Health, VerveIn reads a limited set of health data (steps, resting heart ' +
         'rate, sleep, and active energy) to inform your training plan, and can write completed workouts back to ' +
         'Apple Health. This connection is entirely optional, can be disconnected at any time in Settings, and this ' +
-        'data is never sold or used for advertising.',
+        'data is processed on your device — never sent to our servers, sold, or used for advertising.',
     ],
   },
   {
-    heading: '12. Third-Party Platforms',
+    heading: '12. Apple and Other Third-Party Platforms',
     body: [
-      'If you access VerveIn through an app distributed via the Apple App Store, Apple Inc. is a third-party ' +
-        'beneficiary of these Terms and may enforce them against you. Apple is not a party to these Terms and has ' +
-        'no obligation to provide support or maintenance for the App. In the event of any failure of the App to ' +
-        'conform to any applicable warranty, you may notify Apple, and Apple will refund the purchase price (if ' +
-        'any) for the App to you — to the maximum extent permitted by law, Apple has no other warranty obligation ' +
-        'with respect to the App. Apple is not responsible for addressing any claims by you relating to the App, ' +
-        'including product liability claims, claims that the App fails to conform to legal or regulatory ' +
-        'requirements, or claims arising under consumer protection law.',
+      'If you downloaded VerveIn from the Apple App Store, the following also applies:',
+      '- These Terms are between you and VerveIn only, not Apple. VerveIn, not Apple, is solely responsible for the ' +
+        'App and its content.',
+      '- Apple has no obligation to provide any maintenance or support for the App.',
+      '- If the App fails to conform to any applicable warranty, you may notify Apple, and Apple will refund the ' +
+        'purchase price (if any) for the App to you. To the maximum extent permitted by law, Apple has no other ' +
+        'warranty obligation with respect to the App.',
+      '- Apple is not responsible for addressing any claims by you or any third party relating to the App or your ' +
+        'possession or use of it, including product liability claims, claims that the App fails to conform to any ' +
+        'legal or regulatory requirement, and claims arising under consumer protection, privacy, or similar laws.',
+      '- If a third party claims the App or your possession and use of it infringes their intellectual property ' +
+        'rights, VerveIn, not Apple, is solely responsible for investigating, defending, settling, and discharging ' +
+        'that claim.',
+      '- You represent that you are not located in a country subject to a U.S. Government embargo or designated ' +
+        'by the U.S. Government as a "terrorist supporting" country, and that you are not on any U.S. Government ' +
+        'list of prohibited or restricted parties.',
+      `- Questions, complaints, or claims about the App go to us, not Apple: ${CONTACT_LINE}.`,
+      '- You must comply with any applicable third-party terms when using the App (for example, your wireless ' +
+        'data plan).',
+      '- Apple and its subsidiaries are third-party beneficiaries of these Terms, and upon your acceptance of them, ' +
+        'Apple will have the right (and will be deemed to have accepted the right) to enforce these Terms against ' +
+        'you as a third-party beneficiary.',
     ],
   },
   {
     heading: '13. Service Dependencies and Availability',
     body: [
       'The App depends on third-party services we don’t control and aren’t responsible for: Supabase (accounts ' +
-        'and cross-device sync), RevenueCat (subscription management), and Apple and Google (sign-in, App Store/ ' +
-        'Play Store purchases, Apple Health, and push notifications). If any of these services are unavailable, ' +
-        'degraded, or change how they work, parts of the App may not function correctly, and we are not responsible ' +
-        'for outages, errors, or changes caused by them.',
+        'and cross-device sync), RevenueCat (subscription management), Expo (push notifications and app updates), ' +
+        'Sentry (crash reporting), and Apple and Google (sign-in, App Store purchases, Apple Health, and push ' +
+        'notification delivery). If any of these services are unavailable, degraded, or change how they work, parts ' +
+        'of the App may not function correctly, and we are not responsible for outages, errors, or changes caused by them.',
     ],
   },
   {
     heading: '14. Acceptable Use',
     body: [
       'Don’t use VerveIn to: violate any law; attempt to access another user’s account or data; reverse-engineer, ' +
-        'scrape, or interfere with the App or its infrastructure; or circumvent the subscription or referral system ' +
-        'described above.',
+        'scrape, or interfere with the App or its infrastructure; create accounts by automated means; or circumvent ' +
+        'the subscription or referral system described above.',
     ],
   },
   {
@@ -219,6 +268,7 @@ export const TERMS_SECTIONS: LegalSection[] = [
         'including warranties of merchantability, fitness for a particular purpose, and non-infringement. We do not ' +
         'guarantee the App will be uninterrupted, error-free, or that any specific fitness outcome will result from ' +
         'using it.',
+      'Some jurisdictions don’t allow the exclusion of certain warranties, so some of the above may not apply to you.',
     ],
   },
   {
@@ -231,6 +281,10 @@ export const TERMS_SECTIONS: LegalSection[] = [
       'To the extent VerveIn is found liable for any reason despite the above, our total liability to you for all ' +
         'claims arising from or related to the App or these Terms will not exceed the amount you paid us in the ' +
         'twelve (12) months before the claim arose, or $50 if you haven’t paid us anything.',
+      'Nothing in these Terms excludes or limits liability that cannot be excluded or limited under applicable ' +
+        'law, including liability for fraud, gross negligence, or willful misconduct, or for death or personal ' +
+        'injury where the law does not allow that liability to be limited. Some jurisdictions don’t allow the ' +
+        'limitations above, so they may not apply to you.',
     ],
   },
   {
@@ -247,33 +301,46 @@ export const TERMS_SECTIONS: LegalSection[] = [
       'You can stop using VerveIn and delete your account at any time from Settings. We may suspend or terminate ' +
         'access to the App if you violate these Terms. We may also modify, suspend, or discontinue the App, or any ' +
         'feature of it, at any time, with or without notice.',
+      'Sections 3, 4, 5, 7 (ownership), 9, 10, and 15 through 23 survive the end of these Terms or your use of the App.',
     ],
   },
   {
     heading: '19. Changes to These Terms',
     body: [
-      'We may update these Terms as the App changes. If we make a material change, we’ll update the effective ' +
-        'date above and make reasonable efforts to let you know. Continuing to use the App after a change means you ' +
-        'accept the updated Terms.',
+      'We may update these Terms as the App changes. We’ll post the new version with a new effective date and, for ' +
+        'a material change, let you know in the App before it takes effect. Continuing to use the App after a change ' +
+        'takes effect means you accept the updated Terms. A change to Section 20 never applies to a dispute we were ' +
+        'already notified of before the change.',
     ],
   },
   {
     heading: '20. Dispute Resolution; Arbitration Agreement',
     body: [
       'PLEASE READ THIS SECTION CAREFULLY — IT AFFECTS YOUR LEGAL RIGHTS, INCLUDING YOUR RIGHT TO GO TO COURT.',
-      'You and VerveIn agree that any dispute, claim, or controversy arising out of or relating to these Terms or ' +
-        'your use of the App will be resolved by binding individual arbitration, administered by the American ' +
-        'Arbitration Association under its Consumer Arbitration Rules, rather than in court — except that either of ' +
-        'us may bring an individual claim in small claims court instead, if it qualifies.',
+      `Talk to us first. Before starting an arbitration or court case, you and we each agree to send the other a ` +
+        `written notice describing the dispute and the relief requested (you to ${CONTACT_EMAIL}; we to your ` +
+        'account email) and to try in good faith to resolve it informally for 60 days. Filing deadlines pause ' +
+        'during those 60 days.',
+      'If it isn’t resolved, you and VerveIn agree that any dispute, claim, or controversy arising out of or ' +
+        'relating to these Terms or your use of the App will be resolved by binding individual arbitration, ' +
+        'administered by the American Arbitration Association (AAA) under its Consumer Arbitration Rules, rather ' +
+        'than in court — except that either of us may bring an individual claim in small claims court instead, if ' +
+        'it qualifies. Hearings may take place by video or phone, or in the county where you live. The arbitrator ' +
+        'decides any question about the scope, enforceability, or formation of this arbitration agreement.',
       'You and VerveIn each waive the right to a jury trial and the right to participate in a class action, ' +
         'consolidated proceeding, or representative action. The arbitrator may not combine more than one person’s ' +
         'claims into a single proceeding.',
+      'If 25 or more similar demands are filed by or with the help of the same law firm or organization, they ' +
+        'will be administered in batches under the AAA’s Mass Arbitration Supplementary Rules, and the statute of ' +
+        'limitations for demands in later batches is paused until they are administered.',
       `You can opt out of this arbitration agreement entirely. To do so, email ${CONTACT_EMAIL} within 30 days of ` +
         'first accepting these Terms, with the subject line "Arbitration Opt-Out" and your account email address. ' +
         'If you opt out, disputes between us will instead be resolved in the courts named in the Governing Law ' +
         'section below.',
-      'If this arbitration agreement is found unenforceable as to a particular dispute, that dispute may be brought ' +
-        'in the courts named in the Governing Law section instead.',
+      'If the class, consolidated, or representative action waiver is found unenforceable as to a particular ' +
+        'claim, that claim (and only that claim) must be brought in the courts named in the Governing Law section ' +
+        'instead. If any other part of this arbitration agreement is found unenforceable as to a particular ' +
+        'dispute, that dispute may be brought in those courts.',
     ],
   },
   {
@@ -281,27 +348,29 @@ export const TERMS_SECTIONS: LegalSection[] = [
     body: [
       'These Terms are governed by the laws of the State of Illinois, USA, without regard to its conflict-of-law ' +
         'principles. Any dispute arising from these Terms or your use of the App that is not subject to arbitration ' +
-        '(or where you’ve opted out of arbitration) will be resolved in the state or federal courts located in ' +
-        'Illinois, and you consent to their jurisdiction.',
+        '(or where you’ve opted out of arbitration) will be resolved in the state or federal courts located in Cook ' +
+        'County, Illinois, and you consent to their jurisdiction.',
     ],
   },
   {
     heading: '22. General',
     body: [
-      'You may not assign or transfer these Terms without our prior written consent; we may assign these Terms ' +
-        'without your consent to a successor of our business. If any provision of these Terms is found ' +
-        'unenforceable, the rest of these Terms will remain in effect. Our failure to enforce any right or ' +
-        'provision of these Terms is not a waiver of that right or provision.',
+      'These Terms and our Privacy Policy are the entire agreement between you and VerveIn about the App, and ' +
+        'replace any earlier agreement on the same subject. You may not assign or transfer these Terms without our ' +
+        'prior written consent; we may assign these Terms without your consent to a successor of our business. If ' +
+        'any provision of these Terms is found unenforceable, the rest of these Terms will remain in effect. Our ' +
+        'failure to enforce any right or provision of these Terms is not a waiver of that right or provision. We ' +
+        'aren’t liable for delays or failures caused by events beyond our reasonable control.',
     ],
   },
   {
     heading: '23. California Consumer Notice',
     body: [
       'Under California Civil Code Section 1789.3, California residents are entitled to the following consumer ' +
-        `rights notice: current pricing for VerveIn Plus is available on its App Store or Play Store listing. If ` +
-        `you have a complaint regarding the App, you may contact us at ${CONTACT_EMAIL}, or the Complaint ` +
-        'Assistance Unit of the Division of Consumer Services of the California Department of Consumer Affairs in ' +
-        'writing at 1625 North Market Blvd., Suite N-112, Sacramento, CA 95834, or by phone at (800) 952-5210.',
+        `rights notice: current pricing for VerveIn Plus is available on its App Store listing. If you have a ` +
+        `complaint regarding the App, you may contact us at ${CONTACT_EMAIL}, or the Complaint Assistance Unit of ` +
+        'the Division of Consumer Services of the California Department of Consumer Affairs in writing at 1625 ' +
+        'North Market Blvd., Suite N-112, Sacramento, CA 95834, or by phone at (800) 952-5210.',
     ],
   },
   {
@@ -326,6 +395,6 @@ export const TERMS_SECTIONS: LegalSection[] = [
   },
   {
     heading: '25. Contact',
-    body: [`Questions about these Terms? Reach us at ${CONTACT_EMAIL}.`],
+    body: [`Questions about these Terms? Reach us at ${CONTACT_LINE}.`],
   },
 ];
