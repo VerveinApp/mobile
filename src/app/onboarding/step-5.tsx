@@ -24,12 +24,15 @@ import { saveOnboardingDraft } from '@/lib/onboarding-draft';
 const CANVAS_WIDTH = 375;
 const CANVAS_HEIGHT = 812;
 
-// PLACEHOLDER COPY — legal review required before ship. Real opt-in gate
-// (not just reassuring copy) ahead of collecting any body-related data, per
-// Washington's My Health My Data Act and equivalent health-data consent
-// requirements. The checkbox below is a functioning gate — the fields
-// beneath it stay inert until it's checked — only the wording is a stand-in.
-const CONSENT_COPY = 'I agree to share this to tailor my training load.';
+// Real opt-in gate (not just reassuring copy) ahead of collecting any
+// body-related data, per Washington's My Health My Data Act and equivalent
+// health-data consent requirements — the fields beneath it stay inert until
+// it's checked. The wording says what those laws expect a consent to say:
+// that it's STORED (with the account, i.e. synced to our server — the old
+// "share this" never said where), why, and how to take it back (Settings →
+// Body & Biometrics → Stop sharing health info). Kept to two lines: the card
+// has ~68pt before the first field below it. Still worth a lawyer's read.
+const CONSENT_COPY = 'I agree to VerveIn saving these with my account to tailor my training. I can withdraw this in Settings.';
 
 type SexId = 'female' | 'male';
 type UnitSystem = 'imperial' | 'metric';
