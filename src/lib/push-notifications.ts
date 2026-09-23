@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 
-import { getModule } from '@/lib/session-reminders';
+import { getModule, getNotificationPermissionState } from '@/lib/session-reminders';
 
 /**
  * Remote push token registration — the client half of remote push. This
@@ -19,9 +19,20 @@ import { getModule } from '@/lib/session-reminders';
  * Fire-and-forget, same as profile-sync.ts's own pushProfileToRemote: a
  * failed registration never blocks anything the caller is doing, and the
  * next successful app open just tries again. Silently no-ops when signed
- * out, when the permission prompt is denied, or when running somewhere a
- * push token can't be issued (Simulator) — none of those are errors, they're
- * normal states this app already treats the same way for local reminders.
+ * out, when notification permission hasn't been granted, or when running
+ * somewhere a push token can't be issued (Simulator) — none of those are
+ * errors, they're normal states this app already treats the same way for
+ * local reminders.
+ *
+ * BUG FIX: this used to call requestPermissionsAsync() itself on every cold
+ * launch — before the signed-in check, so the OS permission prompt fired
+ * over the Welcome screen on a brand-new install, before anyone knew what
+ * the app was. A reflexive "Don't Allow" there can never be re-asked, which
+ * silently killed reminders for good. This now only REGISTERS when
+ * permission already exists; the actual ask happens in context — the
+ * Settings reminder toggle and the one-time post-session offer (see
+ * session-reminders.ts's shouldOfferReminderPrompt) — and both call this
+ * right after a grant so the token doesn't wait for the next cold launch.
  */
 export async function registerForRemotePushNotifications(): Promise<void> {
   const Notifications = getModule();
@@ -32,22 +43,19 @@ export async function registerForRemotePushNotifications(): Promise<void> {
   if (!Constants.isDevice) return;
 
   try {
-    const existing = await Notifications.getPermissionsAsync();
-    const granted =
-      existing.granted ||
-      (existing.canAskAgain && (await Notifications.requestPermissionsAsync()).granted);
-    if (!granted) return;
+    const { supabase } = await import('@/lib/supabase');
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) return;
+
+    if ((await getNotificationPermissionState()) !== 'granted') return;
 
     const projectId = Constants.expoConfig?.extra?.eas?.projectId;
     if (!projectId) return;
     const { data: expoPushToken } = await Notifications.getExpoPushTokenAsync({ projectId });
 
-    const { supabase } = await import('@/lib/supabase');
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return;
-    await supabase.from('push_tokens').upsert({ user_id: user.id, expo_push_token: expoPushToken });
+    await supabase.from('push_tokens').upsert({ user_id: session.user.id, expo_push_token: expoPushToken });
   } catch {
     // Never a crash — worst case this device just doesn't receive a remote
     // push later, same "under-triggering is the safe failure mode" rule

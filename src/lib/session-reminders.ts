@@ -6,11 +6,16 @@ import { localDateStr } from '@/lib/local-date';
 import { BODY_AREA_PRIORITY_LABEL } from '@/lib/plan-preview';
 import { WEEKDAY_NAMES } from '@/lib/profile-labels';
 import { getSessionHistory } from '@/lib/session-history';
+import { getTodaySession } from '@/lib/today-session';
 import { getTrainingState } from '@/lib/training-state-loader';
 import { getProfile } from '@/lib/user-profile';
 
 const ENABLED_KEY = 'vervein.remindersEnabled.v1';
 const LAST_RESCHEDULED_KEY = 'vervein.remindersLastRescheduled.v1';
+// Set the one time the post-session "want a nudge on training days?" offer
+// is shown (see shouldOfferReminderPrompt) — a single contextual ask, never
+// a repeating nag. Settings' own toggle stays available either way.
+const PROMPT_OFFERED_KEY = 'vervein.reminderPromptOffered.v1';
 // Every reminder this module schedules carries this identifier prefix, so
 // disabling (or re-enabling with a changed schedule) can cancel exactly its
 // own notifications via cancelScheduledNotificationAsync — never a blanket
@@ -281,9 +286,15 @@ async function scheduleRollingWindowInner(
 
   const content = await buildReminderContent();
   const reminderHour = await getPersonalizedReminderHour();
+  // BUG FIX: today's slot used to be scheduled even after today's check-in
+  // already happened — someone who trained at 7am still got a "Training
+  // day" nudge at their usual 6pm. A today-session existing at all means
+  // they've already shown up today, so there's nothing left to remind.
+  const checkedInToday = (await getTodaySession()) !== null;
   const now = new Date();
   const scheduleOps: Promise<unknown>[] = [];
   for (let offset = 0; offset < RESCHEDULE_WINDOW_DAYS; offset++) {
+    if (offset === 0 && checkedInToday) continue;
     const day = new Date(now);
     day.setDate(day.getDate() + offset);
     const weekday = WEEKDAY_NAMES[day.getDay()];
@@ -465,4 +476,79 @@ export async function disableSessionReminders(): Promise<void> {
       // above already happened regardless.
     }
   });
+}
+
+/**
+ * Cancels just today's already-scheduled reminder — called the moment a
+ * check-in starts (see check-in.tsx's handleStartSession). The daily
+ * reschedule throttle means today's slot could otherwise still be pending
+ * from a refresh that ran earlier the same day, before the check-in existed;
+ * scheduleRollingWindowInner's own checkedInToday skip covers every later
+ * reschedule. Chained like every other scheduling operation here so it can't
+ * interleave with a reschedule that's mid-flight.
+ */
+export async function cancelTodaysReminder(): Promise<void> {
+  const Notifications = getModule();
+  if (!Notifications) return;
+  await runChained(async () => {
+    try {
+      await Notifications.cancelScheduledNotificationAsync(`${ID_PREFIX}${localDateStr()}`);
+    } catch {
+      // Nothing scheduled for today (or already fired) — nothing to cancel.
+    }
+  });
+}
+
+export type NotificationPermissionState = 'granted' | 'denied' | 'undetermined' | 'unsupported';
+
+/**
+ * The OS-level permission state, read without ever prompting. 'granted'
+ * includes iOS provisional authorization (quiet delivery the user can later
+ * upgrade from Notification Center) — see the SDK 57 docs' own guidance to
+ * read ios.status rather than the root fields alone.
+ */
+export async function getNotificationPermissionState(): Promise<NotificationPermissionState> {
+  const Notifications = getModule();
+  if (!Notifications) return 'unsupported';
+  try {
+    const permissions = await Notifications.getPermissionsAsync();
+    if (
+      permissions.granted ||
+      permissions.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL ||
+      permissions.ios?.status === Notifications.IosAuthorizationStatus.EPHEMERAL
+    ) {
+      return 'granted';
+    }
+    return permissions.canAskAgain ? 'undetermined' : 'denied';
+  } catch {
+    return 'unsupported';
+  }
+}
+
+/**
+ * Whether the post-session "want a nudge on your training days?" line
+ * should show: reminders aren't already on, the OS prompt has genuinely
+ * never been answered (asking again after a "Don't Allow" is impossible
+ * anyway), there are real training days to remind about, and this offer
+ * hasn't been made before. This replaces the old cold-launch permission
+ * prompt, which fired over the Welcome screen before anyone knew what the
+ * app was — a reflexive "Don't Allow" there disabled reminders for good.
+ */
+export async function shouldOfferReminderPrompt(scheduledDays: string[]): Promise<boolean> {
+  if (scheduledDays.length === 0) return false;
+  if (await isReminderEnabled()) return false;
+  try {
+    if ((await AsyncStorage.getItem(PROMPT_OFFERED_KEY)) === 'true') return false;
+  } catch {
+    return false;
+  }
+  return (await getNotificationPermissionState()) === 'undetermined';
+}
+
+export async function markReminderPromptOffered(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(PROMPT_OFFERED_KEY, 'true');
+  } catch {
+    // Worst case the offer can show once more — never a crash.
+  }
 }

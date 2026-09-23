@@ -38,6 +38,7 @@ import {
 } from '@/lib/health-kit';
 import { CONTACT_EMAIL } from '@/lib/legal/terms-content';
 import { localDateStr } from '@/lib/local-date';
+import { registerForRemotePushNotifications } from '@/lib/push-notifications';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import {
   disableSessionReminders,
@@ -347,6 +348,9 @@ export default function SettingsScreen() {
     if (granted) {
       setRemindersOn(true);
       hapticImpactLight();
+      // Same permission covers remote pushes — register now rather than
+      // waiting for the next cold launch (see push-notifications.ts).
+      registerForRemotePushNotifications();
     } else {
       // Permission denied at the OS prompt — the toggle reverts rather than
       // showing "on" for something that can't actually fire.

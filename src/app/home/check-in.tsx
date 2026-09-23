@@ -50,7 +50,14 @@ import { getLoadImprovementNote, getPacingTrendNote, getPostSessionNote } from '
 import { getLastPerformance, recordPerformanceBatch, type ExercisePerformance } from '@/lib/exercise-performance';
 import { schedulePrCelebration } from '@/lib/pr-celebration';
 import { calculatePlates, formatKg, formatPlateBreakdown } from '@/lib/plate-calculator';
+import { registerForRemotePushNotifications } from '@/lib/push-notifications';
 import { recordSessionForMilestones } from '@/lib/session-milestones';
+import {
+  cancelTodaysReminder,
+  enableSessionReminders,
+  markReminderPromptOffered,
+  shouldOfferReminderPrompt,
+} from '@/lib/session-reminders';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { estimateCaloriesBurned } from '@/lib/calorie-estimate';
 import { getHealthReadinessModifier, getHealthReadinessReasons, saveCompletedWorkout } from '@/lib/health-kit';
@@ -388,6 +395,13 @@ export default function EnergyCheckInScreen() {
   // recordSessionForMilestones' own doc comment) — only ever set the one
   // time handleFinishSession itself just reached a new milestone.
   const [milestoneReached, setMilestoneReached] = useState<number | null>(null);
+  // The one-time, in-context notification ask (replacing the old cold-launch
+  // permission prompt — see push-notifications.ts). Ephemeral like
+  // milestoneReached: shown only on the finish that first qualifies, never
+  // restored on a same-day reopen. 'pending' = offer visible, 'on' = the user
+  // turned reminders on from it, 'declined' = the OS prompt was refused.
+  const [reminderOffer, setReminderOffer] = useState<'pending' | 'on' | 'declined' | null>(null);
+  const trainingDaysList = profile?.days ? profile.days.split(',').filter(Boolean) : [];
   // Re-entrancy guard for handleFinishSession — that handler spans several
   // awaited AsyncStorage writes before setSessionState('done') unmounts the
   // button, and currentExerciseTimerDone (the button's only other disabled
@@ -1075,6 +1089,8 @@ export default function EnergyCheckInScreen() {
     else hapticImpactLight();
     recordCheckIn(energy);
     saveTodaySession(energy, false, Array.from(symptomTags), timeAvailableMin ?? undefined, finisherAccepted, preferredBodyArea ?? undefined, equipmentOverride ?? undefined);
+    // Already showed up today — a "Training day" nudge later would be noise.
+    cancelTodaysReminder();
     // The honest starting point for today's completion signal — a real
     // 'skipped' entry the moment the session begins (zero exercises done
     // yet), overwritten with the real status as exercises complete and
@@ -1201,7 +1217,24 @@ export default function EnergyCheckInScreen() {
     await saveWorkoutLog(localDateStr(), finalExercises);
     recordDecisionTrace(localDateStr(), preview.trace);
     setDoneInsight(await getBodyAreaInsight());
+    // Only after a real session — the moment "remind me next training day"
+    // actually means something — and only ever offered once (marked the
+    // moment it's shown, not when tapped, so ignoring it counts as an answer).
+    if (completedSomething && (await shouldOfferReminderPrompt(trainingDaysList))) {
+      setReminderOffer('pending');
+      markReminderPromptOffered();
+    }
     setSessionState('done');
+  };
+
+  const handleAcceptReminderOffer = async () => {
+    hapticSelect();
+    const granted = await enableSessionReminders(trainingDaysList);
+    setReminderOffer(granted ? 'on' : 'declined');
+    if (granted) {
+      hapticSuccess();
+      registerForRemotePushNotifications();
+    }
   };
 
   // Flow-layout logo for the checkin/resolved/done ScrollViews — see
@@ -2024,6 +2057,30 @@ export default function EnergyCheckInScreen() {
               <Text style={styles.calorieEstimateText} maxFontSizeMultiplier={1.3}>
                 ~{estimatedCalories} cal · estimated
               </Text>
+            ) : null}
+
+            {/* Same pressable-sentence pattern as the "See Progress" and
+                "Invite a friend" lines — an offer, not a modal. */}
+            {reminderOffer === 'pending' ? (
+              <Pressable
+                style={styles.doneInsightHit}
+                onPress={handleAcceptReminderOffer}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel="Want a nudge on your training days? Turn on reminders"
+              >
+                <Text style={styles.doneInsightText} maxFontSizeMultiplier={1.3}>
+                  Want a nudge on your training days? <Text style={styles.doneInsightLink}>Turn on reminders</Text>
+                </Text>
+              </Pressable>
+            ) : reminderOffer === 'on' ? (
+              <ReanimatedAnimated.Text
+                entering={FadeIn.duration(MOTION_DURATION.emphasis)}
+                style={styles.milestoneText}
+                maxFontSizeMultiplier={1.2}
+              >
+                Reminders on for your training days.
+              </ReanimatedAnimated.Text>
             ) : null}
 
             {doneInsight ? (
