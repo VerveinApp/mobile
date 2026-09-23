@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useColorScheme } from 'react-native';
+import { Appearance, Platform, useColorScheme } from 'react-native';
 
 import { Colors } from '@/constants/theme';
 import { getThemePreference, setThemePreference, type ThemePreference } from '@/lib/theme-preference';
@@ -34,6 +34,18 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
+  // BUG FIX: the in-app choice only ever reached React-drawn UI — the
+  // status bar, keyboard, system alerts, action/share sheets and the native
+  // tab bar all kept following the DEVICE setting. Picking Light on a phone
+  // in dark mode left white status-bar text on a light-gray page (invisible)
+  // and a dark keyboard over light screens. Overriding the app-level
+  // appearance makes every native surface follow the same choice; 'system'
+  // hands control back to the OS ('unspecified').
+  useEffect(() => {
+    if (!loaded || Platform.OS === 'web') return;
+    Appearance.setColorScheme(preference === 'system' ? 'unspecified' : preference);
+  }, [loaded, preference]);
+
   const setPreference = (next: ThemePreference) => {
     setPreferenceState(next);
     setThemePreference(next);
@@ -47,12 +59,14 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
     [preference, resolvedScheme]
   );
 
-  // Loading the stored preference is fast (one AsyncStorage read), and the
-  // 'system' default already resolves against the real device scheme on the
-  // very first render, so there's no blank/flash frame to guard against here
-  // — children render immediately and re-render only if the stored
-  // preference turns out to differ from 'system'.
-  void loaded;
+  // BUG FIX: children used to render before the stored preference loaded,
+  // resolving 'system' against the device for a frame or two — anyone who
+  // picked a theme different from their phone's saw the whole app flip
+  // right after launch. Holding render for this one AsyncStorage read keeps
+  // the native splash up instead (it only hides once the first real frame
+  // lays out — see AnimatedSplashOverlay), so the first frame is already
+  // the right theme.
+  if (!loaded) return null;
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

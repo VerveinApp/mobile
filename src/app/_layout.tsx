@@ -3,6 +3,7 @@ import * as Sentry from '@sentry/react-native';
 import { useFonts } from 'expo-font';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
+import { StatusBar } from 'expo-status-bar';
 import { AppState, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
@@ -101,6 +102,11 @@ function RootNavigator() {
 
   return (
     <ThemeProvider value={resolvedScheme === 'dark' ? DarkTheme : DefaultTheme}>
+      {/* Explicit, not 'auto' — the status bar's text must follow the
+          in-app theme choice, which can differ from the device's. Screens
+          with their own <StatusBar> (create-account.tsx) still override
+          this while mounted. */}
+      <StatusBar style={resolvedScheme === 'dark' ? 'light' : 'dark'} />
       <AnimatedSplashOverlay />
       <View style={{ flex: 1 }}>
         {/* The (tabs) group owns the bottom tab bar (Home/Explore). Auth screens like
