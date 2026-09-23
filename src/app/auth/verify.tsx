@@ -12,7 +12,14 @@ import {
 } from 'react-native';
 
 import { useCanvasScale } from '@/lib/canvas-scale';
-import ReanimatedAnimated, { FadeIn } from 'react-native-reanimated';
+import ReanimatedAnimated, {
+  FadeIn,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight, hapticSuccess } from '@/lib/haptics';
@@ -82,6 +89,7 @@ export default function VerifyEmailScreen() {
   const inputRefs = useRef<(TextInput | null)[]>([]);
   // True once this screen's code has been verified — see handleContinue.
   const verifiedRef = useRef(false);
+  const isSubmittingRef = useRef(false);
 
   const [cooldown, setCooldown] = useState(RESEND_COOLDOWN_SECONDS);
 
@@ -99,6 +107,13 @@ export default function VerifyEmailScreen() {
     return () => clearInterval(timer);
   }, [cooldown]);
 
+  // Submits the moment the sixth digit lands — typed, pasted, or filled in
+  // by iOS's "From Mail" code suggestion — instead of leaving the user to
+  // find and tap Continue after already entering everything.
+  const autoSubmitIfComplete = (next: string[]) => {
+    if (next.every((d) => d !== '')) submitCode(next.join(''));
+  };
+
   const handleDigitChange = (index: number, value: string) => {
     const digitsOnly = value.replace(/[^0-9]/g, '');
 
@@ -106,32 +121,30 @@ export default function VerifyEmailScreen() {
     // distribute it across the remaining boxes instead of only keeping the
     // last character like a normal keystroke would.
     if (digitsOnly.length > 1) {
-      setDigits((prev) => {
-        const next = [...prev];
-        let cursor = index;
-        for (const char of digitsOnly) {
-          if (cursor >= CODE_LENGTH) break;
-          next[cursor] = char;
-          cursor += 1;
-        }
-        return next;
-      });
+      const next = [...digits];
+      let cursor = index;
+      for (const char of digitsOnly) {
+        if (cursor >= CODE_LENGTH) break;
+        next[cursor] = char;
+        cursor += 1;
+      }
+      setDigits(next);
       if (codeError) setCodeError(null);
       const lastFilled = Math.min(index + digitsOnly.length, CODE_LENGTH) - 1;
       inputRefs.current[lastFilled]?.focus();
+      autoSubmitIfComplete(next);
       return;
     }
 
     const clean = digitsOnly.slice(-1);
-    setDigits((prev) => {
-      const next = [...prev];
-      next[index] = clean;
-      return next;
-    });
+    const next = [...digits];
+    next[index] = clean;
+    setDigits(next);
     if (codeError) setCodeError(null);
     if (clean && index < CODE_LENGTH - 1) {
       inputRefs.current[index + 1]?.focus();
     }
+    if (clean) autoSubmitIfComplete(next);
   };
 
   const handleKeyPress = (index: number, key: string) => {
@@ -140,11 +153,31 @@ export default function VerifyEmailScreen() {
     }
   };
 
-  const handleContinue = async () => {
-    const code = digits.join('');
+  const handleContinue = () => submitCode(digits.join(''));
+
+  // A small horizontal shake on a rejected code — the same "that didn't
+  // take" gesture iOS uses for a wrong passcode, alongside the haptic and
+  // the error text. Skipped under Reduce Motion.
+  const reducedMotion = useReducedMotion();
+  const shakeX = useSharedValue(0);
+  const shake = () => {
+    if (reducedMotion) return;
+    shakeX.value = withSequence(
+      withTiming(-8, { duration: 45 }),
+      withTiming(8, { duration: 70 }),
+      withTiming(-5, { duration: 60 }),
+      withTiming(5, { duration: 60 }),
+      withTiming(0, { duration: 50 })
+    );
+  };
+  const otpRowShakeStyle = useAnimatedStyle(() => ({ transform: [{ translateX: shakeX.value }] }));
+
+  const submitCode = async (code: string) => {
+    if (isSubmittingRef.current) return;
     if (code.length < CODE_LENGTH) {
       setCodeError(`Enter the full ${CODE_LENGTH}-digit code.`);
       hapticError();
+      shake();
       return;
     }
     if (!params.email) {
@@ -153,6 +186,9 @@ export default function VerifyEmailScreen() {
       return;
     }
     setCodeError(null);
+    // Synchronous guard — auto-submit on the sixth digit and a tap on
+    // Continue (or a double tap) can land before `verifying` re-renders.
+    isSubmittingRef.current = true;
     setVerifying(true);
     // A code can only be verified once — if an earlier tap already verified
     // it and only the profile restore below failed (offline), a retry must
@@ -163,9 +199,11 @@ export default function VerifyEmailScreen() {
       // this wiring closes.
       const { data, error } = await supabase.auth.verifyOtp({ email: params.email, token: code, type: 'email' });
       if (error) {
+        isSubmittingRef.current = false;
         setVerifying(false);
         setCodeError(error.message);
         hapticError();
+        shake();
         return;
       }
       verifiedRef.current = true;
@@ -174,6 +212,7 @@ export default function VerifyEmailScreen() {
       // that account and this one gets its own (see account-switch.ts).
       if (data.user) await prepareLocalDataForAccount(data.user.id);
     }
+    isSubmittingRef.current = false;
     setVerifying(false);
     hapticSuccess();
     // This screen has three real entry points now, not one: mid-onboarding
@@ -302,7 +341,7 @@ export default function VerifyEmailScreen() {
         </View>
 
         <View style={styles.otpGroup}>
-          <View style={styles.otpRow}>
+          <ReanimatedAnimated.View style={[styles.otpRow, otpRowShakeStyle]}>
             {digits.map((digit, index) => (
               <View key={index} style={[styles.otpBox, focusedIndex === index && styles.otpBoxFocused]}>
                 <View pointerEvents="none" style={styles.otpBoxSheen} />
@@ -333,7 +372,7 @@ export default function VerifyEmailScreen() {
                 />
               </View>
             ))}
-          </View>
+          </ReanimatedAnimated.View>
 
           {codeError ? (
             <ReanimatedAnimated.Text entering={FadeIn.duration(MOTION_DURATION.fast)} style={styles.codeErrorText} maxFontSizeMultiplier={1.3}>
