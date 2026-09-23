@@ -6,7 +6,7 @@ import {
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
@@ -14,7 +14,7 @@ import { ENERGY_LABELS, type EnergyScore } from '@/components/home/energy-gauge'
 import { HorizontalRuler } from '@/components/onboarding/horizontal-ruler';
 import { Type } from '@/constants/theme';
 import { BODY_AREA_LABELS, BODY_AREA_ORDER } from '@/lib/body-area-labels';
-import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
+import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticImpactLight, hapticSelect, hapticSuccess } from '@/lib/haptics';
 import { localDateStr } from '@/lib/local-date';
 import type { BodyArea } from '@/lib/plan-preview';
@@ -196,7 +196,7 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
           onHoverIn={closeHover.onHoverIn}
           onHoverOut={closeHover.onHoverOut}
           hitSlop={10}
-          style={styles.closeButton}
+          style={({ pressed }) => [styles.closeButton, pressed && PRESSED_DIM]}
           accessibilityRole="button"
           accessibilityLabel="Close"
         >
@@ -258,7 +258,7 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
               return (
                 <Pressable
                   key={score}
-                  style={styles.energyPillHit}
+                  style={({ pressed }) => [styles.energyPillHit, pressed && PRESSED_DIM]}
                   onPress={() => {
                     hapticSelect();
                     setEnergy((prev) => (prev === score ? null : score));
@@ -290,7 +290,7 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
               return (
                 <Pressable
                   key={score}
-                  style={styles.energyPillHit}
+                  style={({ pressed }) => [styles.energyPillHit, pressed && PRESSED_DIM]}
                   onPress={() => {
                     hapticSelect();
                     setSoreness((prev) => (prev === score ? null : score));
@@ -340,6 +340,13 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
           disabled={!isValid || saving}
         >
           <View style={[styles.saveButton, (!isValid || saving) && styles.saveButtonDisabled]}>
+            {/* The press glow savePress already animates — wired to the
+                Pressable above but never drawn, so Save gave no visual
+                response to a tap. */}
+            <Animated.View
+              pointerEvents="none"
+              style={[StyleSheet.absoluteFill, styles.saveButtonGlow, { opacity: savePress.glow }]}
+            />
             <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>
               {alreadyLogged ? 'Replace Logged Session' : 'Save Session'}
             </Text>
@@ -485,6 +492,10 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       borderRadius: 16,
       backgroundColor: '#438C63',
       alignItems: 'center',
+    },
+    saveButtonGlow: {
+      borderRadius: 16,
+      backgroundColor: 'rgba(255,255,255,0.18)',
     },
     saveButtonDisabled: {
       opacity: 0.4,

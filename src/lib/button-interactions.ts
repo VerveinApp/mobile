@@ -52,3 +52,14 @@ export function useLiquidPress() {
 
   return { scale, glow, onPressIn, onPressOut };
 }
+
+/**
+ * The touch-down feedback for every plain Pressable that has no glow of its
+ * own — rows, cards, pills, header buttons, dialog buttons. BUG FIX: on
+ * iPhone most of these gave no visual response at all: useHoverFade only
+ * fires for a mouse/trackpad pointer and android_ripple only on Android, so
+ * a tap registered as a haptic tick and nothing else. Applied as
+ * `style={({ pressed }) => [base, pressed && PRESSED_DIM]}`, iOS's own
+ * dim-while-held convention for tappable content.
+ */
+export const PRESSED_DIM = { opacity: 0.6 } as const;

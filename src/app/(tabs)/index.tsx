@@ -4,7 +4,7 @@ import { AppState, Platform, Pressable, RefreshControl, ScrollView, Share, Style
 import ReanimatedAnimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
+import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
 import { AndroidCardElevation, AndroidRipple, TabularNums, Type } from '@/constants/theme';
 import { getCalibration } from '@/lib/calibration';
 import { getDeloadNudge } from '@/lib/deload';
@@ -457,7 +457,7 @@ export default function SummaryScreen() {
 
         {deloadNudge?.triggered && deloadNudge.message ? (
           <Pressable
-            style={styles.deloadBanner}
+            style={({ pressed }) => [styles.deloadBanner, pressed && PRESSED_DIM]}
             onPress={() => {
               hapticSelect();
               router.push('/home/check-in' as never);
@@ -483,12 +483,22 @@ export default function SummaryScreen() {
               </Text>
             </View>
             <View style={styles.healthKitBannerActions}>
-              <Pressable style={styles.healthKitBannerDismiss} onPress={handleDismissHealthKitBanner} hitSlop={8}>
+              <Pressable
+                style={({ pressed }) => [styles.healthKitBannerDismiss, pressed && PRESSED_DIM]}
+                onPress={handleDismissHealthKitBanner}
+                hitSlop={8}
+                accessibilityRole="button"
+              >
                 <Text style={styles.healthKitBannerDismissText} maxFontSizeMultiplier={1.2}>
                   Not now
                 </Text>
               </Pressable>
-              <Pressable style={styles.healthKitBannerConnect} onPress={handleConnectHealthKit} hitSlop={8}>
+              <Pressable
+                style={({ pressed }) => [styles.healthKitBannerConnect, pressed && PRESSED_DIM]}
+                onPress={handleConnectHealthKit}
+                hitSlop={8}
+                accessibilityRole="button"
+              >
                 <Text style={styles.healthKitBannerConnectText} maxFontSizeMultiplier={1.2}>
                   Connect
                 </Text>

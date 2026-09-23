@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } fro
 import { SymbolView } from '@/components/ui/app-symbol';
 
 import { Type } from '@/constants/theme';
-import { useHoverFade } from '@/lib/button-interactions';
+import { useHoverFade, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticSelect } from '@/lib/haptics';
 import { useAppTheme } from '@/lib/theme-context';
 
@@ -40,7 +40,7 @@ export function PremiumGate({
 
   return (
     <Pressable
-      style={[styles.card, style]}
+      style={({ pressed }) => [styles.card, style, pressed && PRESSED_DIM]}
       onPress={() => {
         hapticSelect();
         router.push('/paywall' as never);

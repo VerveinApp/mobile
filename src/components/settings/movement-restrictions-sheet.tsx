@@ -1,11 +1,11 @@
 import { BottomSheetBackdrop, type BottomSheetBackdropProps, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
 import { Type } from '@/constants/theme';
-import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
+import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { MOVEMENT_RESTRICTIONS, MOVEMENT_RESTRICTION_LABELS, type MovementRestriction } from '@/lib/movement-restrictions';
 import { useAppColors } from '@/lib/theme-context';
@@ -115,7 +115,7 @@ export const MovementRestrictionsSheet = forwardRef<BottomSheetModal>((_props, f
           onHoverIn={closeHover.onHoverIn}
           onHoverOut={closeHover.onHoverOut}
           hitSlop={10}
-          style={styles.closeButton}
+          style={({ pressed }) => [styles.closeButton, pressed && PRESSED_DIM]}
           accessibilityRole="button"
           accessibilityLabel="Close"
         >
@@ -137,7 +137,7 @@ export const MovementRestrictionsSheet = forwardRef<BottomSheetModal>((_props, f
             return (
               <Pressable
                 key={restriction}
-                style={[styles.row, isLast && styles.rowLast]}
+                style={({ pressed }) => [styles.row, isLast && styles.rowLast, pressed && PRESSED_DIM]}
                 onPress={() => toggleRestriction(restriction)}
               >
                 <Text style={styles.rowLabel} maxFontSizeMultiplier={1.3}>{MOVEMENT_RESTRICTION_LABELS[restriction]}</Text>
@@ -149,7 +149,7 @@ export const MovementRestrictionsSheet = forwardRef<BottomSheetModal>((_props, f
           })}
         </View>
 
-        <Pressable style={styles.noneRow} onPress={selectNone}>
+        <Pressable style={({ pressed }) => [styles.noneRow, pressed && PRESSED_DIM]} onPress={selectNone}>
           <Text style={styles.rowLabel} maxFontSizeMultiplier={1.3}>None of these</Text>
           <View style={[styles.checkbox, noneSelected && styles.checkboxChecked]}>
             {noneSelected ? <SymbolView name="checkmark" size={11} tintColor="#ffffff" weight="bold" /> : null}
@@ -165,6 +165,13 @@ export const MovementRestrictionsSheet = forwardRef<BottomSheetModal>((_props, f
           disabled={saving}
         >
           <View style={[styles.saveButton, saving && styles.saveButtonDisabled]}>
+            {/* The press glow savePress already animates — wired to the
+                Pressable above but never drawn, so Save gave no visual
+                response to a tap. */}
+            <Animated.View
+              pointerEvents="none"
+              style={[StyleSheet.absoluteFill, styles.saveButtonGlow, { opacity: savePress.glow }]}
+            />
             <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>
               {saving ? 'Saving…' : 'Save'}
             </Text>
@@ -272,6 +279,10 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       borderRadius: 16,
       backgroundColor: '#438C63',
       alignItems: 'center',
+    },
+    saveButtonGlow: {
+      borderRadius: 16,
+      backgroundColor: 'rgba(255,255,255,0.18)',
     },
     saveButtonDisabled: {
       opacity: 0.5,

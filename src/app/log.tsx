@@ -9,7 +9,7 @@ import { SymbolView } from '@/components/ui/app-symbol';
 import { LogPastSessionSheet } from '@/components/settings/log-past-session-sheet';
 import { PremiumGate } from '@/components/premium-gate';
 import { AndroidCardElevation, AndroidRipple, Type } from '@/constants/theme';
-import { useHoverFade } from '@/lib/button-interactions';
+import { useHoverFade, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticImpactLight } from '@/lib/haptics';
 import { usePremiumEntitlement } from '@/lib/purchases';
 import { useAppColors } from '@/lib/theme-context';
@@ -51,7 +51,7 @@ export default function LogScreen() {
           onHoverIn={backHover.onHoverIn}
           onHoverOut={backHover.onHoverOut}
           hitSlop={10}
-          style={styles.backButton}
+          style={({ pressed }) => [styles.backButton, pressed && PRESSED_DIM]}
           android_ripple={{ ...AndroidRipple, borderless: true }}
           accessibilityRole="button"
           accessibilityLabel="Go back"
@@ -164,7 +164,7 @@ function LogRow({
   const hover = useHoverFade();
   return (
     <Pressable
-      style={[styles.row, !last && styles.rowDivider]}
+      style={({ pressed }) => [styles.row, !last && styles.rowDivider, pressed && PRESSED_DIM]}
       onPress={() => {
         hapticImpactLight();
         onPress();

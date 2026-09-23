@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
 import { Type } from '@/constants/theme';
-import { useHoverFade } from '@/lib/button-interactions';
+import { useHoverFade, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight } from '@/lib/haptics';
 import { getArchivedNotes, deleteNote, setNoteArchived, type NoteEntry } from '@/lib/notes';
 import { useFadeInEntering } from '@/lib/screen-transitions';
@@ -101,7 +101,7 @@ export default function ArchiveScreen() {
           onHoverIn={backHover.onHoverIn}
           onHoverOut={backHover.onHoverOut}
           hitSlop={10}
-          style={styles.headerButton}
+          style={({ pressed }) => [styles.headerButton, pressed && PRESSED_DIM]}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
@@ -150,7 +150,7 @@ export default function ArchiveScreen() {
                     return (
                       <View style={styles.actionsRow}>
                         <Pressable
-                          style={[styles.action, styles.unarchiveAction]}
+                          style={({ pressed }) => [styles.action, styles.unarchiveAction, pressed && PRESSED_DIM]}
                           onPress={() => {
                             swipeableRefs.current.get(note.id)?.close();
                             handleUnarchive(note);
@@ -161,7 +161,7 @@ export default function ArchiveScreen() {
                           <SymbolView name="arrow.uturn.left" size={15} tintColor="#ffffff" />
                         </Pressable>
                         <Pressable
-                          style={[styles.action, styles.deleteAction]}
+                          style={({ pressed }) => [styles.action, styles.deleteAction, pressed && PRESSED_DIM]}
                           onPress={() => handleDelete(note.id)}
                           accessibilityRole="button"
                           accessibilityLabel="Delete note"

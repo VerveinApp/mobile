@@ -1,11 +1,11 @@
 import { BottomSheetBackdrop, type BottomSheetBackdropProps, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Animated, Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
 import { Type } from '@/constants/theme';
-import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
+import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
 import { getAllExercisePerformances, type ExercisePerformance } from '@/lib/exercise-performance';
 import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { HorizontalRuler } from '@/components/onboarding/horizontal-ruler';
@@ -212,7 +212,7 @@ export const GoalsSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void 
           onHoverIn={closeHover.onHoverIn}
           onHoverOut={closeHover.onHoverOut}
           hitSlop={10}
-          style={styles.closeButton}
+          style={({ pressed }) => [styles.closeButton, pressed && PRESSED_DIM]}
           accessibilityRole="button"
           accessibilityLabel="Close"
         >
@@ -281,7 +281,7 @@ export const GoalsSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void 
                     return (
                       <Pressable
                         key={name}
-                        style={[styles.exerciseRow, !isLast && styles.exerciseRowDivider]}
+                        style={({ pressed }) => [styles.exerciseRow, !isLast && styles.exerciseRowDivider, pressed && PRESSED_DIM]}
                         onPress={() => handleSelectExercise(name)}
                       >
                         <Text style={styles.exerciseRowLabel} maxFontSizeMultiplier={1.3}>{name}</Text>
@@ -333,6 +333,13 @@ export const GoalsSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void 
           disabled={saving}
         >
           <View style={[styles.saveButton, saving && styles.saveButtonDisabled]}>
+            {/* The press glow savePress already animates — wired to the
+                Pressable above but never drawn, so Save gave no visual
+                response to a tap. */}
+            <Animated.View
+              pointerEvents="none"
+              style={[StyleSheet.absoluteFill, styles.saveButtonGlow, { opacity: savePress.glow }]}
+            />
             <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>
               {saving ? 'Saving…' : 'Save'}
             </Text>
@@ -452,6 +459,10 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       borderRadius: 16,
       backgroundColor: '#438C63',
       alignItems: 'center',
+    },
+    saveButtonGlow: {
+      borderRadius: 16,
+      backgroundColor: 'rgba(255,255,255,0.18)',
     },
     saveButtonDisabled: {
       opacity: 0.5,

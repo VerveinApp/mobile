@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
-import { useHoverFade } from '@/lib/button-interactions';
+import { useHoverFade, PRESSED_DIM } from '@/lib/button-interactions';
 import { AndroidCardElevation, AndroidRipple, TabularNums, Type, sheenGradient } from '@/constants/theme';
 import { hapticImpactLight, hapticSuccess } from '@/lib/haptics';
 import {
@@ -206,7 +206,7 @@ export default function ProfileScreen() {
             onHoverIn={settingsHover.onHoverIn}
             onHoverOut={settingsHover.onHoverOut}
             hitSlop={10}
-            style={styles.settingsButton}
+            style={({ pressed }) => [styles.settingsButton, pressed && PRESSED_DIM]}
             accessibilityRole="button"
             accessibilityLabel="Open settings"
           >
@@ -217,7 +217,7 @@ export default function ProfileScreen() {
             <Text style={styles.avatarText} maxFontSizeMultiplier={1.15}>{initial}</Text>
           </View>
           <Pressable
-            style={styles.nameHit}
+            style={({ pressed }) => [styles.nameHit, pressed && PRESSED_DIM]}
             onPress={handleOpenEditName}
             onHoverIn={nameHover.onHoverIn}
             onHoverOut={nameHover.onHoverOut}
@@ -279,11 +279,16 @@ export default function ProfileScreen() {
                 maxFontSizeMultiplier={1.3}
               />
               <View style={styles.editNameActions}>
-                <Pressable style={styles.editNameCancelHit} onPress={handleCancelEditName} hitSlop={8} disabled={savingName}>
+                <Pressable
+                  style={({ pressed }) => [styles.editNameCancelHit, pressed && PRESSED_DIM]}
+                  onPress={handleCancelEditName}
+                  hitSlop={8}
+                  disabled={savingName}
+                >
                   <Text style={styles.editNameCancelText} maxFontSizeMultiplier={1.2}>Cancel</Text>
                 </Pressable>
                 <Pressable
-                  style={[styles.editNameConfirmHit, (!nameDraft.trim() || savingName) && styles.editNameConfirmHitDisabled]}
+                  style={({ pressed }) => [styles.editNameConfirmHit, (!nameDraft.trim() || savingName) && styles.editNameConfirmHitDisabled, pressed && PRESSED_DIM]}
                   onPress={handleSaveName}
                   hitSlop={8}
                   disabled={!nameDraft.trim() || savingName}
@@ -314,7 +319,7 @@ export default function ProfileScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>LOG</Text>
           <Pressable
-            style={styles.card}
+            style={({ pressed }) => [styles.card, pressed && PRESSED_DIM]}
             onPress={() => router.push('/log' as never)}
             onHoverIn={logHover.onHoverIn}
             onHoverOut={logHover.onHoverOut}
@@ -340,7 +345,7 @@ export default function ProfileScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>GOALS</Text>
           <Pressable
-            style={styles.card}
+            style={({ pressed }) => [styles.card, pressed && PRESSED_DIM]}
             onPress={() => goalsSheetRef.current?.present()}
             onHoverIn={goalsHover.onHoverIn}
             onHoverOut={goalsHover.onHoverOut}

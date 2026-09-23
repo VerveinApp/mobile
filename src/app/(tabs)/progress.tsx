@@ -31,6 +31,7 @@ import {
   type MovementPatternBreakdown,
 } from '@/lib/workout-log';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
+import { PRESSED_DIM } from '@/lib/button-interactions';
 
 const WEEKDAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 const MONTH_WEEK_COUNT = 4;
@@ -338,7 +339,7 @@ export default function ProgressScreen() {
               {(['week', 'month'] as const).map((option) => (
                 <Pressable
                   key={option}
-                  style={[styles.rangeOption, gridRange === option && styles.rangeOptionActive]}
+                  style={({ pressed }) => [styles.rangeOption, gridRange === option && styles.rangeOptionActive, pressed && PRESSED_DIM]}
                   onPress={() => {
                     if (gridRange === option) return;
                     hapticSelect();
@@ -473,7 +474,7 @@ export default function ProgressScreen() {
                                   ? undefined
                                   : `${formatEntryDateLabel(day.date)}, ${day.completed ? 'completed' : 'missed'}. Tap for detail.`
                               }
-                              style={[
+                              style={({ pressed }) => [
                                 styles.gridCell,
                                 day.completed === true && styles.gridCellCompleted,
                                 // Fixed bug: previously `day.completed === false`
@@ -493,6 +494,7 @@ export default function ProgressScreen() {
                                 // to be findable at a glance in a 4-week grid
                                 // without changing what its fill already says.
                                 day.isToday && styles.gridCellToday,
+                                pressed && PRESSED_DIM,
                               ]}
                             />
                           ) : (
@@ -522,7 +524,7 @@ export default function ProgressScreen() {
               {(['recent', 'all'] as const).map((option) => (
                 <Pressable
                   key={option}
-                  style={[styles.rangeOption, balanceRange === option && styles.rangeOptionActive]}
+                  style={({ pressed }) => [styles.rangeOption, balanceRange === option && styles.rangeOptionActive, pressed && PRESSED_DIM]}
                   android_ripple={AndroidRipple}
                   onPress={() => {
                     if (balanceRange === option) return;
@@ -573,7 +575,7 @@ export default function ProgressScreen() {
                       {(['body-area', 'pattern'] as const).map((option) => (
                         <Pressable
                           key={option}
-                          style={[styles.rangeOption, balanceView === option && styles.rangeOptionActive]}
+                          style={({ pressed }) => [styles.rangeOption, balanceView === option && styles.rangeOptionActive, pressed && PRESSED_DIM]}
                           android_ripple={AndroidRipple}
                           onPress={() => {
                             if (balanceView === option) return;

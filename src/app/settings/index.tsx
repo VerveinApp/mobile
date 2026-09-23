@@ -12,7 +12,7 @@ import appConfig from '../../../app.json';
 import { deleteAccount } from '@/lib/account';
 import { isAppLockEnabled, setAppLockEnabled } from '@/lib/app-lock';
 import { AndroidCardElevation, AndroidRipple, Type } from '@/constants/theme';
-import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
+import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
 import { buildBackupPayload, clearAllLocalData, parseBackupPayload, restoreBackupPayload, type BackupPayload } from '@/lib/data-backup';
 import {
   checkDevPremiumUnlockKey,
@@ -648,7 +648,7 @@ export default function SettingsScreen() {
           onHoverIn={backHover.onHoverIn}
           onHoverOut={backHover.onHoverOut}
           hitSlop={10}
-          style={styles.backButton}
+          style={({ pressed }) => [styles.backButton, pressed && PRESSED_DIM]}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
@@ -1013,11 +1013,11 @@ export default function SettingsScreen() {
                       <Text style={styles.importErrorText} maxFontSizeMultiplier={1.3}>{importError}</Text>
                     ) : null}
                     <View style={styles.importActions}>
-                      <Pressable style={styles.importCancelHit} onPress={handleCancelImport} hitSlop={8}>
+                      <Pressable style={({ pressed }) => [styles.importCancelHit, pressed && PRESSED_DIM]} onPress={handleCancelImport} hitSlop={8}>
                         <Text style={styles.importCancelText} maxFontSizeMultiplier={1.2}>Cancel</Text>
                       </Pressable>
                       <Pressable
-                        style={[styles.importConfirmHit, importText.trim().length === 0 && styles.importConfirmHitDisabled]}
+                        style={({ pressed }) => [styles.importConfirmHit, importText.trim().length === 0 && styles.importConfirmHitDisabled, pressed && PRESSED_DIM]}
                         onPress={handleValidateImport}
                         disabled={importText.trim().length === 0}
                         hitSlop={8}
@@ -1037,7 +1037,7 @@ export default function SettingsScreen() {
                     </Text>
                     <View style={styles.importActions}>
                       <Pressable
-                        style={styles.importCancelHit}
+                        style={({ pressed }) => [styles.importCancelHit, pressed && PRESSED_DIM]}
                         onPress={() => setImportStep('paste')}
                         hitSlop={8}
                         disabled={restoringImport}
@@ -1045,7 +1045,7 @@ export default function SettingsScreen() {
                         <Text style={styles.importCancelText} maxFontSizeMultiplier={1.2}>Back</Text>
                       </Pressable>
                       <Pressable
-                        style={[styles.importDestructiveHit, restoringImport && styles.importConfirmHitDisabled]}
+                        style={({ pressed }) => [styles.importDestructiveHit, restoringImport && styles.importConfirmHitDisabled, pressed && PRESSED_DIM]}
                         onPress={handleConfirmImport}
                         hitSlop={8}
                         disabled={restoringImport}
@@ -1089,7 +1089,7 @@ export default function SettingsScreen() {
                 </Text>
                 <View style={styles.importActions}>
                   <Pressable
-                    style={styles.importCancelHit}
+                    style={({ pressed }) => [styles.importCancelHit, pressed && PRESSED_DIM]}
                     onPress={handleCancelDeleteData}
                     hitSlop={8}
                     disabled={deletingData}
@@ -1097,7 +1097,7 @@ export default function SettingsScreen() {
                     <Text style={styles.importCancelText} maxFontSizeMultiplier={1.2}>Cancel</Text>
                   </Pressable>
                   <Pressable
-                    style={[styles.importDestructiveHit, deletingData && styles.importConfirmHitDisabled]}
+                    style={({ pressed }) => [styles.importDestructiveHit, deletingData && styles.importConfirmHitDisabled, pressed && PRESSED_DIM]}
                     onPress={handleConfirmDeleteData}
                     hitSlop={8}
                     disabled={deletingData}
@@ -1123,10 +1123,18 @@ export default function SettingsScreen() {
                     </View>
                   </View>
                 </View>
-                <Pressable style={[styles.comingSoonRow, styles.rowDivider]} onPress={handleSignOut}>
+                <Pressable
+                  style={({ pressed }) => [styles.comingSoonRow, styles.rowDivider, pressed && PRESSED_DIM]}
+                  onPress={handleSignOut}
+                  accessibilityRole="button"
+                >
                   <Text style={styles.signOutText} maxFontSizeMultiplier={1.3}>Sign Out</Text>
                 </Pressable>
-                <Pressable style={styles.comingSoonRow} onPress={handleOpenDeleteAccount}>
+                <Pressable
+                  style={({ pressed }) => [styles.comingSoonRow, pressed && PRESSED_DIM]}
+                  onPress={handleOpenDeleteAccount}
+                  accessibilityRole="button"
+                >
                   <Text style={styles.deleteAccountRowText} maxFontSizeMultiplier={1.3}>Delete Account</Text>
                 </Pressable>
               </>
@@ -1165,7 +1173,7 @@ export default function SettingsScreen() {
                 ) : null}
                 <View style={styles.importActions}>
                   <Pressable
-                    style={styles.importCancelHit}
+                    style={({ pressed }) => [styles.importCancelHit, pressed && PRESSED_DIM]}
                     onPress={handleCancelDeleteAccount}
                     hitSlop={8}
                     disabled={deletingAccount}
@@ -1173,7 +1181,7 @@ export default function SettingsScreen() {
                     <Text style={styles.importCancelText} maxFontSizeMultiplier={1.2}>Cancel</Text>
                   </Pressable>
                   <Pressable
-                    style={[styles.importDestructiveHit, deletingAccount && styles.importConfirmHitDisabled]}
+                    style={({ pressed }) => [styles.importDestructiveHit, deletingAccount && styles.importConfirmHitDisabled, pressed && PRESSED_DIM]}
                     onPress={handleConfirmDeleteAccount}
                     hitSlop={8}
                     disabled={deletingAccount}
@@ -1209,7 +1217,7 @@ export default function SettingsScreen() {
                 />
                 <View style={styles.importActions}>
                   <Pressable
-                    style={styles.importCancelHit}
+                    style={({ pressed }) => [styles.importCancelHit, pressed && PRESSED_DIM]}
                     onPress={handleCancelEditName}
                     hitSlop={8}
                     disabled={savingName}
@@ -1217,7 +1225,7 @@ export default function SettingsScreen() {
                     <Text style={styles.importCancelText} maxFontSizeMultiplier={1.2}>Cancel</Text>
                   </Pressable>
                   <Pressable
-                    style={[styles.importConfirmHit, (!nameDraft.trim() || savingName) && styles.importConfirmHitDisabled]}
+                    style={({ pressed }) => [styles.importConfirmHit, (!nameDraft.trim() || savingName) && styles.importConfirmHitDisabled, pressed && PRESSED_DIM]}
                     onPress={handleSaveName}
                     hitSlop={8}
                     disabled={!nameDraft.trim() || savingName}
@@ -1235,7 +1243,7 @@ export default function SettingsScreen() {
         <Section styles={styles} title="SUPPORT">
           <View style={styles.card}>
             <Pressable
-              style={styles.aboutRow}
+              style={({ pressed }) => [styles.aboutRow, pressed && PRESSED_DIM]}
               onPress={() => {
                 hapticImpactLight();
                 router.push('/legal/terms' as never);
@@ -1247,7 +1255,7 @@ export default function SettingsScreen() {
               <SymbolView name="chevron.right" size={12} tintColor={colors.iconFaint} />
             </Pressable>
             <Pressable
-              style={[styles.aboutRow, styles.rowDivider]}
+              style={({ pressed }) => [styles.aboutRow, styles.rowDivider, pressed && PRESSED_DIM]}
               onPress={() => {
                 hapticImpactLight();
                 router.push('/legal/privacy' as never);
@@ -1259,7 +1267,7 @@ export default function SettingsScreen() {
               <SymbolView name="chevron.right" size={12} tintColor={colors.iconFaint} />
             </Pressable>
             <Pressable
-              style={styles.aboutRow}
+              style={({ pressed }) => [styles.aboutRow, pressed && PRESSED_DIM]}
               onPress={() => {
                 hapticImpactLight();
                 Linking.openURL(`mailto:${CONTACT_EMAIL}`);
@@ -1295,7 +1303,7 @@ export default function SettingsScreen() {
                     </Text>
                   </View>
                   <Pressable
-                    style={[styles.aboutRow, styles.rowDivider]}
+                    style={({ pressed }) => [styles.aboutRow, styles.rowDivider, pressed && PRESSED_DIM]}
                     disabled={seedingHistory}
                     onPress={handleSeedFakeHistory}
                   >
@@ -1314,7 +1322,7 @@ export default function SettingsScreen() {
                     )}
                   </Pressable>
                   <Pressable
-                    style={[styles.aboutRow, styles.rowDivider]}
+                    style={({ pressed }) => [styles.aboutRow, styles.rowDivider, pressed && PRESSED_DIM]}
                     disabled={seedingStrength}
                     onPress={handleSeedFakeStrength}
                   >
@@ -1328,7 +1336,7 @@ export default function SettingsScreen() {
                     )}
                   </Pressable>
                   <Pressable
-                    style={styles.aboutRow}
+                    style={({ pressed }) => [styles.aboutRow, pressed && PRESSED_DIM]}
                     disabled={resettingSub}
                     onPress={handleResetSubscription}
                   >
@@ -1424,7 +1432,7 @@ function NavRow({
 }) {
   return (
     <Pressable
-      style={[styles.navRow, !last && styles.rowDivider]}
+      style={({ pressed }) => [styles.navRow, !last && styles.rowDivider, pressed && PRESSED_DIM]}
       onPress={() => {
         hapticImpactLight();
         onPress();

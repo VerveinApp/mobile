@@ -6,7 +6,7 @@ import { SymbolView } from '@/components/ui/app-symbol';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Type } from '@/constants/theme';
-import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
+import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight, hapticSuccess } from '@/lib/haptics';
 import { getOrCreateReferralCode, redeemReferralCode } from '@/lib/referral';
 import { useFadeInEntering } from '@/lib/screen-transitions';
@@ -117,7 +117,7 @@ export default function ReferralScreen() {
           onHoverIn={backHover.onHoverIn}
           onHoverOut={backHover.onHoverOut}
           hitSlop={10}
-          style={styles.backButton}
+          style={({ pressed }) => [styles.backButton, pressed && PRESSED_DIM]}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >

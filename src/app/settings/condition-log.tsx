@@ -9,7 +9,7 @@ import { SymbolView } from '@/components/ui/app-symbol';
 
 import { HorizontalRuler } from '@/components/onboarding/horizontal-ruler';
 import { Type } from '@/constants/theme';
-import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
+import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
 import { CONDITIONS, CONDITION_LABELS, type Condition } from '@/lib/conditions';
 import {
   addConditionLogEntry,
@@ -142,7 +142,7 @@ export default function ConditionLogScreen() {
           onHoverIn={backHover.onHoverIn}
           onHoverOut={backHover.onHoverOut}
           hitSlop={10}
-          style={styles.backButton}
+          style={({ pressed }) => [styles.backButton, pressed && PRESSED_DIM]}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
@@ -167,7 +167,7 @@ export default function ConditionLogScreen() {
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.section}>
             <Pressable
-              style={styles.addRow}
+              style={({ pressed }) => [styles.addRow, pressed && PRESSED_DIM]}
               onPress={handleToggleAdd}
               onHoverIn={addHover.onHoverIn}
               onHoverOut={addHover.onHoverOut}
@@ -194,7 +194,7 @@ export default function ConditionLogScreen() {
                     return (
                       <Pressable
                         key={condition}
-                        style={styles.gridPillHit}
+                        style={({ pressed }) => [styles.gridPillHit, pressed && PRESSED_DIM]}
                         onPress={() => {
                           hapticSelect();
                           setSelectedCondition((prev) => (prev === condition ? null : condition));
@@ -272,7 +272,7 @@ export default function ConditionLogScreen() {
                       dragListeners.current.set(entry.id, listenerId);
                       return (
                         <Pressable
-                          style={styles.deleteAction}
+                          style={({ pressed }) => [styles.deleteAction, pressed && PRESSED_DIM]}
                           onPress={() => handleDelete(entry.id)}
                           accessibilityRole="button"
                           accessibilityLabel="Delete entry"

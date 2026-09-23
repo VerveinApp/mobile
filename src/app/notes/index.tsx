@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
 import { Type } from '@/constants/theme';
-import { useHoverFade } from '@/lib/button-interactions';
+import { useHoverFade, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight } from '@/lib/haptics';
 import { getArchivedNotes, getNotes, deleteNote, setNoteArchived, type NoteEntry } from '@/lib/notes';
 import { useFadeInEntering } from '@/lib/screen-transitions';
@@ -140,7 +140,7 @@ export default function NotesScreen() {
           onHoverIn={backHover.onHoverIn}
           onHoverOut={backHover.onHoverOut}
           hitSlop={10}
-          style={styles.headerButton}
+          style={({ pressed }) => [styles.headerButton, pressed && PRESSED_DIM]}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
@@ -152,7 +152,7 @@ export default function NotesScreen() {
           onHoverIn={addHover.onHoverIn}
           onHoverOut={addHover.onHoverOut}
           hitSlop={10}
-          style={styles.headerButton}
+          style={({ pressed }) => [styles.headerButton, pressed && PRESSED_DIM]}
           accessibilityRole="button"
           accessibilityLabel="New note"
         >
@@ -196,7 +196,7 @@ export default function NotesScreen() {
                     return (
                       <View style={styles.actionsRow}>
                         <Pressable
-                          style={[styles.action, styles.archiveAction]}
+                          style={({ pressed }) => [styles.action, styles.archiveAction, pressed && PRESSED_DIM]}
                           onPress={() => {
                             swipeableRefs.current.get(note.id)?.close();
                             handleArchive(note);
@@ -207,7 +207,7 @@ export default function NotesScreen() {
                           <SymbolView name="archivebox.fill" size={15} tintColor="#ffffff" />
                         </Pressable>
                         <Pressable
-                          style={[styles.action, styles.deleteAction]}
+                          style={({ pressed }) => [styles.action, styles.deleteAction, pressed && PRESSED_DIM]}
                           onPress={() => handleDelete(note.id)}
                           accessibilityRole="button"
                           accessibilityLabel="Delete note"
@@ -259,7 +259,7 @@ export default function NotesScreen() {
 
           {archivedCount > 0 ? (
             <Pressable
-              style={styles.archiveRow}
+              style={({ pressed }) => [styles.archiveRow, pressed && PRESSED_DIM]}
               onPress={() => {
                 hapticImpactLight();
                 router.push('/notes/archive' as never);

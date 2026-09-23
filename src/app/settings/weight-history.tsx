@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
 import { TabularNums, Type } from '@/constants/theme';
-import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
+import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { localDateStr } from '@/lib/local-date';
 import { useFadeInEntering } from '@/lib/screen-transitions';
@@ -215,7 +215,7 @@ export default function WeightHistoryScreen() {
           onHoverIn={backHover.onHoverIn}
           onHoverOut={backHover.onHoverOut}
           hitSlop={10}
-          style={styles.backButton}
+          style={({ pressed }) => [styles.backButton, pressed && PRESSED_DIM]}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
@@ -238,7 +238,7 @@ export default function WeightHistoryScreen() {
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.section}>
             <Pressable
-              style={styles.addRow}
+              style={({ pressed }) => [styles.addRow, pressed && PRESSED_DIM]}
               onPress={handleToggleAdd}
               onHoverIn={addHover.onHoverIn}
               onHoverOut={addHover.onHoverOut}
@@ -384,7 +384,7 @@ export default function WeightHistoryScreen() {
                       dragListeners.current.set(entry.date, listenerId);
                       return (
                         <Pressable
-                          style={styles.deleteAction}
+                          style={({ pressed }) => [styles.deleteAction, pressed && PRESSED_DIM]}
                           onPress={() => handleDelete(entry.date)}
                           accessibilityRole="button"
                           accessibilityLabel="Delete entry"

@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
 import { Type } from '@/constants/theme';
-import { useHoverFade } from '@/lib/button-interactions';
+import { useHoverFade, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight } from '@/lib/haptics';
 import { localDateStr } from '@/lib/local-date';
 import {
@@ -167,7 +167,7 @@ export default function ProgressPhotosScreen() {
           onHoverIn={backHover.onHoverIn}
           onHoverOut={backHover.onHoverOut}
           hitSlop={10}
-          style={styles.headerButton}
+          style={({ pressed }) => [styles.headerButton, pressed && PRESSED_DIM]}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
@@ -196,7 +196,7 @@ export default function ProgressPhotosScreen() {
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.section}>
             <Pressable
-              style={styles.addRow}
+              style={({ pressed }) => [styles.addRow, pressed && PRESSED_DIM]}
               onPress={handleToggleAdd}
               onHoverIn={addHover.onHoverIn}
               onHoverOut={addHover.onHoverOut}
@@ -212,7 +212,7 @@ export default function ProgressPhotosScreen() {
             {adding ? (
               <View style={styles.addCard}>
                 <Pressable
-                  style={styles.choiceRow}
+                  style={({ pressed }) => [styles.choiceRow, pressed && PRESSED_DIM]}
                   onPress={handleTakePhoto}
                   disabled={saving}
                   accessibilityRole="button"
@@ -222,7 +222,7 @@ export default function ProgressPhotosScreen() {
                   <Text style={styles.choiceText} maxFontSizeMultiplier={1.2}>Take Photo</Text>
                 </Pressable>
                 <Pressable
-                  style={styles.choiceRow}
+                  style={({ pressed }) => [styles.choiceRow, pressed && PRESSED_DIM]}
                   onPress={handleChooseFromLibrary}
                   disabled={saving}
                   accessibilityRole="button"
@@ -241,7 +241,7 @@ export default function ProgressPhotosScreen() {
           {photos.length >= 2 ? (
             <View style={styles.section}>
               <Pressable
-                style={styles.addRow}
+                style={({ pressed }) => [styles.addRow, pressed && PRESSED_DIM]}
                 onPress={handleOpenCompare}
                 onHoverIn={compareHover.onHoverIn}
                 onHoverOut={compareHover.onHoverOut}
@@ -270,7 +270,7 @@ export default function ProgressPhotosScreen() {
                   return (
                     <Pressable
                       key={photo.id}
-                      style={styles.gridCell}
+                      style={({ pressed }) => [styles.gridCell, pressed && PRESSED_DIM]}
                       onPress={() => {
                         if (deleteTargetId) {
                           setDeleteTargetId(null);
@@ -289,7 +289,7 @@ export default function ProgressPhotosScreen() {
                         <Image source={{ uri: progressPhotoUri(photo) }} style={styles.gridImage} contentFit="cover" />
                         {isDeleteTarget ? (
                           <Pressable
-                            style={styles.gridDeleteBadge}
+                            style={({ pressed }) => [styles.gridDeleteBadge, pressed && PRESSED_DIM]}
                             onPress={() => {
                               setDeleteTargetId(null);
                               handleDelete(photo.id);
@@ -319,7 +319,7 @@ export default function ProgressPhotosScreen() {
             <Pressable
               onPress={() => setViewing(null)}
               hitSlop={10}
-              style={styles.headerButton}
+              style={({ pressed }) => [styles.headerButton, pressed && PRESSED_DIM]}
               accessibilityRole="button"
               accessibilityLabel="Close"
             >
@@ -331,7 +331,7 @@ export default function ProgressPhotosScreen() {
             <Pressable
               onPress={() => viewing && handleDelete(viewing.id)}
               hitSlop={10}
-              style={styles.headerButton}
+              style={({ pressed }) => [styles.headerButton, pressed && PRESSED_DIM]}
               accessibilityRole="button"
               accessibilityLabel="Delete photo"
             >
@@ -350,7 +350,7 @@ export default function ProgressPhotosScreen() {
             <Pressable
               onPress={() => setComparing(false)}
               hitSlop={10}
-              style={styles.headerButton}
+              style={({ pressed }) => [styles.headerButton, pressed && PRESSED_DIM]}
               accessibilityRole="button"
               accessibilityLabel="Close"
             >

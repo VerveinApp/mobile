@@ -31,7 +31,7 @@ import { SymbolView } from '@/components/ui/app-symbol';
 import { openBrowserAsync } from 'expo-web-browser';
 import { postAccessibilityScreenChanged } from 'expo-accessibility-rescan';
 
-import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
+import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
 import { getCalibration, submitSessionFeedback } from '@/lib/calibration';
 import { Type, sheenGradient } from '@/constants/theme';
 import { getLastCheckIn, recordCheckIn, type CheckInRecord } from '@/lib/check-in-history';
@@ -1343,7 +1343,7 @@ export default function EnergyCheckInScreen() {
             </Text>
 
             <Pressable
-              style={styles.restDayLinkHit}
+              style={({ pressed }) => [styles.restDayLinkHit, pressed && PRESSED_DIM]}
               onPress={() => setShowAnyway(true)}
               hitSlop={12}
               accessibilityRole="button"
@@ -1397,7 +1397,7 @@ export default function EnergyCheckInScreen() {
                   return (
                     <Pressable
                       key={minutes}
-                      style={[styles.timePill, active && styles.timePillActive]}
+                      style={({ pressed }) => [styles.timePill, active && styles.timePillActive, pressed && PRESSED_DIM]}
                       onPress={() => handleTimeAvailableChange(minutes)}
                       hitSlop={2}
                       accessibilityRole="button"
@@ -1426,7 +1426,7 @@ export default function EnergyCheckInScreen() {
                   return (
                     <Pressable
                       key={environment}
-                      style={[styles.timePill, active && styles.timePillActive]}
+                      style={({ pressed }) => [styles.timePill, active && styles.timePillActive, pressed && PRESSED_DIM]}
                       onPress={() => handleEquipmentOverrideChange(environment)}
                       hitSlop={2}
                       accessibilityRole="button"
@@ -1464,7 +1464,7 @@ export default function EnergyCheckInScreen() {
                     return (
                       <Pressable
                         key={area}
-                        style={[styles.timePill, active && styles.timePillActive]}
+                        style={({ pressed }) => [styles.timePill, active && styles.timePillActive, pressed && PRESSED_DIM]}
                         onPress={() => handleBodyAreaChange(area)}
                         hitSlop={2}
                         accessibilityRole="button"
@@ -1492,7 +1492,7 @@ export default function EnergyCheckInScreen() {
 
             {energy === 5 ? (
               <Pressable
-                style={[styles.timePill, finisherAccepted && styles.timePillActive, styles.finisherPill]}
+                style={({ pressed }) => [styles.timePill, finisherAccepted && styles.timePillActive, styles.finisherPill, pressed && PRESSED_DIM]}
                 onPress={handleFinisherToggle}
                 hitSlop={4}
                 accessibilityRole="button"
@@ -1520,7 +1520,7 @@ export default function EnergyCheckInScreen() {
                       return (
                         <Pressable
                           key={tag}
-                          style={[styles.symptomChip, active && styles.symptomChipActive]}
+                          style={({ pressed }) => [styles.symptomChip, active && styles.symptomChipActive, pressed && PRESSED_DIM]}
                           onPress={() => toggleSymptomTag(tag)}
                           hitSlop={2}
                           accessibilityRole="button"
@@ -1605,7 +1605,7 @@ export default function EnergyCheckInScreen() {
             {exclusionSummary.length > 0 || symptomLines.length > 0 ? (
               <View style={styles.reasoningCard}>
                 <Pressable
-                  style={styles.reasoningToggleRow}
+                  style={({ pressed }) => [styles.reasoningToggleRow, pressed && PRESSED_DIM]}
                   onPress={() => {
                     hapticSelect();
                     setShowReasoning((v) => !v);
@@ -2041,7 +2041,7 @@ export default function EnergyCheckInScreen() {
                     </ScrollView>
                   )}
                   <Pressable
-                    style={styles.swapModalCancelHit}
+                    style={({ pressed }) => [styles.swapModalCancelHit, pressed && PRESSED_DIM]}
                     onPress={handleCloseSwap}
                     hitSlop={8}
                     accessibilityRole="button"
@@ -2092,7 +2092,7 @@ export default function EnergyCheckInScreen() {
                 session that isn't a real milestone (no separate nag). */}
             {milestoneReached ? (
               <Pressable
-                style={styles.doneInsightHit}
+                style={({ pressed }) => [styles.doneInsightHit, pressed && PRESSED_DIM]}
                 onPress={() => {
                   hapticSelect();
                   router.push('/referral' as never);
@@ -2124,7 +2124,7 @@ export default function EnergyCheckInScreen() {
                 "Invite a friend" lines — an offer, not a modal. */}
             {reminderOffer === 'pending' ? (
               <Pressable
-                style={styles.doneInsightHit}
+                style={({ pressed }) => [styles.doneInsightHit, pressed && PRESSED_DIM]}
                 onPress={handleAcceptReminderOffer}
                 hitSlop={6}
                 accessibilityRole="button"
@@ -2146,7 +2146,7 @@ export default function EnergyCheckInScreen() {
 
             {doneInsight ? (
               <Pressable
-                style={styles.doneInsightHit}
+                style={({ pressed }) => [styles.doneInsightHit, pressed && PRESSED_DIM]}
                 onPress={() => {
                   hapticSelect();
                   router.push('/(tabs)/progress' as never);

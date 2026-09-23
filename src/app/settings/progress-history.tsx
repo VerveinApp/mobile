@@ -9,7 +9,7 @@ import { SymbolView } from '@/components/ui/app-symbol';
 
 import { LogPastSessionSheet } from '@/components/settings/log-past-session-sheet';
 import { Type } from '@/constants/theme';
-import { useHoverFade } from '@/lib/button-interactions';
+import { useHoverFade, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import {
@@ -177,7 +177,7 @@ export default function ProgressHistoryScreen() {
           onHoverIn={backHover.onHoverIn}
           onHoverOut={backHover.onHoverOut}
           hitSlop={10}
-          style={styles.backButton}
+          style={({ pressed }) => [styles.backButton, pressed && PRESSED_DIM]}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
@@ -192,7 +192,7 @@ export default function ProgressHistoryScreen() {
           onHoverIn={addHover.onHoverIn}
           onHoverOut={addHover.onHoverOut}
           hitSlop={10}
-          style={styles.backButton}
+          style={({ pressed }) => [styles.backButton, pressed && PRESSED_DIM]}
           accessibilityRole="button"
           accessibilityLabel="Log a past session"
         >
@@ -244,7 +244,7 @@ export default function ProgressHistoryScreen() {
                   return (
                     <View key={group.key} style={styles.card}>
                       <Pressable
-                        style={styles.monthHeaderRow}
+                        style={({ pressed }) => [styles.monthHeaderRow, pressed && PRESSED_DIM]}
                         onPress={() => toggleMonth(group.key)}
                         accessibilityRole="button"
                         accessibilityLabel={`${group.label}, ${completedInMonth} of ${group.entries.length} completed. ${expanded ? 'Collapse' : 'Expand'}.`}
@@ -340,7 +340,7 @@ function HistoryRow({
         });
         return (
           <Pressable
-            style={styles.deleteAction}
+            style={({ pressed }) => [styles.deleteAction, pressed && PRESSED_DIM]}
             onPress={onDelete}
             accessibilityRole="button"
             accessibilityLabel="Delete session"
