@@ -155,13 +155,24 @@ export default function ReferralScreen() {
                   Share your code. When a friend joins with it, you both get a free week of VerveIn Plus.
                 </Text>
                 <View style={styles.codeCard}>
-                  <Text style={styles.codeText} maxFontSizeMultiplier={1.2}>{myCode}</Text>
+                  {/* selectable: long-press → Copy, for typing the code into
+                      a message by hand (the share sheet has Copy too). Read
+                      out character by character, not as one made-up word. */}
+                  <Text
+                    style={styles.codeText}
+                    maxFontSizeMultiplier={1.2}
+                    selectable
+                    accessibilityLabel={`Your code: ${myCode.split('').join(' ')}`}
+                  >
+                    {myCode}
+                  </Text>
                 </View>
                 <Pressable
                   onPress={handleShare}
                   onPressIn={sharePress.onPressIn}
                   onPressOut={sharePress.onPressOut}
                   style={styles.shareButtonHit}
+                  accessibilityRole="button"
                 >
                   <View style={styles.shareButton}>
                     <Text style={styles.shareButtonText} maxFontSizeMultiplier={1.15}>Share your code</Text>
