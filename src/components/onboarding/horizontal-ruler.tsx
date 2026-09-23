@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   type LayoutChangeEvent,
@@ -22,6 +22,20 @@ const LABEL_BAND_HEIGHT = 26;
 // fading to near-zero — the same "raised floor" fix WheelPicker needed after
 // a fully-dimmed edge read as dead space rather than a visible option.
 const TICK_FADE_SPAN = 4;
+// Only ticks within MOUNT_RADIUS of the value are mounted up front; spacers
+// stand in for the rest so the content width, snapping and every offset stay
+// exactly what a fully mounted ruler would have. Whenever the scroll comes
+// within MOUNT_MARGIN ticks of either edge of what's mounted, the range grows
+// (never shrinks) around the new position. 60 ticks is 1,560pt, several
+// screen widths each side, so even a hard fling can't outrun it. Mounting
+// every tick at once cost up to 601 ticks (lift goals in lb), three native
+// views and two animated nodes apiece, right as a sheet was opening.
+const MOUNT_RADIUS = 60;
+const MOUNT_MARGIN = 30;
+
+function mountRangeAround(index: number, count: number): [number, number] {
+  return [Math.max(0, index - MOUNT_RADIUS), Math.min(count - 1, index + MOUNT_RADIUS)];
+}
 
 type HorizontalRulerProps = {
   items: string[];
@@ -83,18 +97,34 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width }: Horiz
   // haptic only once the scroll has fully settled. Tracked separately from
   // lastIndex, which only ever means "the committed value".
   const tickIndex = useRef(selectedIndex);
+  const [mountRange, setMountRange] = useState(() => mountRangeAround(selectedIndex, items.length));
+  // A mirror of mountRange for the scroll listener, which runs every frame
+  // and should only touch state when the range actually has to grow.
+  const mountRangeRef = useRef(mountRange);
   useEffect(() => {
     // A JS listener on the natively-driven value — RN forwards native
     // updates to it whenever one is attached.
     const id = scrollX.addListener(({ value }) => {
       const index = Math.max(0, Math.min(items.length - 1, Math.round(value / RULER_TICK_SPACING)));
-      if (index !== tickIndex.current) {
-        tickIndex.current = index;
-        hapticSelect();
+      if (index === tickIndex.current) return;
+      tickIndex.current = index;
+      hapticSelect();
+      const [start, end] = mountRangeRef.current;
+      const nearStart = start > 0 && index - start < MOUNT_MARGIN;
+      const nearEnd = end < items.length - 1 && end - index < MOUNT_MARGIN;
+      if (nearStart || nearEnd) {
+        const [aroundStart, aroundEnd] = mountRangeAround(index, items.length);
+        const grown: [number, number] = [Math.min(start, aroundStart), Math.max(end, aroundEnd)];
+        mountRangeRef.current = grown;
+        setMountRange(grown);
       }
     });
     return () => scrollX.removeListener(id);
   }, [scrollX, items.length]);
+  // Clamped in case the items list ever shrinks under a mounted ruler.
+  const lastItemIndex = items.length - 1;
+  const mountStart = Math.max(0, Math.min(mountRange[0], lastItemIndex));
+  const mountEnd = Math.min(mountRange[1], lastItemIndex);
   const handleScroll = Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], {
     useNativeDriver: true,
   });
@@ -118,70 +148,20 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width }: Horiz
     if (Math.abs(e.nativeEvent.velocity?.x ?? 0) < 0.01) commitAtOffset(e.nativeEvent.contentOffset.x);
   };
 
-  // Every tick's two interpolations, built once per item list. This is its
-  // own memo on purpose: left inline, the React Compiler grouped the list
-  // with the ScrollView's contentOffset, which reads selectedIndex — so
-  // every committed value rebuilt every tick (up to 601 ticks × 2
-  // native-driven nodes, each detached and re-attached) right as the
-  // scroll settled.
-  const ticks = useMemo(
-    () =>
-      items.map((label, index) => {
-        const tickRange = [
-          (index - TICK_FADE_SPAN) * RULER_TICK_SPACING,
-          index * RULER_TICK_SPACING,
-          (index + TICK_FADE_SPAN) * RULER_TICK_SPACING,
-        ];
-        const tickOpacity = scrollX.interpolate({
-          inputRange: tickRange,
-          outputRange: [0.3, 1, 0.3],
-          extrapolate: 'clamp',
-        });
-        // BUG FIX: this used to fade across a full tick spacing on each
-        // side, so two neighboring labels (e.g. "5 ft" and "6 ft") were
-        // simultaneously partway visible for the whole distance between
-        // them — wide enough that both rendered legibly at once, reading
-        // as garbled overlapping text mid-swipe. Halving the fade distance
-        // means a label reaches 0 opacity exactly where its neighbor's own
-        // fade-in starts, so only one is ever meaningfully visible.
-        const labelRange = [
-          (index - 0.5) * RULER_TICK_SPACING,
-          index * RULER_TICK_SPACING,
-          (index + 0.5) * RULER_TICK_SPACING,
-        ];
-        const labelOpacity = scrollX.interpolate({
-          inputRange: labelRange,
-          outputRange: [0, 1, 0],
-          extrapolate: 'clamp',
-        });
-        return (
-          <View key={label + index} style={styles.tickSlot}>
-            {/* Absolutely positioned and centered on its own tick slot so
-                it never nudges neighboring ticks apart while animating —
-                same reason WheelPicker keeps its scale/opacity animation
-                on a wrapping view rather than the Text node directly.
-                BUG FIX: this used to also animate `transform: [{ scale }]`
-                on the Text node itself (0.7 → 1 → 0.7, same range as the
-                opacity fade) — scaling a rasterized text layer mid-motion
-                is exactly the kind of transform iOS doesn't always
-                re-rasterize crisply for, and swiping is when a label
-                spends the most time at an intermediate, blurry-looking
-                scale value rather than settled at a clean 1.0 or 0. Opacity
-                alone gives the same "coming into focus" feel without ever
-                touching how the glyphs themselves are rendered. */}
-            <Animated.Text
-              style={[styles.tickLabel, { opacity: labelOpacity }]}
-              maxFontSizeMultiplier={1.15}
-              numberOfLines={1}
-            >
-              {label}
-            </Animated.Text>
-            <Animated.View style={[styles.tick, { opacity: tickOpacity }]} />
-          </View>
-        );
-      }),
-    [items, scrollX, styles]
-  );
+  // Built only when the mounted range or the items change. Each RulerTick
+  // keeps its own interpolations, so growing the range mounts just the new
+  // ticks. (Left inline, the React Compiler grouped the tick list with the
+  // ScrollView's contentOffset, which reads selectedIndex, so every
+  // committed value rebuilt every tick right as the scroll settled.)
+  const ticks = useMemo(() => {
+    const list = [];
+    for (let index = mountStart; index <= mountEnd; index++) {
+      list.push(
+        <RulerTick key={items[index] + index} label={items[index]} index={index} scrollX={scrollX} styles={styles} />
+      );
+    }
+    return list;
+  }, [items, mountStart, mountEnd, scrollX, styles]);
 
   return (
     <View
@@ -203,13 +183,79 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width }: Horiz
         onContentSizeChange={handleContentSizeChange}
         contentOffset={{ x: selectedIndex * RULER_TICK_SPACING, y: 0 }}
       >
+        <View style={{ width: mountStart * RULER_TICK_SPACING }} />
         {ticks}
+        <View style={{ width: (items.length - 1 - mountEnd) * RULER_TICK_SPACING }} />
       </Animated.ScrollView>
       )}
       <View pointerEvents="none" style={styles.pointer} />
     </View>
   );
 }
+
+type RulerTickProps = {
+  label: string;
+  index: number;
+  scrollX: Animated.Value;
+  styles: ReturnType<typeof createStyles>;
+};
+
+/**
+ * One tick and its label. Memoized, with its two interpolations built once
+ * per index, so growing the mounted range (or any parent re-render) never
+ * recreates the animated nodes of ticks that are already on screen.
+ */
+const RulerTick = memo(function RulerTick({ label, index, scrollX, styles }: RulerTickProps) {
+  const tickOpacity = useMemo(
+    () =>
+      scrollX.interpolate({
+        inputRange: [
+          (index - TICK_FADE_SPAN) * RULER_TICK_SPACING,
+          index * RULER_TICK_SPACING,
+          (index + TICK_FADE_SPAN) * RULER_TICK_SPACING,
+        ],
+        outputRange: [0.3, 1, 0.3],
+        extrapolate: 'clamp',
+      }),
+    [index, scrollX]
+  );
+  // BUG FIX: this used to fade across a full tick spacing on each side, so
+  // two neighboring labels (e.g. "5 ft" and "6 ft") were simultaneously
+  // partway visible for the whole distance between them — wide enough that
+  // both rendered legibly at once, reading as garbled overlapping text
+  // mid-swipe. Halving the fade distance means a label reaches 0 opacity
+  // exactly where its neighbor's own fade-in starts, so only one is ever
+  // meaningfully visible.
+  const labelOpacity = useMemo(
+    () =>
+      scrollX.interpolate({
+        inputRange: [(index - 0.5) * RULER_TICK_SPACING, index * RULER_TICK_SPACING, (index + 0.5) * RULER_TICK_SPACING],
+        outputRange: [0, 1, 0],
+        extrapolate: 'clamp',
+      }),
+    [index, scrollX]
+  );
+  return (
+    <View style={styles.tickSlot}>
+      {/* Absolutely positioned and centered on its own tick slot so it never
+          nudges neighboring ticks apart while animating — same reason
+          WheelPicker keeps its scale/opacity animation on a wrapping view
+          rather than the Text node directly.
+          BUG FIX: this used to also animate `transform: [{ scale }]` on the
+          Text node itself (0.7 → 1 → 0.7, same range as the opacity fade) —
+          scaling a rasterized text layer mid-motion is exactly the kind of
+          transform iOS doesn't always re-rasterize crisply for, and swiping
+          is when a label spends the most time at an intermediate,
+          blurry-looking scale value rather than settled at a clean 1.0 or 0.
+          Opacity alone gives the same "coming into focus" feel without ever
+          touching how the glyphs themselves are rendered. */}
+      <Animated.Text style={[styles.tickLabel, { opacity: labelOpacity }]} maxFontSizeMultiplier={1.15} numberOfLines={1}>
+        {label}
+      </Animated.Text>
+      <Animated.View style={[styles.tick, { opacity: tickOpacity }]} />
+    </View>
+  );
+});
 
 function createStyles(colors: ReturnType<typeof useAppTheme>['colors']) {
   return StyleSheet.create({
