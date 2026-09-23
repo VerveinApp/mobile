@@ -78,8 +78,7 @@
   "jest": {
     "preset": "jest-expo",
     "testPathIgnorePatterns": [
-      "/node_modules/",
-      "/backup-.*/"
+      "/node_modules/"
     ],
     "moduleNameMapper": {
       "^@/(.*)$": "<rootDir>/src/$1"
