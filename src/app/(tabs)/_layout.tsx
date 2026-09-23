@@ -1,3 +1,4 @@
+import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useRef } from 'react';
 
@@ -68,8 +69,16 @@ export default function TabsLayout() {
           if (!completed) return;
           const {
             data: { session },
+            error,
           } = await supabase.auth.getSession();
-          if (!session) {
+          // BUG FIX: getSession() also returns session: null when the access
+          // token has expired and refreshing it failed for a NETWORK reason
+          // (see auth-js's own __loadSession) — an hour-plus offline, e.g. a
+          // gym basement, then returning to the tabs from check-in bounced a
+          // perfectly signed-in user to the sign-in screen. The session is
+          // still in storage and refreshes once there's signal again; only a
+          // real, non-network "no session" means signed out.
+          if (!session && !isAuthRetryableFetchError(error)) {
             router.dismissAll();
             router.replace('/onboarding/create-account' as never);
           }

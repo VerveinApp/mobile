@@ -2,6 +2,7 @@ import './crypto-polyfill';
 import 'react-native-url-polyfill/auto';
 
 import { createClient } from '@supabase/supabase-js';
+import { AppState, Platform } from 'react-native';
 
 import { secureSessionStorage } from '@/lib/secure-session-storage';
 
@@ -57,3 +58,15 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     flowType: 'pkce',
   },
 });
+
+// Supabase's documented React Native pattern: the client's refresh timer
+// only makes sense while the app is actually in the foreground (JS timers
+// are suspended in the background anyway), and resuming it the moment the
+// app becomes active refreshes an access token that expired while it was
+// away — before any screen asks for the session and sees it missing.
+if (Platform.OS !== 'web') {
+  AppState.addEventListener('change', (state) => {
+    if (state === 'active') supabase.auth.startAutoRefresh();
+    else supabase.auth.stopAutoRefresh();
+  });
+}
