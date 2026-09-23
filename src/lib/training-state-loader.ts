@@ -1,7 +1,7 @@
 import { compileTrainingState, type TrainingState } from '@/lib/engine/training-state';
 import { getDecisionTraceLog } from '@/lib/decision-trace-log';
 import { localDateStr } from '@/lib/local-date';
-import { getSessionHistory } from '@/lib/session-history';
+import { getRecentSessionHistory } from '@/lib/session-history';
 
 /**
  * Combines the two real logs M20 folds over — session-history.ts's energy
@@ -10,7 +10,11 @@ import { getSessionHistory } from '@/lib/session-history';
  * skipped, same as deload.ts's own handling of the same gap.
  */
 export async function getTrainingState(): Promise<TrainingState> {
-  const [history, traces] = await Promise.all([getSessionHistory(), getDecisionTraceLog()]);
+  // The last ROLLING_WINDOW_DAYS entries only — exactly what the engine saw
+  // back when session history was capped at that size (see
+  // getRecentSessionHistory). Longer retention is for display, not for
+  // changing what the plan is built from.
+  const [history, traces] = await Promise.all([getRecentSessionHistory(), getDecisionTraceLog()]);
 
   const checkIns = history
     .filter((e) => e.energy !== undefined)

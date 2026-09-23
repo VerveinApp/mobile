@@ -1,4 +1,5 @@
 import { clearStoredValue, readJsonList, writeJsonValue } from '@/lib/storage/json-storage';
+import { trimToNewestByDate } from '@/lib/rolling-window';
 
 const KEY = 'vervein.nutritionLog.v1';
 const MAX_ENTRIES = 365; // roughly a year of daily entries — generous, not unbounded
@@ -24,7 +25,7 @@ export type NutritionLogEntry = {
 export async function saveNutritionEntry(date: string, calories: number) {
   const entries = await readJsonList<NutritionLogEntry>(KEY);
   const withoutDate = entries.filter((e) => e.date !== date);
-  const next = [...withoutDate, { date, calories }].slice(-MAX_ENTRIES);
+  const next = trimToNewestByDate([...withoutDate, { date, calories }], MAX_ENTRIES);
   await writeJsonValue(KEY, next);
 }
 

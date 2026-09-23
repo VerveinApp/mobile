@@ -2,14 +2,14 @@ import { exerciseLibrary } from '@/lib/engine/exercise-library';
 import type { MovementPattern } from '@/lib/engine/types';
 import { localDateStr } from '@/lib/local-date';
 import type { BodyArea } from '@/lib/plan-preview';
-import { ROLLING_WINDOW_DAYS } from '@/lib/rolling-window';
+import { HISTORY_RETENTION_ENTRIES, trimToNewestByDate } from '@/lib/rolling-window';
 import { clearStoredValue, readJsonList, writeJsonValue } from '@/lib/storage/json-storage';
 
 const KEY = 'vervein.workoutLog.v1';
 // BUG FIX (found in a later full-app audit): this used to be its own local
 // `30`, matching session-history.ts's by convention/comment only — nothing
 // enforced it. Single-sourced now; see rolling-window.ts's own doc comment.
-const MAX_ENTRIES = ROLLING_WINDOW_DAYS;
+const MAX_ENTRIES = HISTORY_RETENTION_ENTRIES;
 
 /**
  * Per-exercise completion for a finished session — session-history.ts only
@@ -62,7 +62,7 @@ export function getCompletionStatus(exercises: WorkoutLogExercise[]): Completion
 export async function saveWorkoutLog(date: string, exercises: WorkoutLogExercise[]) {
   const entries = await readJsonList<WorkoutLogEntry>(KEY);
   const withoutToday = entries.filter((e) => e.date !== date);
-  const next = [...withoutToday, { date, exercises }].slice(-MAX_ENTRIES);
+  const next = trimToNewestByDate([...withoutToday, { date, exercises }], MAX_ENTRIES);
   await writeJsonValue(KEY, next);
 }
 
@@ -80,7 +80,7 @@ export async function saveWorkoutLog(date: string, exercises: WorkoutLogExercise
 export async function saveRetroactiveWorkoutLog(date: string, exercises: WorkoutLogExercise[]) {
   const entries = await readJsonList<WorkoutLogEntry>(KEY);
   const withoutDate = entries.filter((e) => e.date !== date);
-  const next = [...withoutDate, { date, exercises, retroactive: true }].slice(-MAX_ENTRIES);
+  const next = trimToNewestByDate([...withoutDate, { date, exercises, retroactive: true }], MAX_ENTRIES);
   await writeJsonValue(KEY, next);
 }
 

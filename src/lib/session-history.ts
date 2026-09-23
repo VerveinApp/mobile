@@ -2,7 +2,7 @@ import type { EnergyScore } from '@/components/home/energy-gauge';
 import type { FeedbackResponse } from '@/lib/engine/types';
 import { getAccountStartDate } from '@/lib/onboarding-draft';
 import { WEEKDAY_NAMES } from '@/lib/profile-labels';
-import { ROLLING_WINDOW_DAYS } from '@/lib/rolling-window';
+import { HISTORY_RETENTION_ENTRIES, ROLLING_WINDOW_DAYS, trimToNewestByDate } from '@/lib/rolling-window';
 import { clearStoredValue, readJsonList, writeJsonValue } from '@/lib/storage/json-storage';
 import type { CompletionStatus } from '@/lib/workout-log';
 
@@ -12,7 +12,7 @@ const KEY = 'vervein.sessionHistory.v1';
 // See rolling-window.ts's own doc comment for why this is shared, not a
 // local constant — a rolling month is plenty for this store's own 7-day
 // weekly view.
-const MAX_ENTRIES = ROLLING_WINDOW_DAYS;
+const MAX_ENTRIES = HISTORY_RETENTION_ENTRIES;
 
 export type SessionHistoryEntry = {
   /** YYYY-MM-DD. */
@@ -86,10 +86,13 @@ export async function recordSessionCompletion(
   // would silently overwrite an already-recorded real value with nothing.
   // Same existingToday-preserving fallback pattern checkedInAtHour uses.
   const resolvedCaloriesBurned = caloriesBurned ?? existingToday?.caloriesBurned;
-  const next = [
-    ...withoutToday,
-    { ...existingToday, date, completed, energy, completionStatus, checkedInAtHour, caloriesBurned: resolvedCaloriesBurned },
-  ].slice(-MAX_ENTRIES);
+  const next = trimToNewestByDate(
+    [
+      ...withoutToday,
+      { ...existingToday, date, completed, energy, completionStatus, checkedInAtHour, caloriesBurned: resolvedCaloriesBurned },
+    ],
+    MAX_ENTRIES
+  );
   await writeJsonValue(KEY, next);
 }
 
@@ -113,11 +116,30 @@ export async function recordPastSessionCompletion(
   soreness?: EnergyScore
 ) {
   const entries = await readJsonList<SessionHistoryEntry>(KEY);
+  const existing = entries.find((e) => e.date === date);
   const withoutDate = entries.filter((e) => e.date !== date);
-  const next = [
-    ...withoutDate,
-    { date, completed, energy, completionStatus, soreness, loggedRetroactively: true },
-  ].slice(-MAX_ENTRIES);
+  // BUG FIX: replacing an already-logged day used to rebuild the entry from
+  // scratch, silently dropping that day's note and pacing feedback (and the
+  // real check-in hour the reminder time is personalized from). Those still
+  // describe the same day, so they carry over; calories don't — they were
+  // estimated from the exercises being replaced.
+  const next = trimToNewestByDate(
+    [
+      ...withoutDate,
+      {
+        date,
+        completed,
+        energy,
+        completionStatus,
+        soreness,
+        loggedRetroactively: true,
+        notes: existing?.notes,
+        feedback: existing?.feedback,
+        checkedInAtHour: existing?.checkedInAtHour,
+      },
+    ],
+    MAX_ENTRIES
+  );
   await writeJsonValue(KEY, next);
 }
 
@@ -129,6 +151,18 @@ export async function clearSessionHistory() {
 export async function deleteSessionHistoryEntry(date: string) {
   const entries = await readJsonList<SessionHistoryEntry>(KEY);
   await writeJsonValue(KEY, entries.filter((e) => e.date !== date));
+}
+
+/**
+ * The most recent `limit` entries, most recent first — the same window every
+ * history-driven computation had before retention grew past
+ * ROLLING_WINDOW_DAYS (see HISTORY_RETENTION_ENTRIES). The adaptive engine
+ * (training-state-loader.ts) and the count-based coaching notes read this,
+ * not the full history, so a long-time user's plan and insights behave
+ * exactly as they always did.
+ */
+export async function getRecentSessionHistory(limit: number = ROLLING_WINDOW_DAYS): Promise<SessionHistoryEntry[]> {
+  return (await getSessionHistory()).slice(0, limit);
 }
 
 /** Every stored entry, most recent first — the real log behind Settings' Progress & History. */

@@ -13,3 +13,25 @@
  * full-decision trace.
  */
 export const ROLLING_WINDOW_DAYS = 30;
+
+/**
+ * How many daily entries the user-facing history stores keep —
+ * session-history.ts and workout-log.ts. Deliberately separate from
+ * ROLLING_WINDOW_DAYS above.
+ *
+ * BUG FIX: both stores used to be trimmed to ROLLING_WINDOW_DAYS (30
+ * entries), so VerveIn Plus's "Progress & History", the consistency
+ * calendar and Training Balance's "All" view silently lost everything
+ * older than ~7 weeks for someone training four days a week. The adaptive
+ * engine and the count-based coaching notes still read only the most recent
+ * ROLLING_WINDOW_DAYS entries (see getRecentSessionHistory), so their
+ * behavior is unchanged; only what's KEPT grew. Two years of daily entries
+ * keeps each store's JSON well under a megabyte.
+ */
+export const HISTORY_RETENTION_ENTRIES = 730;
+
+/** Oldest-first by date, then keep only the newest `max` — trims by the
+ * DATE each entry is for, not the order it was written in. */
+export function trimToNewestByDate<T extends { date: string }>(entries: T[], max: number): T[] {
+  return [...entries].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).slice(-max);
+}

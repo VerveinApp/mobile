@@ -245,3 +245,18 @@ describe('session-history', () => {
     expect(history[0].caloriesBurned).toBe(450);
   });
 });
+
+describe('recordPastSessionCompletion replacing an existing day', () => {
+  beforeEach(async () => {
+    await clearSessionHistory();
+  });
+
+  it('keeps that day’s note and feedback', async () => {
+    await recordPastSessionCompletion('2026-08-01', true, 4, 'done');
+    await saveSessionNote('2026-08-01', 'Felt strong');
+    await saveSessionFeedback('2026-08-01', 'just_right');
+    await recordPastSessionCompletion('2026-08-01', true, 3, 'partial');
+    expect(await getSessionNote('2026-08-01')).toBe('Felt strong');
+    expect(await getSessionFeedback('2026-08-01')).toBe('just_right');
+  });
+});

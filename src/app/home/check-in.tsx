@@ -51,6 +51,7 @@ import { getLastPerformance, recordPerformanceBatch, type ExercisePerformance } 
 import { schedulePrCelebration } from '@/lib/pr-celebration';
 import { PLATE_SETUP_BY_UNIT, calculatePlates, formatPlateBreakdown } from '@/lib/plate-calculator';
 import { registerForRemotePushNotifications } from '@/lib/push-notifications';
+import { ROLLING_WINDOW_DAYS } from '@/lib/rolling-window';
 import { recordSessionForMilestones } from '@/lib/session-milestones';
 import {
   cancelTodaysReminder,
@@ -576,7 +577,9 @@ export default function EnergyCheckInScreen() {
           const [history, traceLog] = await Promise.all([getSessionHistory(), getDecisionTraceLog()]);
           setPacingTrendNote(getPacingTrendNote(history));
           const [insightNote, fitNote] = await Promise.all([
-            getCoachingInsightNote(history),
+            // Count-based — reads the same recent window it always did,
+            // not the longer-retained history (see getRecentSessionHistory).
+            getCoachingInsightNote(history.slice(0, ROLLING_WINDOW_DAYS)),
             getPlanFitNote(traceLog),
           ]);
           setCoachingInsightNote(insightNote);
@@ -1220,7 +1223,7 @@ export default function EnergyCheckInScreen() {
     const [historyForNotes, traceLogForNotes] = await Promise.all([getSessionHistory(), getDecisionTraceLog()]);
     setPacingTrendNote(getPacingTrendNote(historyForNotes));
     const [insightNote, fitNote] = await Promise.all([
-      getCoachingInsightNote(historyForNotes),
+      getCoachingInsightNote(historyForNotes.slice(0, ROLLING_WINDOW_DAYS)),
       getPlanFitNote(traceLogForNotes),
     ]);
     setCoachingInsightNote(insightNote);
