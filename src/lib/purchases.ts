@@ -10,7 +10,6 @@ import Purchases, {
   type PurchasesPackage,
 } from 'react-native-purchases';
 
-import { getDevPremiumOverride } from '@/lib/dev-premium-override';
 import { supabase } from '@/lib/supabase';
 
 // iOS-only for now, same scoping as health-kit.ts — this app doesn't ship
@@ -61,21 +60,6 @@ function publishEntitlement(value: boolean): void {
 // network call can't block them forever).
 let identityReady: Promise<void> = Promise.resolve();
 const IDENTITY_WAIT_MAX_MS = 5000;
-
-export type BillingMode = 'test-store' | 'production' | 'unconfigured';
-
-/**
- * Which key API_KEY above actually resolved to — surfaced in Settings' own
- * Developer section so it's never ambiguous which backend a build is
- * talking to (the exact confusion that led to a "couldn't load pricing"
- * paywall in the Simulator: the app was silently on the real production key,
- * which can't resolve in Simulator at all).
- */
-export function getBillingMode(): BillingMode {
-  if (!API_KEY) return 'unconfigured';
-  if (__DEV__ && process.env.EXPO_PUBLIC_REVENUECAT_TEST_STORE_KEY_IOS) return 'test-store';
-  return 'production';
-}
 
 /**
  * Call once at app startup (see _layout.tsx). Safe to call more than once —
@@ -187,19 +171,8 @@ export async function getIntroOfferEligibility(productIdentifiers: string[]): Pr
  * wouldn't. False (not an error) when not configured — an unconfigured
  * (e.g. non-iOS) build should read as "no Premium," not crash every gated
  * screen.
- *
- * ⚠️ TEMPORARY: checks dev-premium-override.ts's local, client-side-only
- * override FIRST — see that file's own header comment for what this is and
- * why it must be removed before the real App Store submission. Gated behind
- * __DEV__ so a release bundle (including any TestFlight/App Store build,
- * which is never __DEV__) can never read or honor it regardless of what's
- * sitting in AsyncStorage — same belt-and-suspenders posture as the
- * Developer section in settings/index.tsx that's the only real way to set
- * this override in the first place. Never touches RevenueCat itself, so it
- * can't fake or grant a real purchase.
  */
 export async function hasPremiumEntitlement(): Promise<boolean> {
-  if (__DEV__ && (await getDevPremiumOverride())) return true;
   if (!configured) return false;
   await identityReady;
   try {
@@ -214,9 +187,8 @@ export async function hasPremiumEntitlement(): Promise<boolean> {
  * whichever the active subscription is actually on) — RevenueCat's
  * `CustomerInfo.managementURL` already resolves to the right one, so this
  * doesn't need its own platform branch. Null whenever there's nothing real
- * to manage: not configured, the dev-premium-override is what's granting
- * access (there's no real subscription behind it to open), or RevenueCat
- * itself reports no management URL (e.g. no active subscription).
+ * to manage: not configured, or RevenueCat itself reports no management URL
+ * (e.g. no active subscription).
  */
 export async function getSubscriptionManagementUrl(): Promise<string | null> {
   if (!configured) return null;
@@ -239,13 +211,11 @@ export async function getSubscriptionManagementUrl(): Promise<string | null> {
  * that's genuinely remounted after a purchase (the paywall's own success
  * path calls router.back(), remounting whatever gated section sent the user
  * there) — but a tab screen stays mounted in the background when you switch
- * tabs, so flipping the Settings dev-premium-override toggle and returning
- * to an already-visited tab never re-ran this check; it kept showing
- * whatever answer it got the first time that tab was ever opened. Real
- * RevenueCat state can also actually change between visits to the same
- * still-mounted tab (a purchase completing, a subscription expiring), not
- * just the dev override — useFocusEffect (re-checks on mount AND on every
- * return to focus) is correct for both.
+ * tabs, so returning to an already-visited tab never re-ran this check; it
+ * kept showing whatever answer it got the first time that tab was ever
+ * opened, even though RevenueCat state can change between visits (a purchase
+ * completing, a subscription expiring) — useFocusEffect re-checks on mount
+ * AND on every return to focus.
  */
 export function usePremiumEntitlement(): boolean | null {
   // Starts from the last real answer (see lastKnownEntitlement) — only the
@@ -324,39 +294,5 @@ export async function restorePurchases(): Promise<RestoreOutcome> {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Couldn't restore purchases right now.";
     return { kind: 'error', message };
-  }
-}
-
-export type ResetPurchaserResult = 'reset' | 'already-anonymous' | 'not-configured' | 'error';
-
-/**
- * ⚠️ DEV-ONLY — Settings' Developer section, "Reset VerveIn Plus Sub" only.
- *
- * IMPORTANT SCOPE NOTE: this can only ever detach the SDK from its current
- * RevenueCat identity (Purchases.logOut(), RevenueCat's own documented way
- * to test a paywall repeatedly) — it cannot revoke or expire a real
- * entitlement, which only RevenueCat's server-side dashboard/API (gated by a
- * secret key that must never ship in this client bundle) can do. Concretely:
- * a Test Store purchase made under this device's current identity really is
- * granted server-side, tied to that app_user_id (syncIdentityWithSupabaseAuth
- * deliberately keeps that stable = the Supabase user id, so a real install
- * never loses a real purchase) — logOut() only switches to a fresh anonymous
- * id with no purchase history for the REST OF THIS APP SESSION. The next
- * app restart re-runs syncIdentityWithSupabaseAuth's own INITIAL_SESSION
- * handler, which logs back into the same still-signed-in Supabase user id
- * and pulls the same entitlement right back. Good enough for "let me see the
- * paywall/free tier again without restarting"; not a real, permanent
- * revocation — that has to happen in the RevenueCat dashboard itself
- * (Customers → find the subscriber → expire/revoke the entitlement).
- */
-export async function resetPurchaserIdentityForTesting(): Promise<ResetPurchaserResult> {
-  if (!configured) return 'not-configured';
-  try {
-    await Purchases.logOut();
-    return 'reset';
-  } catch (error) {
-    const code = (error as { code?: PURCHASES_ERROR_CODE })?.code;
-    if (code === PURCHASES_ERROR_CODE.LOG_OUT_ANONYMOUS_USER_ERROR) return 'already-anonymous';
-    return 'error';
   }
 }

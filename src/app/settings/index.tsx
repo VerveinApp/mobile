@@ -2,7 +2,7 @@ import type { BottomSheetModal } from '@gorhom/bottom-sheet';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import ReanimatedAnimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
@@ -15,17 +15,7 @@ import { AndroidCardElevation, AndroidRipple, Type } from '@/constants/theme';
 import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
 import { buildBackupPayload, clearAllLocalData, parseBackupPayload, restoreBackupPayload, type BackupPayload } from '@/lib/data-backup';
 import {
-  checkDevPremiumUnlockKey,
-  getDevPremiumOverride,
-  isDevPremiumUnlocked,
-  setDevPremiumOverride,
-  setDevPremiumUnlocked,
-} from '@/lib/dev-premium-override';
-import { seedFakeSessionHistory, seedFakeStrengthProgress } from '@/lib/dev-seed';
-import {
-  getBillingMode,
   getSubscriptionManagementUrl,
-  resetPurchaserIdentityForTesting,
   usePremiumEntitlement,
 } from '@/lib/purchases';
 import { hapticError, hapticImpactLight, hapticSuccess, hapticWarning, isHapticsEnabled, setHapticsEnabled } from '@/lib/haptics';
@@ -176,19 +166,6 @@ export default function SettingsScreen() {
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
-  // ⚠️ TEMPORARY — see dev-premium-override.ts's own header comment for why
-  // this must be removed before the real App Store submission.
-  const [devKeyInput, setDevKeyInput] = useState('');
-  const [devUnlocked, setDevUnlocked] = useState(false);
-  const [devOverrideOn, setDevOverrideOn] = useState(false);
-  const [seedingHistory, setSeedingHistory] = useState(false);
-  const [seedResult, setSeedResult] = useState<'seeded' | 'no-schedule' | null>(null);
-  const [seedingStrength, setSeedingStrength] = useState(false);
-  const [strengthSeeded, setStrengthSeeded] = useState(false);
-  const [resettingSub, setResettingSub] = useState(false);
-  const [subResetResult, setSubResetResult] = useState<'reset' | 'already-anonymous' | 'not-configured' | 'error' | null>(
-    null
-  );
   const biometricsSheetRef = useRef<BottomSheetModal>(null);
   const adjustPlanSheetRef = useRef<BottomSheetModal>(null);
   const conditionsSheetRef = useRef<BottomSheetModal>(null);
@@ -245,12 +222,6 @@ export default function SettingsScreen() {
           data: { session },
         } = await supabase.auth.getSession();
         setAccountEmail(session?.user?.email ?? null);
-        // __DEV__-gated same as the Section below — a release bundle should
-        // never even read these, not just fail to render them.
-        if (__DEV__) {
-          setDevUnlocked(await isDevPremiumUnlocked());
-          setDevOverrideOn(await getDevPremiumOverride());
-        }
         setLoaded(true);
       })();
     }, [])
@@ -588,58 +559,6 @@ export default function SettingsScreen() {
     router.replace('/onboarding/welcome' as never);
   };
 
-  // ⚠️ TEMPORARY — see dev-premium-override.ts's own header comment.
-  const handleDevKeyChange = (text: string) => {
-    setDevKeyInput(text);
-    if (checkDevPremiumUnlockKey(text)) {
-      hapticSuccess();
-      setDevUnlocked(true);
-      setDevKeyInput('');
-      void setDevPremiumUnlocked();
-    }
-  };
-  const handleToggleDevOverride = (value: boolean) => {
-    hapticImpactLight();
-    setDevOverrideOn(value);
-    void setDevPremiumOverride(value);
-  };
-
-  // ⚠️ TEMPORARY — see dev-seed.ts's own header comment.
-  const handleSeedFakeHistory = async () => {
-    if (seedingHistory) return;
-    hapticImpactLight();
-    setSeedingHistory(true);
-    setSeedResult(null);
-    const seeded = await seedFakeSessionHistory();
-    setSeedingHistory(false);
-    setSeedResult(seeded ? 'seeded' : 'no-schedule');
-    if (seeded) hapticSuccess();
-    else hapticError();
-  };
-
-  // ⚠️ TEMPORARY — see dev-seed.ts's own header comment.
-  const handleSeedFakeStrength = async () => {
-    if (seedingStrength) return;
-    hapticImpactLight();
-    setSeedingStrength(true);
-    await seedFakeStrengthProgress();
-    setSeedingStrength(false);
-    setStrengthSeeded(true);
-    hapticSuccess();
-  };
-
-  // ⚠️ TEMPORARY — see resetPurchaserIdentityForTesting's own doc comment
-  // in purchases.ts for exactly what this can and can't actually clear.
-  const handleResetSubscription = async () => {
-    if (resettingSub) return;
-    hapticImpactLight();
-    setResettingSub(true);
-    const result = await resetPurchaserIdentityForTesting();
-    setResettingSub(false);
-    setSubResetResult(result);
-    if (result === 'reset') hapticSuccess();
-    else hapticError();
-  };
 
   return (
     <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -1294,105 +1213,6 @@ export default function SettingsScreen() {
 
         <Text style={styles.footer} maxFontSizeMultiplier={1.3}>VerveIn v{appConfig.expo?.version ?? '1.0.0'}</Text>
 
-        {/* ⚠️ TEMPORARY — this whole Section is __DEV__-gated so it can never
-            render in a release bundle (TestFlight or App Store — neither is
-            ever __DEV__), same reminder as the privacy policy check (see
-            dev-premium-override.ts's own header comment). Deliberately kept
-            all the way at the bottom, past everything a real user would
-            ever need to scroll through. */}
-        {__DEV__ ? (
-          <Section styles={styles} title="DEVELOPER">
-            <View style={styles.card}>
-              {devUnlocked ? (
-                <>
-                  <View style={[styles.aboutRow, styles.rowDivider]}>
-                    <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>VerveIn Plus (Dev Override)</Text>
-                    <Switch value={devOverrideOn} onValueChange={handleToggleDevOverride} />
-                  </View>
-                  <View style={[styles.aboutRow, styles.rowDivider]}>
-                    <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>RevenueCat Billing</Text>
-                    <Text style={styles.devValueText} maxFontSizeMultiplier={1.2}>
-                      {{ 'test-store': 'Test Store', production: 'Production', unconfigured: 'Unconfigured' }[getBillingMode()]}
-                    </Text>
-                  </View>
-                  <Pressable
-                    style={({ pressed }) => [styles.aboutRow, styles.rowDivider, pressed && PRESSED_DIM]}
-                    disabled={seedingHistory}
-                    onPress={handleSeedFakeHistory}
-                  >
-                    <View>
-                      <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>Seed Fake Session History</Text>
-                      {seedResult === 'no-schedule' ? (
-                        <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>No training days set — finish onboarding first.</Text>
-                      ) : null}
-                    </View>
-                    {seedingHistory ? (
-                      <ActivityIndicator size="small" color={colors.iconFaint} />
-                    ) : seedResult === 'seeded' ? (
-                      <SymbolView name="checkmark" size={14} tintColor="#5FBE84" />
-                    ) : (
-                      <SymbolView name="arrow.clockwise" size={14} tintColor={colors.iconFaint} />
-                    )}
-                  </Pressable>
-                  <Pressable
-                    style={({ pressed }) => [styles.aboutRow, styles.rowDivider, pressed && PRESSED_DIM]}
-                    disabled={seedingStrength}
-                    onPress={handleSeedFakeStrength}
-                  >
-                    <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>Seed Fake Strength Progress</Text>
-                    {seedingStrength ? (
-                      <ActivityIndicator size="small" color={colors.iconFaint} />
-                    ) : strengthSeeded ? (
-                      <SymbolView name="checkmark" size={14} tintColor="#5FBE84" />
-                    ) : (
-                      <SymbolView name="arrow.clockwise" size={14} tintColor={colors.iconFaint} />
-                    )}
-                  </Pressable>
-                  <Pressable
-                    style={({ pressed }) => [styles.aboutRow, pressed && PRESSED_DIM]}
-                    disabled={resettingSub}
-                    onPress={handleResetSubscription}
-                  >
-                    <View>
-                      <Text style={styles.aboutRowLabel} maxFontSizeMultiplier={1.2}>Reset VerveIn Plus Sub</Text>
-                      {subResetResult === 'already-anonymous' ? (
-                        <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>Already on a fresh identity.</Text>
-                      ) : subResetResult === 'not-configured' ? (
-                        <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>RevenueCat isn&apos;t configured.</Text>
-                      ) : subResetResult === 'error' ? (
-                        <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>Couldn&apos;t reset — try again.</Text>
-                      ) : subResetResult === 'reset' ? (
-                        <Text style={styles.devHintText} maxFontSizeMultiplier={1.3}>
-                          Fresh identity for this session — restarting the app re-syncs your real account.
-                        </Text>
-                      ) : null}
-                    </View>
-                    {resettingSub ? (
-                      <ActivityIndicator size="small" color={colors.iconFaint} />
-                    ) : subResetResult === 'reset' ? (
-                      <SymbolView name="checkmark" size={14} tintColor="#5FBE84" />
-                    ) : (
-                      <SymbolView name="arrow.clockwise" size={14} tintColor={colors.iconFaint} />
-                    )}
-                  </Pressable>
-                </>
-              ) : (
-                <View style={styles.aboutRow}>
-                  <TextInput
-                    style={styles.devKeyInput}
-                    value={devKeyInput}
-                    onChangeText={handleDevKeyChange}
-                    placeholder="Unlock key"
-                    placeholderTextColor={colors.textTertiary}
-                    secureTextEntry
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                </View>
-              )}
-            </View>
-          </Section>
-        ) : null}
       </ScrollView>
       </ReanimatedAnimated.View>
       )}
@@ -1851,24 +1671,6 @@ function createStyles(colors: Record<string, string>) {
     aboutRowLabel: {
       color: colors.text,
       fontSize: Type.body,
-      fontFamily: 'Geist-Medium',
-    },
-    devKeyInput: {
-      flex: 1,
-      color: colors.text,
-      fontSize: Type.body,
-      fontFamily: 'Geist-Medium',
-      paddingVertical: 4,
-    },
-    devValueText: {
-      color: colors.textSecondary,
-      fontSize: Type.body,
-      fontFamily: 'Geist-Medium',
-    },
-    devHintText: {
-      marginTop: 2,
-      color: colors.textTertiary,
-      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
     },
     footer: {

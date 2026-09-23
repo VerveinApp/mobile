@@ -136,26 +136,6 @@ export async function getAccountStartDate(): Promise<string | null> {
   }
 }
 
-/**
- * ⚠️ DEV-ONLY — Settings' Developer section, "Seed fake session history"
- * only. Backdates this device's own account-start floor so a freshly seeded
- * multi-week history doesn't get excluded by the same real check
- * getAccountStartDate's own doc comment describes (a day before the account
- * "existed" always reads as unscheduled, never as missed). Never pulls the
- * date forward — only backdates further than what's already on file, so
- * this can't accidentally erase a real earlier start date by being called
- * with a more recent one.
- */
-export async function backdateAccountStartDateForTesting(date: string): Promise<void> {
-  try {
-    const existing = await AsyncStorage.getItem(START_DATE_KEY);
-    if (existing && existing <= date) return;
-    await AsyncStorage.setItem(START_DATE_KEY, date);
-  } catch {
-    // Best-effort dev tool — worst case the seeded history just gets
-    // excluded again, same as the bug this exists to let you re-test.
-  }
-}
 
 /**
  * Puts back a completed onboarding exactly as it was, original start date
