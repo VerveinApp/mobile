@@ -112,6 +112,12 @@ import { useAppTheme } from '@/lib/theme-context';
 
 const CANVAS_WIDTH = 375;
 const CANVAS_HEIGHT = 812;
+// The rest-day block (logo, "Rest day", its line, "Check in anyway") sat in
+// the top 40% of the screen with the bottom 60% empty — it read as a
+// half-loaded screen. Shifted as one group so it sits at the screen's
+// optical center (a little above true center) without changing its own
+// internal spacing.
+const REST_DAY_OFFSET = 140;
 // Matches resolvedExerciseCard/timerSection's own fixed width, so the
 // progress bar reads as part of the same column instead of a mismatched
 // element with its own sizing logic.
@@ -2877,7 +2883,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     logoMark: {
       position: 'absolute',
       left: 145.65,
-      top: 68,
+      top: 68 + REST_DAY_OFFSET,
       width: 83.7,
       height: 75.11,
     },
@@ -2906,7 +2912,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       position: 'absolute',
       left: 0,
       right: 0,
-      top: 180,
+      top: 180 + REST_DAY_OFFSET,
       paddingHorizontal: 44,
       color: colors.text,
       fontSize: Type.display,
@@ -2922,7 +2928,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       position: 'absolute',
       left: 0,
       right: 0,
-      top: 246,
+      top: 246 + REST_DAY_OFFSET,
       paddingHorizontal: 56,
       color: colors.textSecondary,
       fontSize: Type.secondary,
@@ -3469,7 +3475,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       position: 'absolute',
       left: 0,
       right: 0,
-      top: 310,
+      top: 310 + REST_DAY_OFFSET,
       alignItems: 'center',
     },
     restDayLinkText: {
