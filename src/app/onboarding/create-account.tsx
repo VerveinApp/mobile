@@ -17,7 +17,7 @@ import ReanimatedAnimated, { FadeIn } from 'react-native-reanimated';
 import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
-import { hapticError, hapticImpactLight, hapticSuccess } from '@/lib/haptics';
+import { hapticError, hapticImpactLight, hapticSelect, hapticSuccess } from '@/lib/haptics';
 import { MOTION_DURATION } from '@/lib/motion';
 import { prepareLocalDataForAccount } from '@/lib/account-switch';
 import { hasCompletedOnboarding, markOnboardingComplete } from '@/lib/onboarding-draft';
@@ -126,6 +126,22 @@ export default function CreateAccountScreen() {
   // Google) rather than just the email button, since any of the three is a
   // full account-creation path.
   const [ageConfirmed, setAgeConfirmed] = useState(false);
+  // Briefly highlights the checkbox itself when someone taps Continue/Apple/
+  // Google without it — it sits at the bottom of the screen, well away from
+  // those buttons, so the error text alone left people hunting for it.
+  const [ageNudge, setAgeNudge] = useState(false);
+  const ageNudgeTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nudgeAgeCheck = () => {
+    if (ageNudgeTimeout.current) clearTimeout(ageNudgeTimeout.current);
+    setAgeNudge(true);
+    ageNudgeTimeout.current = setTimeout(() => setAgeNudge(false), 1400);
+  };
+  useEffect(
+    () => () => {
+      if (ageNudgeTimeout.current) clearTimeout(ageNudgeTimeout.current);
+    },
+    []
+  );
   // Real error surface for handleAppleAuth/handleGoogleAuth below — no
   // longer a permanent "not set up yet" notice now that both are wired to
   // real SDK calls, but a real provider/network failure still needs
@@ -189,6 +205,7 @@ export default function CreateAccountScreen() {
   const handleContinue = async () => {
     if (!ageConfirmed) {
       hapticError();
+      nudgeAgeCheck();
       setEmailError("Please confirm you're at least 16 and agree to the Terms of Service and Privacy Policy below.");
       return;
     }
@@ -294,6 +311,7 @@ export default function CreateAccountScreen() {
   const handleAppleAuth = async () => {
     if (!ageConfirmed) {
       hapticError();
+      nudgeAgeCheck();
       setSocialAuthNotice("Please confirm you're at least 16 and agree to the Terms of Service and Privacy Policy below.");
       return;
     }
@@ -318,6 +336,7 @@ export default function CreateAccountScreen() {
   const handleGoogleAuth = async () => {
     if (!ageConfirmed) {
       hapticError();
+      nudgeAgeCheck();
       setSocialAuthNotice("Please confirm you're at least 16 and agree to the Terms of Service and Privacy Policy below.");
       return;
     }
@@ -397,8 +416,12 @@ export default function CreateAccountScreen() {
           <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>Email address</Text>
 
           <View style={styles.inputWrap}>
+            {/* The page background as the field's fill, not the card's own
+                surface color — in light mode that was white on white with a
+                barely-there border, so the one field on the screen hardly
+                read as a field. A recessed fill works in both themes. */}
             <View style={[StyleSheet.absoluteFill, styles.behindContent]} pointerEvents="none">
-              <InputFieldGraphic fill={colors.surface} stroke={colors.surfaceBorder} />
+              <InputFieldGraphic fill={colors.background} stroke={colors.glassBorder} />
             </View>
             <View
               pointerEvents="none"
@@ -593,14 +616,18 @@ export default function CreateAccountScreen() {
 
         <Pressable
           style={styles.ageCheckRow}
-          onPress={() => setAgeConfirmed((prev) => !prev)}
+          onPress={() => {
+            hapticSelect();
+            setAgeNudge(false);
+            setAgeConfirmed((prev) => !prev);
+          }}
           hitSlop={10}
           accessibilityRole="checkbox"
           accessibilityState={{ checked: ageConfirmed }}
           accessibilityLabel="I'm at least 16 and agree to VerveIn's Terms of Service and Privacy Policy"
         >
-          <View style={[styles.ageCheckbox, ageConfirmed && styles.ageCheckboxChecked]}>
-            {ageConfirmed ? <SymbolView name="checkmark" size={9} tintColor="#ffffff" weight="bold" /> : null}
+          <View style={[styles.ageCheckbox, ageNudge && !ageConfirmed && styles.ageCheckboxNudge, ageConfirmed && styles.ageCheckboxChecked]}>
+            {ageConfirmed ? <SymbolView name="checkmark" size={11} tintColor="#ffffff" weight="bold" /> : null}
           </View>
           <Text style={styles.termsText} maxFontSizeMultiplier={1.4}>
             {'I’m at least 16 and agree to VerveIn’s '}
@@ -916,25 +943,33 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       alignItems: 'flex-start',
       gap: 7,
     },
+    // 18pt (was 14) with a readable border — the only way to agree to the
+    // Terms, so it shouldn't be the smallest, faintest control on screen.
     ageCheckbox: {
-      width: 14,
-      height: 14,
-      marginTop: 1,
-      borderRadius: 4,
-      borderWidth: 1,
-      borderColor: colors.surfaceBorder,
+      width: 18,
+      height: 18,
+      marginTop: 0,
+      borderRadius: 5,
+      borderWidth: 1.5,
+      borderColor: colors.textQuaternary,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    ageCheckboxNudge: {
+      borderColor: '#E5484D',
+      backgroundColor: 'rgba(229,72,77,0.12)',
     },
     ageCheckboxChecked: {
       borderColor: '#438C63',
       backgroundColor: '#438C63',
     },
+    // Was 9.26pt — legal consent text shouldn't be the smallest type in the
+    // app. Type.caption, the size every other caption uses.
     termsText: {
       flex: 1,
       color: colors.textTertiary,
-      fontSize: 9.261,
-      lineHeight: 14,
+      fontSize: Type.caption,
+      lineHeight: 16,
       fontFamily: 'Geist-Regular',
     },
     termsLink: {
