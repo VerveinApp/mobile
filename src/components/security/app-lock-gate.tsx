@@ -21,7 +21,17 @@ export function AppLockGate() {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [locked, setLocked] = useState(false);
   const [checked, setChecked] = useState(false);
-  const appState = useRef(AppState.currentState);
+  // BUG FIX: this used to re-lock on any inactive→active transition — but
+  // iOS also reports 'inactive' for things that never leave the app: the
+  // Face ID prompt itself, Control/Notification Center, the photo picker,
+  // the share sheet, every system permission alert. A successful unlock
+  // came back through inactive→active and immediately re-locked, looping
+  // the Face ID prompt. Only a real trip through 'background' counts now.
+  const wentToBackground = useRef(false);
+  // Guards against two overlapping authenticateAsync calls (the mount-time
+  // check and a foreground event landing close together, or a double-tap
+  // on Try Again) stacking two system prompts.
+  const isAuthenticatingRef = useRef(false);
   // "Face ID"/"Touch ID" are real Apple product names, correct only on iOS
   // hardware — settings/index.tsx's own AppLockRow label already makes this
   // same distinction. Fetched once at mount (the device's biometric type
@@ -43,24 +53,30 @@ export function AppLockGate() {
   }, []);
 
   const attemptUnlock = useCallback(async () => {
-    const hasHardware = await LocalAuthentication.hasHardwareAsync();
-    const isEnrolled = await LocalAuthentication.isEnrolledAsync();
-    if (!hasHardware || !isEnrolled) {
-      // Nothing to authenticate against (simulator without enrollment, or a
-      // device with no biometrics set up) — don't strand the user behind a
-      // lock screen with no way through it.
-      setLocked(false);
-      return;
-    }
-    const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: 'Unlock VerveIn',
-      cancelLabel: 'Cancel',
-    });
-    if (result.success) {
-      hapticSuccess();
-      setLocked(false);
-    } else {
-      hapticError();
+    if (isAuthenticatingRef.current) return;
+    isAuthenticatingRef.current = true;
+    try {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+      if (!hasHardware || !isEnrolled) {
+        // Nothing to authenticate against (simulator without enrollment, or a
+        // device with no biometrics set up) — don't strand the user behind a
+        // lock screen with no way through it.
+        setLocked(false);
+        return;
+      }
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: 'Unlock VerveIn',
+        cancelLabel: 'Cancel',
+      });
+      if (result.success) {
+        hapticSuccess();
+        setLocked(false);
+      } else {
+        hapticError();
+      }
+    } finally {
+      isAuthenticatingRef.current = false;
     }
   }, []);
 
@@ -77,9 +93,12 @@ export function AppLockGate() {
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', async (next: AppStateStatus) => {
-      const cameToForeground = appState.current.match(/inactive|background/) && next === 'active';
-      appState.current = next;
-      if (!cameToForeground) return;
+      if (next === 'background') {
+        wentToBackground.current = true;
+        return;
+      }
+      if (next !== 'active' || !wentToBackground.current) return;
+      wentToBackground.current = false;
       const enabled = await isAppLockEnabled();
       if (enabled) {
         setLocked(true);
