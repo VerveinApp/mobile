@@ -5,7 +5,6 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, {
-  Easing,
   Extrapolation,
   FadeIn,
   interpolate,
@@ -13,7 +12,7 @@ import ReanimatedAnimated, {
   type SharedValue,
   useAnimatedStyle,
   useSharedValue,
-  withTiming,
+  withSpring,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
@@ -247,7 +246,12 @@ export default function PaywallScreen() {
           benefitDragStartX.value = benefitTranslateX.value;
         })
         .onUpdate((e) => {
-          benefitTranslateX.value = benefitDragStartX.value + e.translationX;
+          // Past either end, the row follows the finger at a third of the
+          // distance — the rubber-band resistance every native pager has,
+          // instead of sliding freely off into empty space.
+          const raw = benefitDragStartX.value + e.translationX;
+          const minX = -(BENEFITS.length - 1) * benefitCardWidth;
+          benefitTranslateX.value = raw > 0 ? raw / 3 : raw < minX ? minX + (raw - minX) / 3 : raw;
         })
         .onEnd((e) => {
           // Velocity factored in as a bit of extra projected distance, not a
@@ -259,9 +263,13 @@ export default function PaywallScreen() {
             0,
             Math.min(BENEFITS.length - 1, Math.round(-projected / benefitCardWidth))
           );
-          benefitTranslateX.value = withTiming(-targetIndex * benefitCardWidth, {
-            duration: 260,
-            easing: Easing.out(Easing.cubic),
+          // A spring seeded with the fling's own velocity, so a flick carries
+          // its momentum into the snap — a fixed 260ms timing curve used to
+          // stop a fast flick dead and replay it at a fixed pace.
+          benefitTranslateX.value = withSpring(-targetIndex * benefitCardWidth, {
+            velocity: e.velocityX,
+            damping: 28,
+            stiffness: 260,
           });
           runOnJS(setActiveBenefitIndexOnJS)(targetIndex);
         }),
