@@ -185,7 +185,7 @@ export default function ConditionLogScreen() {
               <View style={styles.addCard}>
                 <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>When</Text>
                 <View style={styles.wheelCard}>
-                  <HorizontalRuler items={wheelItems} selectedIndex={dayIndex} onChange={setDayIndex} />
+                  <HorizontalRuler items={wheelItems} selectedIndex={dayIndex} onChange={setDayIndex} accessibilityLabel="Day" />
                 </View>
 
                 <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>Which condition</Text>

@@ -210,6 +210,7 @@ export default function SleepHistoryScreen() {
               <View style={styles.addCard}>
                 <HorizontalRuler
                   items={HOURS_ITEMS}
+                  accessibilityLabel="Hours of sleep"
                   selectedIndex={hoursToIndex(draftHours)}
                   onChange={(index) => setDraftHours(hoursIndexToHours(index))}
                 />

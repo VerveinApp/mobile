@@ -361,6 +361,7 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
               <View style={styles.wheelRow}>
                 <HorizontalRuler
                   items={FEET_ITEMS}
+                  accessibilityLabel="Height, feet"
                   selectedIndex={feetIndex}
                   onChange={(index) => {
                     setHeightCmValue(feetInchesToCm(index, inchesIndex));
@@ -369,6 +370,7 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
                 />
                 <HorizontalRuler
                   items={INCHES_ITEMS}
+                  accessibilityLabel="Height, inches"
                   selectedIndex={inchesIndex}
                   onChange={(index) => {
                     setHeightCmValue(feetInchesToCm(feetIndex, index));
@@ -380,6 +382,7 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
               <View style={styles.wheelRow}>
                 <HorizontalRuler
                   items={HEIGHT_CM_ITEMS}
+                  accessibilityLabel="Height"
                   selectedIndex={cmIndex}
                   onChange={(index) => {
                     setHeightCmValue(index + 120);
@@ -400,6 +403,7 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
                   <HorizontalRuler
                     width={RULER_TICK_SPACING * 4}
                     items={WEIGHT_LB_ITEMS}
+                    accessibilityLabel="Weight, pounds"
                     selectedIndex={lbWholeIndex}
                     onChange={(index) => {
                       setWeightKgValue(lbPartsToKg(index, lbDecimalIndex));
@@ -412,6 +416,7 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
                   <HorizontalRuler
                     width={RULER_TICK_SPACING * 2}
                     items={DECIMAL_ITEMS}
+                    accessibilityLabel="Weight, tenths of a pound"
                     selectedIndex={lbDecimalIndex}
                     onChange={(index) => {
                       setWeightKgValue(lbPartsToKg(lbWholeIndex, index));
@@ -427,6 +432,7 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
                   <HorizontalRuler
                     width={RULER_TICK_SPACING * 4}
                     items={WEIGHT_KG_ITEMS}
+                    accessibilityLabel="Weight, kilograms"
                     selectedIndex={kgWholeIndex}
                     onChange={(index) => {
                       setWeightKgValue(kgPartsToKg(index, kgDecimalIndex));
@@ -439,6 +445,7 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
                   <HorizontalRuler
                     width={RULER_TICK_SPACING * 2}
                     items={DECIMAL_ITEMS}
+                    accessibilityLabel="Weight, tenths of a kilogram"
                     selectedIndex={kgDecimalIndex}
                     onChange={(index) => {
                       setWeightKgValue(kgPartsToKg(kgWholeIndex, index));
@@ -460,6 +467,7 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
             <View style={styles.wheelRow}>
               <HorizontalRuler
                 items={AGE_ITEMS}
+                accessibilityLabel="Age"
                 selectedIndex={ageIndex}
                 onChange={(index) => {
                   setAgeValue(index + 13);

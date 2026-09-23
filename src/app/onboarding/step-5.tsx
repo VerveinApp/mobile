@@ -368,12 +368,14 @@ export default function OnboardingConsentBiometricsScreen() {
                 <HorizontalRuler
                   key="feet"
                   items={FEET_ITEMS}
+                  accessibilityLabel="Height, feet"
                   selectedIndex={feetIndex}
                   onChange={(index) => setHeightCmValue(feetInchesToCm(index, inchesIndex))}
                 />
                 <HorizontalRuler
                   key="inches"
                   items={INCHES_ITEMS}
+                  accessibilityLabel="Height, inches"
                   selectedIndex={inchesIndex}
                   onChange={(index) => setHeightCmValue(feetInchesToCm(feetIndex, index))}
                 />
@@ -382,6 +384,7 @@ export default function OnboardingConsentBiometricsScreen() {
                 <HorizontalRuler
                   key="lb"
                   items={WEIGHT_LB_ITEMS}
+                  accessibilityLabel="Weight"
                   selectedIndex={lbIndex}
                   onChange={(index) => setWeightKgValue(lbToKg(index))}
                 />
@@ -393,6 +396,7 @@ export default function OnboardingConsentBiometricsScreen() {
                 <HorizontalRuler
                   key="cm"
                   items={HEIGHT_CM_ITEMS}
+                  accessibilityLabel="Height"
                   selectedIndex={cmIndex}
                   onChange={(index) => setHeightCmValue(index + 120)}
                 />
@@ -401,6 +405,7 @@ export default function OnboardingConsentBiometricsScreen() {
                 <HorizontalRuler
                   key="kg"
                   items={WEIGHT_KG_ITEMS}
+                  accessibilityLabel="Weight"
                   selectedIndex={kgIndex}
                   onChange={(index) => setWeightKgValue(index + 35)}
                 />

@@ -211,7 +211,7 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
         <View style={styles.section}>
           <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>When</Text>
           <View style={styles.wheelCard}>
-            <HorizontalRuler items={wheelItems} selectedIndex={dayIndex} onChange={setDayIndex} />
+            <HorizontalRuler items={wheelItems} selectedIndex={dayIndex} onChange={setDayIndex} accessibilityLabel="Day" />
           </View>
           {alreadyLogged ? (
             <Text style={styles.warningText} maxFontSizeMultiplier={1.3}>

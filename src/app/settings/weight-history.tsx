@@ -260,6 +260,7 @@ export default function WeightHistoryScreen() {
                       <HorizontalRuler
                         width={RULER_TICK_SPACING * 4}
                         items={WEIGHT_LB_ITEMS}
+                        accessibilityLabel="Weight, pounds"
                         selectedIndex={lbWholeIndex}
                         onChange={(index) => setDraftWeightKg(lbPartsToKg(index, lbDecimalIndex))}
                       />
@@ -269,6 +270,7 @@ export default function WeightHistoryScreen() {
                       <HorizontalRuler
                         width={RULER_TICK_SPACING * 2}
                         items={DECIMAL_ITEMS}
+                        accessibilityLabel="Weight, tenths of a pound"
                         selectedIndex={lbDecimalIndex}
                         onChange={(index) => setDraftWeightKg(lbPartsToKg(lbWholeIndex, index))}
                       />
@@ -281,6 +283,7 @@ export default function WeightHistoryScreen() {
                       <HorizontalRuler
                         width={RULER_TICK_SPACING * 4}
                         items={WEIGHT_KG_ITEMS}
+                        accessibilityLabel="Weight, kilograms"
                         selectedIndex={kgWholeIndex}
                         onChange={(index) => setDraftWeightKg(kgPartsToKg(index, kgDecimalIndex))}
                       />
@@ -290,6 +293,7 @@ export default function WeightHistoryScreen() {
                       <HorizontalRuler
                         width={RULER_TICK_SPACING * 2}
                         items={DECIMAL_ITEMS}
+                        accessibilityLabel="Weight, tenths of a kilogram"
                         selectedIndex={kgDecimalIndex}
                         onChange={(index) => setDraftWeightKg(kgPartsToKg(kgWholeIndex, index))}
                       />

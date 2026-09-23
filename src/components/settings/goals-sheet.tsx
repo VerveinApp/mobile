@@ -243,12 +243,14 @@ export const GoalsSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void 
                 {unit === 'imperial' ? (
                   <HorizontalRuler
                     items={WEIGHT_LB_ITEMS}
+                    accessibilityLabel="Target weight"
                     selectedIndex={lbIndex}
                     onChange={(index) => setTargetWeightKgValue(lbToKg(index))}
                   />
                 ) : (
                   <HorizontalRuler
                     items={WEIGHT_KG_ITEMS}
+                    accessibilityLabel="Target weight"
                     selectedIndex={kgIndex}
                     onChange={(index) => setTargetWeightKgValue(index + 35)}
                   />
@@ -299,12 +301,14 @@ export const GoalsSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void 
                         {unit === 'imperial' ? (
                           <HorizontalRuler
                             items={LIFT_LB_ITEMS}
+                            accessibilityLabel="Target lift weight"
                             selectedIndex={liftLbIndex}
                             onChange={(index) => setTargetLiftKgValue(liftLbToKg(index))}
                           />
                         ) : (
                           <HorizontalRuler
                             items={LIFT_KG_ITEMS}
+                            accessibilityLabel="Target lift weight"
                             selectedIndex={liftKgIndex}
                             onChange={(index) => setTargetLiftKgValue(index)}
                           />

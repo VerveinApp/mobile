@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  type AccessibilityActionEvent,
   Animated,
   type LayoutChangeEvent,
   NativeScrollEvent,
@@ -45,6 +46,9 @@ type HorizontalRulerProps = {
   // (e.g. feet + inches). Omit it to fill the row instead — see the measured-
   // width note below.
   width?: number;
+  // What VoiceOver reads before the value, e.g. "Height, feet". Include the
+  // unit whenever the items themselves are bare numbers.
+  accessibilityLabel?: string;
 };
 
 /**
@@ -68,7 +72,7 @@ type HorizontalRulerProps = {
  * below needs a real number, not a percentage, to center ticks and compute
  * scroll padding.
  */
-export function HorizontalRuler({ items, selectedIndex, onChange, width }: HorizontalRulerProps) {
+export function HorizontalRuler({ items, selectedIndex, onChange, width, accessibilityLabel }: HorizontalRulerProps) {
   const { colors } = useAppTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [scrollX] = useState(() => new Animated.Value(selectedIndex * RULER_TICK_SPACING));
@@ -148,6 +152,22 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width }: Horiz
     if (Math.abs(e.nativeEvent.velocity?.x ?? 0) < 0.01) commitAtOffset(e.nativeEvent.contentOffset.x);
   };
 
+  // VoiceOver sees the ruler as one adjustable control (swipe up or down to
+  // step the value), the same pattern as EnergyGauge and CommitmentDial. A
+  // scrolling strip of ticks can't be operated with VoiceOver on otherwise,
+  // and onboarding's height and weight are set only through these.
+  const stepBy = (delta: number) => {
+    const next = Math.max(0, Math.min(items.length - 1, lastIndex.current + delta));
+    if (next === lastIndex.current) return;
+    lastIndex.current = next;
+    scrollRef.current?.scrollTo({ x: next * RULER_TICK_SPACING, animated: true });
+    onChange(next);
+  };
+  const handleAccessibilityAction = (event: AccessibilityActionEvent) => {
+    if (event.nativeEvent.actionName === 'increment') stepBy(1);
+    else if (event.nativeEvent.actionName === 'decrement') stepBy(-1);
+  };
+
   // Built only when the mounted range or the items change. Each RulerTick
   // keeps its own interpolations, so growing the range mounts just the new
   // ticks. (Left inline, the React Compiler grouped the tick list with the
@@ -167,6 +187,12 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width }: Horiz
     <View
       style={[styles.wrap, { height: RULER_HEIGHT }, width != null ? { width } : styles.wrapFill]}
       onLayout={handleLayout}
+      accessible
+      accessibilityRole="adjustable"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityValue={{ text: items[selectedIndex] ?? '' }}
+      accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+      onAccessibilityAction={handleAccessibilityAction}
     >
       {trackWidth <= 0 ? null : (
       <Animated.ScrollView

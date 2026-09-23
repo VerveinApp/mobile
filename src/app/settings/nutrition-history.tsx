@@ -209,6 +209,7 @@ export default function NutritionHistoryScreen() {
               <View style={styles.addCard}>
                 <HorizontalRuler
                   items={CALORIE_ITEMS}
+                  accessibilityLabel="Calories"
                   selectedIndex={caloriesToIndex(draftCalories)}
                   onChange={(index) => setDraftCalories(caloriesIndexToCalories(index))}
                 />
