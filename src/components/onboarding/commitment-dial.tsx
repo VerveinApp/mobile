@@ -2,7 +2,8 @@ import { useMemo } from 'react';
 import { Platform, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Svg, { Circle, Defs, LinearGradient, Path, Stop } from 'react-native-svg';
-import ReanimatedAnimated, { runOnJS, useAnimatedProps, useSharedValue, withTiming } from 'react-native-reanimated';
+import ReanimatedAnimated, { useAnimatedProps, useSharedValue, withTiming } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 
 import { hapticSelect } from '@/lib/haptics';
 import { useAppTheme } from '@/lib/theme-context';
@@ -146,7 +147,7 @@ export function CommitmentDial({ size = 220, canvasScale = 1, value, onChange, l
           const idx = indexFromSweep(sweep.value);
           if (lastIndex.value !== idx) {
             lastIndex.value = idx;
-            runOnJS(onChange)(idx);
+            scheduleOnRN(onChange, idx);
           }
         })
         .onUpdate((e) => {
@@ -159,8 +160,8 @@ export function CommitmentDial({ size = 220, canvasScale = 1, value, onChange, l
           const idx = indexFromSweep(sweep.value);
           if (lastIndex.value !== idx) {
             lastIndex.value = idx;
-            runOnJS(hapticSelect)();
-            runOnJS(onChange)(idx);
+            scheduleOnRN(hapticSelect);
+            scheduleOnRN(onChange, idx);
           }
         })
         .onEnd(() => {

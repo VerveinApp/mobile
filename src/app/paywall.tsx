@@ -8,12 +8,12 @@ import ReanimatedAnimated, {
   Extrapolation,
   FadeIn,
   interpolate,
-  runOnJS,
   type SharedValue,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 import type { PurchasesOffering, PurchasesPackage } from 'react-native-purchases';
@@ -221,7 +221,7 @@ export default function PaywallScreen() {
   // entire checklistWrap stopped painting, confirmed both with the real
   // components and with bare hardcoded-size colored Views standing in for
   // them. Nesting any ScrollView inside this one was the actual trigger.
-  // Replaced with a gesture-driven pager (same Gesture.Pan + runOnJS +
+  // Replaced with a gesture-driven pager (same Gesture.Pan + scheduleOnRN +
   // useAnimatedStyle idiom energy-gauge.tsx and before-after-slider.tsx
   // already use) — no nested ScrollView at all, so the outer one measures
   // its content correctly again.
@@ -271,7 +271,7 @@ export default function PaywallScreen() {
             damping: 28,
             stiffness: 260,
           });
-          runOnJS(setActiveBenefitIndexOnJS)(targetIndex);
+          scheduleOnRN(setActiveBenefitIndexOnJS, targetIndex);
         }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [benefitCardWidth]
