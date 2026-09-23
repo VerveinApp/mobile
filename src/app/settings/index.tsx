@@ -38,6 +38,7 @@ import {
 } from '@/lib/health-kit';
 import { CONTACT_EMAIL } from '@/lib/legal/terms-content';
 import { localDateStr } from '@/lib/local-date';
+import { deleteRemoteProfile } from '@/lib/profile-sync';
 import { registerForRemotePushNotifications, unregisterPushTokenForThisDevice } from '@/lib/push-notifications';
 import { forgetLocalDataOwner } from '@/lib/account-switch';
 import { useFadeInEntering } from '@/lib/screen-transitions';
@@ -520,6 +521,9 @@ export default function SettingsScreen() {
     if (deletingData) return;
     setDeletingData(true);
     hapticWarning();
+    // The synced copy too — otherwise "permanently clears your profile" left
+    // its health fields on the server (see deleteRemoteProfile).
+    await deleteRemoteProfile();
     await clearAllLocalData();
     setDeletingData(false);
     router.dismissAll();
@@ -1080,8 +1084,8 @@ export default function SettingsScreen() {
               <Pressable style={styles.importCard} onPress={() => {}}>
                 <Text style={styles.importTitle} maxFontSizeMultiplier={1.3}>Delete all your data?</Text>
                 <Text style={styles.importBody} maxFontSizeMultiplier={1.4}>
-                  This permanently clears your on-device profile, session history, workout logs, and
-                  calibration — it can&apos;t be undone.
+                  This permanently clears your profile — on this device and the copy synced to your account —
+                  plus your session history, logs, progress photos, and calibration. It can&apos;t be undone.
                 </Text>
                 <View style={styles.importActions}>
                   <Pressable
@@ -1144,6 +1148,17 @@ export default function SettingsScreen() {
                 <Text style={styles.importBody} maxFontSizeMultiplier={1.4}>
                   This permanently deletes the sign-in for {accountEmail} — it can&apos;t be undone. Your on-device
                   profile, history, and logs are cleared too, the same as Delete My Data.
+                </Text>
+                {/* Deleting an account can't touch an App Store subscription
+                    — Apple bills it independently, so without this line a
+                    subscriber could delete their account and keep being
+                    charged for a Plus they can no longer reach. */}
+                <Text style={[styles.importBody, styles.importBodySpaced]} maxFontSizeMultiplier={1.4}>
+                  {'Have VerveIn Plus? Deleting your account doesn’t cancel it — '}
+                  <Text style={styles.inlineLink} onPress={handleManageSubscription}>
+                    manage your subscription
+                  </Text>
+                  {' first so you’re not charged again.'}
                 </Text>
                 {deleteAccountError ? (
                   <Text style={styles.importErrorText} maxFontSizeMultiplier={1.3}>{deleteAccountError}</Text>
@@ -1746,6 +1761,13 @@ function createStyles(colors: Record<string, string>) {
       lineHeight: 18,
       fontFamily: 'Geist-Medium',
       textAlign: 'center',
+    },
+    importBodySpaced: {
+      marginTop: 8,
+    },
+    inlineLink: {
+      color: colors.accentText,
+      fontFamily: 'Geist-SemiBold',
     },
     importInput: {
       marginTop: 6,

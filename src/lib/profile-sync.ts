@@ -113,3 +113,24 @@ export async function pullProfileFromRemote(): Promise<RemoteProfileResult> {
     return { kind: 'error' };
   }
 }
+
+/**
+ * Deletes the signed-in user's synced profile row — Settings' "Delete My
+ * Data" calls this alongside clearing the device, so "permanently clears
+ * your profile" is true on the server too (health fields included). Needs
+ * 20260923000100_profiles_delete_own.sql deployed; best-effort like every
+ * other sync call here, and deliberately NOT part of clearAllLocalData,
+ * which account-switch.ts also uses while a different account is signed in.
+ */
+export async function deleteRemoteProfile(): Promise<void> {
+  try {
+    const { supabase } = await import('@/lib/supabase');
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) return;
+    await supabase.from('profiles').delete().eq('user_id', session.user.id);
+  } catch {
+    // Best-effort — see this function's own doc comment.
+  }
+}
