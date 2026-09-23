@@ -4,13 +4,21 @@ import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import ReanimatedAnimated from 'react-native-reanimated';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import ReanimatedAnimated, {
+  Extrapolation,
+  interpolate,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { scheduleOnRN } from 'react-native-worklets';
 import { SymbolView } from '@/components/ui/app-symbol';
 
 import { Type } from '@/constants/theme';
 import { useHoverFade, PRESSED_DIM } from '@/lib/button-interactions';
-import { hapticError, hapticImpactLight } from '@/lib/haptics';
+import { hapticError, hapticImpactLight, hapticWarning } from '@/lib/haptics';
 import { localDateStr } from '@/lib/local-date';
 import {
   addProgressPhoto,
@@ -63,7 +71,18 @@ export default function ProgressPhotosScreen() {
   const [hasConsent, setHasConsent] = useState(false);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
+  // The photo in the full-screen viewer. Kept set after the viewer closes,
+  // so the photo fades out with the modal instead of blanking first.
   const [viewing, setViewing] = useState<ProgressPhotoEntry | null>(null);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  // The viewer's trash button used to delete on a single tap — the one
+  // place a photo could be lost without a second, deliberate tap (the grid
+  // needs a long-press, then the badge). First tap arms it, second deletes.
+  const [confirmingViewerDelete, setConfirmingViewerDelete] = useState(false);
+  // How far the viewer's photo has been dragged down, in points. Swiping
+  // down dismisses it, like Photos: the photo follows the finger and
+  // shrinks a little while the black backdrop thins to show the grid.
+  const viewerDragY = useSharedValue(0);
   // Long-press reveals a delete badge on that one thumbnail rather than
   // deleting outright — same "reveal, then a real second tap commits it"
   // shape as every swipe-to-delete list elsewhere in the app (Notes, Weight
@@ -132,17 +151,72 @@ export default function ProgressPhotosScreen() {
     await savePickedAsset(result);
   };
 
+  const openViewer = (photo: ProgressPhotoEntry) => {
+    viewerDragY.value = 0;
+    setConfirmingViewerDelete(false);
+    setViewing(photo);
+    setViewerOpen(true);
+  };
+  const closeViewer = useCallback(() => setViewerOpen(false), []);
+
+  const viewerDismissGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        // Downward drags only; a sideways or upward start stays a no-op.
+        .activeOffsetY(12)
+        .failOffsetX([-24, 24])
+        .onUpdate((e) => {
+          viewerDragY.value = Math.max(0, e.translationY);
+        })
+        .onEnd((e) => {
+          if (e.translationY > 120 || e.velocityY > 900) {
+            // The modal's own fade takes it from wherever the drag left it.
+            scheduleOnRN(closeViewer);
+          } else {
+            viewerDragY.value = withSpring(0, { velocity: e.velocityY, damping: 26, stiffness: 280 });
+          }
+        }),
+    // viewerDragY is a stable shared value — listing it here makes the React
+    // Compiler treat the worklet's writes as mutating a hook argument (same
+    // as BeforeAfterSlider's gesture).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [closeViewer]
+  );
+  const viewerPhotoStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: viewerDragY.value },
+      { scale: interpolate(viewerDragY.value, [0, 400], [1, 0.88], Extrapolation.CLAMP) },
+    ],
+  }));
+  const viewerBackdropStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(viewerDragY.value, [0, 300], [1, 0.35], Extrapolation.CLAMP),
+  }));
+  const viewerChromeStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(viewerDragY.value, [0, 100], [1, 0], Extrapolation.CLAMP),
+  }));
+
   const handleDelete = async (id: string) => {
     hapticImpactLight();
     const previous = photos;
     setPhotos((prev) => prev.filter((p) => p.id !== id));
-    setViewing(null);
+    setViewerOpen(false);
     try {
       await deleteProgressPhoto(id);
     } catch {
       hapticError();
       setPhotos(previous);
     }
+  };
+
+  const handleViewerDelete = () => {
+    if (!viewing) return;
+    if (!confirmingViewerDelete) {
+      hapticWarning();
+      setConfirmingViewerDelete(true);
+      return;
+    }
+    setConfirmingViewerDelete(false);
+    handleDelete(viewing.id);
   };
 
   const handleOpenCompare = () => {
@@ -276,7 +350,7 @@ export default function ProgressPhotosScreen() {
                           setDeleteTargetId(null);
                           return;
                         }
-                        setViewing(photo);
+                        openViewer(photo);
                       }}
                       onLongPress={() => {
                         hapticImpactLight();
@@ -313,11 +387,18 @@ export default function ProgressPhotosScreen() {
         </ReanimatedAnimated.View>
       )}
 
-      <Modal visible={viewing !== null} animationType="fade" transparent onRequestClose={() => setViewing(null)}>
-        <View style={styles.viewerRoot}>
-          <View style={[styles.viewerHeader, { paddingTop: insets.top + 8 }]}>
+      <Modal visible={viewerOpen} animationType="fade" transparent onRequestClose={closeViewer}>
+        {/* Its own gesture root: RN renders a Modal outside the app's root
+            view, and on Android gestures inside one never arrive without
+            this (on iOS it's a plain View). */}
+        <GestureHandlerRootView style={styles.viewerRoot} onAccessibilityEscape={closeViewer}>
+          <ReanimatedAnimated.View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, styles.viewerBackdrop, viewerBackdropStyle]}
+          />
+          <ReanimatedAnimated.View style={[styles.viewerHeader, { paddingTop: insets.top + 8 }, viewerChromeStyle]}>
             <Pressable
-              onPress={() => setViewing(null)}
+              onPress={closeViewer}
               hitSlop={10}
               style={({ pressed }) => [styles.headerButton, pressed && PRESSED_DIM]}
               accessibilityRole="button"
@@ -329,23 +410,44 @@ export default function ProgressPhotosScreen() {
               {viewing ? formatEntryDate(viewing.date) : ''}
             </Text>
             <Pressable
-              onPress={() => viewing && handleDelete(viewing.id)}
+              onPress={handleViewerDelete}
               hitSlop={10}
-              style={({ pressed }) => [styles.headerButton, pressed && PRESSED_DIM]}
+              style={({ pressed }) => [
+                confirmingViewerDelete ? styles.viewerDeleteConfirm : styles.headerButton,
+                pressed && PRESSED_DIM,
+              ]}
               accessibilityRole="button"
-              accessibilityLabel="Delete photo"
+              accessibilityLabel={confirmingViewerDelete ? 'Confirm: delete this photo' : 'Delete photo'}
             >
-              <SymbolView name="trash" size={16} tintColor="#ffffff" />
+              {confirmingViewerDelete ? (
+                <Text style={styles.viewerDeleteConfirmText} maxFontSizeMultiplier={1.2}>
+                  Delete
+                </Text>
+              ) : (
+                <SymbolView name="trash" size={16} tintColor="#ffffff" />
+              )}
             </Pressable>
-          </View>
-          {viewing ? (
-            <Image source={{ uri: progressPhotoUri(viewing) }} style={styles.viewerImage} contentFit="contain" transition={150} />
-          ) : null}
-        </View>
+          </ReanimatedAnimated.View>
+          <GestureDetector gesture={viewerDismissGesture}>
+            <ReanimatedAnimated.View style={[styles.viewerPhotoWrap, viewerPhotoStyle]}>
+              {viewing ? (
+                <Image
+                  source={{ uri: progressPhotoUri(viewing) }}
+                  style={styles.viewerImage}
+                  contentFit="contain"
+                  transition={150}
+                />
+              ) : null}
+            </ReanimatedAnimated.View>
+          </GestureDetector>
+        </GestureHandlerRootView>
       </Modal>
 
       <Modal visible={comparing} animationType="fade" transparent onRequestClose={() => setComparing(false)}>
-        <View style={styles.viewerRoot}>
+        <GestureHandlerRootView
+          style={[styles.viewerRoot, styles.viewerRootOpaque]}
+          onAccessibilityEscape={() => setComparing(false)}
+        >
           <View style={[styles.viewerHeader, { paddingTop: insets.top + 8 }]}>
             <Pressable
               onPress={() => setComparing(false)}
@@ -434,7 +536,7 @@ export default function ProgressPhotosScreen() {
               </View>
             </View>
           ) : null}
-        </View>
+        </GestureHandlerRootView>
       </Modal>
     </View>
   );
@@ -582,7 +684,30 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     viewerRoot: {
       flex: 1,
+    },
+    viewerRootOpaque: {
       backgroundColor: '#000000',
+    },
+    // Its own layer, not viewerRoot's background, so a swipe-down can thin
+    // it and let the grid show through.
+    viewerBackdrop: {
+      backgroundColor: '#000000',
+    },
+    viewerPhotoWrap: {
+      flex: 1,
+    },
+    viewerDeleteConfirm: {
+      height: 32,
+      paddingHorizontal: 14,
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#E5484D',
+    },
+    viewerDeleteConfirmText: {
+      color: '#ffffff',
+      fontSize: Type.body,
+      fontFamily: 'Geist-SemiBold',
     },
     viewerHeader: {
       flexDirection: 'row',
