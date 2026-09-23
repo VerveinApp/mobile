@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import Purchases, {
@@ -35,6 +35,33 @@ export const PREMIUM_ENTITLEMENT_ID = 'VerveIn Plus';
 
 let configured = false;
 
+// ---------------------------------------------------------------------------
+// One shared, live view of the entitlement — see usePremiumEntitlement.
+// ---------------------------------------------------------------------------
+
+function isEntitled(info: CustomerInfo): boolean {
+  return info.entitlements.active[PREMIUM_ENTITLEMENT_ID]?.isActive === true;
+}
+
+/** The last real answer any check produced, so a screen mounting later
+ * starts from it instead of from "unknown" (and its locked-teaser pop-in). */
+let lastKnownEntitlement: boolean | null = null;
+const entitlementListeners = new Set<(value: boolean) => void>();
+
+function publishEntitlement(value: boolean): void {
+  lastKnownEntitlement = value;
+  entitlementListeners.forEach((listener) => listener(value));
+}
+
+// Resolves once RevenueCat has been told who the signed-in user is (or that
+// nobody is). BUG FIX: logIn used to be fire-and-forget, so the first
+// entitlement check on a cold launch could read the ANONYMOUS RevenueCat
+// user — a paying subscriber saw every Plus section locked until they
+// switched screens. Checks now wait for identity first (bounded, so a hung
+// network call can't block them forever).
+let identityReady: Promise<void> = Promise.resolve();
+const IDENTITY_WAIT_MAX_MS = 5000;
+
 export type BillingMode = 'test-store' | 'production' | 'unconfigured';
 
 /**
@@ -66,6 +93,10 @@ export async function initPurchases(): Promise<void> {
     Purchases.configure({ apiKey: API_KEY });
     configured = true;
     syncIdentityWithSupabaseAuth();
+    // Purchases, restores, renewals and expirations all arrive here — every
+    // mounted screen's gate updates the moment it happens, not on its next
+    // focus.
+    Purchases.addCustomerInfoUpdateListener((info) => publishEntitlement(isEntitled(info)));
   } catch {
     // Worst case Premium features stay locked this session — never a crash,
     // same "under-triggering is the safe failure mode" rule health-kit.ts
@@ -88,11 +119,23 @@ export async function initPurchases(): Promise<void> {
  * broken app right now.
  */
 function syncIdentityWithSupabaseAuth(): void {
+  let markIdentityReady: () => void = () => {};
+  identityReady = new Promise<void>((resolve) => {
+    markIdentityReady = resolve;
+    setTimeout(resolve, IDENTITY_WAIT_MAX_MS);
+  });
   supabase.auth.onAuthStateChange((event, session) => {
     if ((event === 'INITIAL_SESSION' || event === 'SIGNED_IN') && session?.user.id) {
-      Purchases.logIn(session.user.id).catch(() => {});
+      Purchases.logIn(session.user.id)
+        .then(({ customerInfo }) => publishEntitlement(isEntitled(customerInfo)))
+        .catch(() => {})
+        .finally(markIdentityReady);
+    } else if (event === 'INITIAL_SESSION') {
+      markIdentityReady();
     } else if (event === 'SIGNED_OUT') {
-      Purchases.logOut().catch(() => {});
+      Purchases.logOut()
+        .then((customerInfo) => publishEntitlement(isEntitled(customerInfo)))
+        .catch(() => {});
     }
   });
 }
@@ -158,9 +201,9 @@ export async function getIntroOfferEligibility(productIdentifiers: string[]): Pr
 export async function hasPremiumEntitlement(): Promise<boolean> {
   if (__DEV__ && (await getDevPremiumOverride())) return true;
   if (!configured) return false;
+  await identityReady;
   try {
-    const info = await Purchases.getCustomerInfo();
-    return info.entitlements.active[PREMIUM_ENTITLEMENT_ID]?.isActive === true;
+    return isEntitled(await Purchases.getCustomerInfo());
   } catch {
     return false;
   }
@@ -205,12 +248,22 @@ export async function getSubscriptionManagementUrl(): Promise<string | null> {
  * return to focus) is correct for both.
  */
 export function usePremiumEntitlement(): boolean | null {
-  const [isPremium, setIsPremium] = useState<boolean | null>(null);
+  // Starts from the last real answer (see lastKnownEntitlement) — only the
+  // very first check of an app launch is ever "unknown" now.
+  const [isPremium, setIsPremium] = useState<boolean | null>(lastKnownEntitlement);
+  useEffect(() => {
+    entitlementListeners.add(setIsPremium);
+    return () => {
+      entitlementListeners.delete(setIsPremium);
+    };
+  }, []);
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
       hasPremiumEntitlement().then((value) => {
-        if (!cancelled) setIsPremium(value);
+        if (cancelled) return;
+        lastKnownEntitlement = value;
+        setIsPremium(value);
       });
       return () => {
         cancelled = true;
@@ -265,7 +318,8 @@ export type RestoreOutcome =
 export async function restorePurchases(): Promise<RestoreOutcome> {
   try {
     const info = await Purchases.restorePurchases();
-    const isActive = info.entitlements.active[PREMIUM_ENTITLEMENT_ID]?.isActive === true;
+    const isActive = isEntitled(info);
+    publishEntitlement(isActive);
     return isActive ? { kind: 'restored' } : { kind: 'none' };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Couldn't restore purchases right now.";
