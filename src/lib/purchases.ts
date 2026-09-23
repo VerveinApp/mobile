@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import { Platform } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import Purchases, {
+  INTRO_ELIGIBILITY_STATUS,
   LOG_LEVEL,
   PURCHASES_ERROR_CODE,
   type CustomerInfo,
@@ -109,6 +110,29 @@ export async function getCurrentOffering(): Promise<PurchasesOffering | null> {
     return offerings.current;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Which products this Apple ID can still get an intro offer (free trial) on.
+ * Apple only grants one intro offer per subscription group, so someone who
+ * already used a trial must never see "Start Free Trial" — tapping it would
+ * charge them immediately. Anything other than a definite ELIGIBLE (including
+ * UNKNOWN, which RevenueCat's own docs say to treat as "show regular
+ * pricing") comes back false, as does any failure: under-promising a trial
+ * is the safe failure mode, advertising one that won't happen is not.
+ */
+export async function getIntroOfferEligibility(productIdentifiers: string[]): Promise<Record<string, boolean>> {
+  if (!configured || productIdentifiers.length === 0) return {};
+  try {
+    const result = await Purchases.checkTrialOrIntroductoryPriceEligibility(productIdentifiers);
+    const eligibility: Record<string, boolean> = {};
+    for (const id of productIdentifiers) {
+      eligibility[id] = result[id]?.status === INTRO_ELIGIBILITY_STATUS.INTRO_ELIGIBILITY_STATUS_ELIGIBLE;
+    }
+    return eligibility;
+  } catch {
+    return {};
   }
 }
 

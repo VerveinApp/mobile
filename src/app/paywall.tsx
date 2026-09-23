@@ -25,7 +25,7 @@ import { MOTION_DURATION } from '@/lib/motion';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { AndroidCardElevation, AndroidRipple, AndroidRippleOnAccent, Type } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
-import { getCurrentOffering, purchasePackage, restorePurchases } from '@/lib/purchases';
+import { getCurrentOffering, getIntroOfferEligibility, purchasePackage, restorePurchases } from '@/lib/purchases';
 import { supabase } from '@/lib/supabase';
 import { getLoggedSessionCount } from '@/lib/workout-log';
 import {
@@ -199,6 +199,10 @@ export default function PaywallScreen() {
   const [offering, setOffering] = useState<PurchasesOffering | null>(null);
   const [offeringLoadFailed, setOfferingLoadFailed] = useState(false);
   const [selectedPackage, setSelectedPackage] = useState<PurchasesPackage | null>(null);
+  // productIdentifier -> can this Apple ID still get the intro offer. Empty
+  // (every lookup false) until checked, so a trial is never advertised
+  // before eligibility is actually known.
+  const [introEligibility, setIntroEligibility] = useState<Record<string, boolean>>({});
   const [isPurchasing, setIsPurchasing] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
@@ -297,6 +301,10 @@ export default function PaywallScreen() {
     // Annual first if available — the honest default for whichever plan
     // is actually the best value, not just "whatever loaded first."
     setSelectedPackage(current?.annual ?? current?.monthly ?? current?.lifetime ?? null);
+    const productIds = [current?.monthly, current?.annual, current?.lifetime]
+      .filter((p): p is PurchasesPackage => p != null)
+      .map((p) => p.product.identifier);
+    setIntroEligibility(await getIntroOfferEligibility(productIds));
   }, []);
 
   useEffect(() => {
@@ -422,7 +430,11 @@ export default function PaywallScreen() {
       [offering.monthly, offering.annual, offering.lifetime].filter((p): p is PurchasesPackage => p != null)
     : [];
   const savingsText = annualSavingsText(offering?.monthly ?? undefined, offering?.annual ?? undefined);
-  const selectedTrial = selectedPackage ? trialLabel(selectedPackage) : null;
+  // BUG FIX: trialLabel alone only reads whether the product HAS an intro
+  // offer, not whether this Apple ID can still get it — someone who already
+  // used their trial saw "Start Free Trial" and was charged immediately.
+  const selectedTrial =
+    selectedPackage && introEligibility[selectedPackage.product.identifier] ? trialLabel(selectedPackage) : null;
 
   return (
     <View style={styles.root}>
@@ -517,6 +529,9 @@ export default function PaywallScreen() {
                       key={pkg.identifier}
                       style={[styles.packagePill, active && styles.packagePillActive]}
                       onPress={() => handleSelectPackage(pkg)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      accessibilityLabel={`${packageLabel(pkg)}, ${pkg.product.priceString}`}
                     >
                       <Text
                         style={[styles.packagePillLabel, active && styles.packagePillLabelActive]}
@@ -713,8 +728,15 @@ export default function PaywallScreen() {
               </Animated.Text>
             </Pressable>
 
+            {/* Apple 3.1.2 (and California/Illinois auto-renewal laws) want
+                the renewal terms spelled out right at the point of purchase:
+                price, period, that it renews automatically, and how to
+                cancel — the old "Cancel anytime in Settings" named none of
+                those (and "Settings" read as the app's own Settings screen,
+                which can't cancel an App Store subscription). */}
             <Text style={styles.legalText} maxFontSizeMultiplier={1.4}>
-              {'Cancel anytime in Settings. By continuing, you agree to VerveIn’s '}
+              {selectedPackage ? `${renewalDisclosure(selectedPackage, selectedTrial)} ` : ''}
+              {'By continuing, you agree to VerveIn’s '}
               <Text style={styles.legalLink} onPress={() => router.push('/legal/terms' as never)}>
                 Terms of Service
               </Text>
@@ -750,6 +772,30 @@ export default function PaywallScreen() {
         </ReanimatedAnimated.View>
       </View>
     </View>
+  );
+}
+
+const BILLING_PERIOD_BY_PACKAGE_TYPE: Partial<Record<string, string>> = {
+  ANNUAL: 'year',
+  SIX_MONTH: '6 months',
+  THREE_MONTH: '3 months',
+  TWO_MONTH: '2 months',
+  MONTHLY: 'month',
+  WEEKLY: 'week',
+};
+
+/**
+ * The auto-renewal terms for whichever package is selected — live price and
+ * period from the store, never hardcoded. A lifetime package is a one-time
+ * purchase and says so instead.
+ */
+function renewalDisclosure(pkg: PurchasesPackage, trial: string | null): string {
+  if (pkg.packageType === 'LIFETIME') return `One-time purchase of ${pkg.product.priceString}.`;
+  const period = BILLING_PERIOD_BY_PACKAGE_TYPE[pkg.packageType] ?? 'billing period';
+  return (
+    `${trial ? `After your ${trial}, ` : ''}${pkg.product.priceString} per ${period}, charged to your Apple ID. ` +
+    'Renews automatically unless canceled at least 24 hours before the current period ends — manage or cancel ' +
+    'anytime in your Apple ID subscription settings.'
   );
 }
 
