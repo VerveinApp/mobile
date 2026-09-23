@@ -19,6 +19,7 @@ import { usePremiumEntitlement } from '@/lib/purchases';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { DAY_ORDER, ENVIRONMENT_LABELS, SESSION_LABEL_BY_GOAL, WEEKDAY_NAMES } from '@/lib/profile-labels';
+import { getWeekActivity, type WeekDay } from '@/lib/session-history';
 import { getTodaySession, type TodaySession } from '@/lib/today-session';
 import { getTrainingState } from '@/lib/training-state-loader';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
@@ -60,6 +61,7 @@ export default function TrainScreen() {
     { rhrElevated: boolean; sleepDeficit: boolean } | undefined
   >(undefined);
   const [loaded, setLoaded] = useState(false);
+  const [weekDays, setWeekDays] = useState<WeekDay[] | null>(null);
   const isPremium = usePremiumEntitlement();
   // BUG FIX: the HealthKit-informed trim is a VerveIn Plus benefit —
   // check-in.tsx already gates it this exact way (its own
@@ -122,6 +124,8 @@ export default function TrainScreen() {
         setTrainingState(loadedTrainingState);
         setHealthReadinessModifier(loadedReadinessModifier);
         setHealthReadinessReasons(loadedReadinessReasons);
+        const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
+        setWeekDays((await getWeekActivity(trainingDays)).days);
         setLoaded(true);
       })();
     }, [])
@@ -260,8 +264,9 @@ export default function TrainScreen() {
       >
         <Text style={styles.screenTitle} maxFontSizeMultiplier={1.3}>Train</Text>
 
+        {/* No separate TODAY kicker — the card already carries its own, and
+            the two stacked read as a duplicated label. */}
         <View style={styles.section}>
-          <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TODAY</Text>
           <TodaysTrainingCard
             isRestDay={isRestDay}
             todaySession={todaySession}
@@ -319,10 +324,19 @@ export default function TrainScreen() {
                 // comment for why these must differ.
                 const rowExerciseCount = isToday ? preview.exerciseCount : baselinePreview.exerciseCount;
                 const rowDurationMin = isToday ? preview.durationMin : baselinePreview.durationMin;
+                // Days already behind us this week show what happened, not
+                // an estimate for a session that can no longer occur.
+                const weekDay = weekDays?.find((d) => d.weekday === day);
+                const isPast = !!weekDay && !weekDay.isFuture && !weekDay.isToday;
+                const pastDone = isPast && weekDay?.completed === true;
                 return (
                   <View
                     key={day}
-                    style={[styles.planRow, index < orderedScheduledDays.length - 1 && styles.rowDivider]}
+                    style={[
+                      styles.planRow,
+                      index < orderedScheduledDays.length - 1 && styles.rowDivider,
+                      isPast && !pastDone && styles.planRowPast,
+                    ]}
                   >
                     <View>
                       <Text style={[styles.planRowDay, isToday && styles.planRowDayToday]} maxFontSizeMultiplier={1.2}>
@@ -331,9 +345,18 @@ export default function TrainScreen() {
                       </Text>
                       <Text style={styles.planRowLabel} maxFontSizeMultiplier={1.3}>{sessionLabel}</Text>
                     </View>
-                    <Text style={styles.planRowMeta} maxFontSizeMultiplier={1.3}>
-                      Est. {rowExerciseCount} · {rowDurationMin} min
-                    </Text>
+                    {pastDone ? (
+                      <View style={styles.planRowDone}>
+                        <SymbolView name="checkmark.circle.fill" size={13} tintColor="#5FBE84" />
+                        <Text style={styles.planRowMeta} maxFontSizeMultiplier={1.3}>Done</Text>
+                      </View>
+                    ) : isPast ? (
+                      <Text style={styles.planRowMeta} maxFontSizeMultiplier={1.3}>—</Text>
+                    ) : (
+                      <Text style={styles.planRowMeta} maxFontSizeMultiplier={1.3}>
+                        Est. {rowExerciseCount} exercises · {rowDurationMin} min
+                      </Text>
+                    )}
                   </View>
                 );
               })}
@@ -490,6 +513,16 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       color: colors.textSecondary,
       fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
+    },
+    planRowDone: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+    },
+    // A scheduled day that's already passed without a logged session —
+    // quieted, not flagged: nothing to act on, no ledger to keep.
+    planRowPast: {
+      opacity: 0.5,
     },
   });
 }
