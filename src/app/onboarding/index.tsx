@@ -148,6 +148,8 @@ export default function OnboardingNameScreen() {
 
         <Pressable
           style={styles.primaryButtonHit}
+          // 38pt tall by design; the slop brings the tap target past 44pt.
+          hitSlop={{ top: 6, bottom: 6 }}
           onPress={handleContinue}
           disabled={isNameEmpty}
           onHoverIn={continueHover.onHoverIn}

@@ -1583,6 +1583,8 @@ export default function EnergyCheckInScreen() {
             <ReanimatedAnimated.View layout={sectionLayout}>
             <Pressable
               style={styles.checkinPrimaryButtonHit}
+              // 38pt tall by design; the slop brings the tap target past 44pt.
+              hitSlop={{ top: 6, bottom: 6 }}
               onPress={handleStartSession}
               disabled={energy === null || isStartingSession}
               onHoverIn={ctaHover.onHoverIn}
@@ -1920,6 +1922,8 @@ export default function EnergyCheckInScreen() {
 
             <Pressable
               style={styles.checkinPrimaryButtonHit}
+              // 38pt tall by design; the slop brings the tap target past 44pt.
+              hitSlop={{ top: 6, bottom: 6 }}
               onPress={() => (isLastExercise ? handleFinishSession() : handleNextExercise())}
               disabled={!currentExerciseTimerDone || isFinishingSession}
               onHoverIn={finishHover.onHoverIn}

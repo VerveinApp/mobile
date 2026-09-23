@@ -165,6 +165,8 @@ export default function OnboardingCommitmentScreen() {
 
         <Pressable
           style={styles.primaryButtonHit}
+          // 38pt tall by design; the slop brings the tap target past 44pt.
+          hitSlop={{ top: 6, bottom: 6 }}
           onPress={handleBuildPlan}
           disabled={isUnselected}
           onHoverIn={continueHover.onHoverIn}
