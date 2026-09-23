@@ -22,6 +22,7 @@ import {
 } from '@/lib/health-kit';
 import { getImprovedExercises } from '@/lib/exercise-performance';
 import { getShareableWeeklyRecapText, getWeeklyRecap } from '@/lib/momentum';
+import { getUnitSystem } from '@/lib/unit-preference';
 import { hasCompletedOnboarding, loadOnboardingDraft, ONBOARDING_STEP_ROUTES } from '@/lib/onboarding-draft';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
@@ -363,6 +364,7 @@ export default function SummaryScreen() {
     const recentImprovement = improved
       .filter((e) => Date.parse(`${e.performance.date}T00:00:00`) >= cutoffMs)
       .sort((a, b) => b.performance.date.localeCompare(a.performance.date))[0];
+    const unit = await getUnitSystem();
     const message = getShareableWeeklyRecapText(
       weekActivity,
       recentImprovement
@@ -370,7 +372,8 @@ export default function SummaryScreen() {
             exerciseName: recentImprovement.exerciseName,
             estimatedOneRepMaxKg: recentImprovement.performance.estimatedOneRepMax,
           }
-        : null
+        : null,
+      unit
     );
     if (!message) return;
     try {

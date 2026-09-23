@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { EnergyScore } from '@/components/home/energy-gauge';
 import { localDateStr } from '@/lib/local-date';
+import type { UnitSystem } from '@/lib/unit-preference';
 import type { BodyArea } from '@/lib/plan-preview';
 
 const KEY = 'vervein.todaySession.v1';
@@ -62,6 +63,10 @@ export type TodaySession = {
    * here too. Keyed by exercise index, same as check-in.tsx's own
    * loggedWeightsKg state this mirrors. */
   loggedWeightsKg?: Record<number, string>;
+  /** Which unit the raw strings in loggedWeightsKg were typed in — despite
+   * the (persisted, so kept) field name, those are raw text in the user's
+   * display unit, not kg. Absent on sessions saved before units existed. */
+  loggedWeightsUnit?: UnitSystem;
 };
 
 function today() {
@@ -90,7 +95,8 @@ export async function saveTodaySession(
   finisherAccepted?: boolean,
   preferredBodyArea?: BodyArea,
   equipmentOverride?: string,
-  loggedWeightsKg?: Record<number, string>
+  loggedWeightsKg?: Record<number, string>,
+  loggedWeightsUnit?: UnitSystem
 ) {
   try {
     const session: TodaySession = {
@@ -103,6 +109,7 @@ export async function saveTodaySession(
       preferredBodyArea,
       equipmentOverride,
       loggedWeightsKg,
+      loggedWeightsUnit,
     };
     await AsyncStorage.setItem(KEY, JSON.stringify(session));
   } catch {

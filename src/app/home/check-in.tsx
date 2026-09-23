@@ -49,7 +49,7 @@ import { recordCheckInAndShouldShowPaywall } from '@/lib/paywall-trigger';
 import { getLoadImprovementNote, getPacingTrendNote, getPostSessionNote } from '@/lib/momentum';
 import { getLastPerformance, recordPerformanceBatch, type ExercisePerformance } from '@/lib/exercise-performance';
 import { schedulePrCelebration } from '@/lib/pr-celebration';
-import { calculatePlates, formatKg, formatPlateBreakdown } from '@/lib/plate-calculator';
+import { PLATE_SETUP_BY_UNIT, calculatePlates, formatPlateBreakdown } from '@/lib/plate-calculator';
 import { registerForRemotePushNotifications } from '@/lib/push-notifications';
 import { recordSessionForMilestones } from '@/lib/session-milestones';
 import {
@@ -80,7 +80,15 @@ import {
 import { SYMPTOM_TAG_LABELS, SYMPTOM_TAGS, type SymptomTag } from '@/lib/symptom-tags';
 import { TIME_AVAILABLE_LABELS, TIME_AVAILABLE_OPTIONS } from '@/lib/time-available';
 import { getTodaySession, saveTodaySession } from '@/lib/today-session';
+import { getUnitSystem, type UnitSystem } from '@/lib/unit-preference';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
+import {
+  displayWeightToKg,
+  formatWeight,
+  kgToDisplayWeight,
+  parseDecimalInput,
+  weightUnitLabel,
+} from '@/lib/weight-units';
 import {
   getBodyAreaBreakdown,
   getCompletionStatus,
@@ -318,6 +326,11 @@ export default function EnergyCheckInScreen() {
   // completedExercises already use), raw string from the input so an
   // in-progress "12" vs "120" keystroke never gets coerced mid-typing.
   const [loggedWeightsKg, setLoggedWeightsKg] = useState<Record<number, string>>({});
+  // The unit the weight field is typed in — the user's own unit preference,
+  // or, when resuming a session, whichever unit its already-typed weights
+  // were entered in (so a raw "135" keeps meaning what it meant). Storage
+  // stays kg regardless; see weight-units.ts.
+  const [weightUnit, setWeightUnit] = useState<UnitSystem>('imperial');
   // BUG FIX (found in a later full-app audit): loggedWeightsKg used to live
   // only in this state, with nothing persisting it until Finish — an app
   // kill mid-session (OS memory pressure, an incoming call, a force-quit)
@@ -340,7 +353,8 @@ export default function EnergyCheckInScreen() {
         finisherAccepted,
         preferredBodyArea ?? undefined,
         equipmentOverride ?? undefined,
-        loggedWeightsKg
+        loggedWeightsKg,
+        weightUnit
       );
     }, 600);
     return () => clearTimeout(timeout);
@@ -503,6 +517,7 @@ export default function EnergyCheckInScreen() {
         loadedTrainingState,
         loadedReadinessModifier,
         loadedReadinessReasons,
+        loadedUnit,
       ] = await Promise.all([
         getProfile(),
         getLastCheckIn(),
@@ -511,8 +526,10 @@ export default function EnergyCheckInScreen() {
         getTrainingState(),
         getHealthReadinessModifier(),
         getHealthReadinessReasons(),
+        getUnitSystem(),
       ]);
       setProfile(loadedProfile);
+      setWeightUnit(loadedTodaySession?.loggedWeightsUnit ?? loadedUnit);
       setLastCheckIn(loadedLastCheckIn);
       setCalibration(loadedCalibration);
       setTrainingState(loadedTrainingState);
@@ -1177,7 +1194,8 @@ export default function EnergyCheckInScreen() {
       .map(([indexStr, weightText]) => {
         const index = Number(indexStr);
         const exercise = sessionExercises[index];
-        const weightKg = Number(weightText);
+        const typed = parseDecimalInput(weightText);
+        const weightKg = typed !== null ? displayWeightToKg(typed, weightUnit) : NaN;
         const reps = exercise?.reps;
         if (!exercise || !(weightKg > 0) || typeof reps !== 'number') return null;
         return { exerciseName: exercise.name, weightKg, reps };
@@ -1659,7 +1677,7 @@ export default function EnergyCheckInScreen() {
                             happened last time. */}
                         {lastPerformanceByName[currentExercise.name] ? (
                           <Text style={styles.lastPerformanceHint} maxFontSizeMultiplier={1.2}>
-                            {`Last time: ${formatKg(lastPerformanceByName[currentExercise.name]!.weightKg)}kg × ${
+                            {`Last time: ${formatWeight(lastPerformanceByName[currentExercise.name]!.weightKg, weightUnit)} × ${
                               lastPerformanceByName[currentExercise.name]!.reps
                             }`}
                           </Text>
@@ -1674,7 +1692,7 @@ export default function EnergyCheckInScreen() {
                             onChangeText={(text) =>
                               setLoggedWeightsKg((prev) => ({ ...prev, [currentExerciseIndex]: text }))
                             }
-                            placeholder="kg"
+                            placeholder={weightUnitLabel(weightUnit)}
                             placeholderTextColor={colors.textTertiary}
                             keyboardType="decimal-pad"
                             maxLength={5}
@@ -1703,11 +1721,16 @@ export default function EnergyCheckInScreen() {
                                 // last time's weight only when the field is
                                 // still empty, so this always reflects intent
                                 // rather than a stale number once someone
-                                // starts typing a different target.
-                                Number(loggedWeightsKg[currentExerciseIndex]) > 0
-                                  ? Number(loggedWeightsKg[currentExerciseIndex])
-                                  : (lastPerformanceByName[currentExercise.name]?.weightKg ?? 0)
-                              )
+                                // starts typing a different target. Both are
+                                // in the display unit, broken down on that
+                                // unit's own bar and plates.
+                                (parseDecimalInput(loggedWeightsKg[currentExerciseIndex] ?? '') ?? 0) > 0
+                                  ? (parseDecimalInput(loggedWeightsKg[currentExerciseIndex] ?? '') as number)
+                                  : kgToDisplayWeight(lastPerformanceByName[currentExercise.name]?.weightKg ?? 0, weightUnit),
+                                PLATE_SETUP_BY_UNIT[weightUnit].barbell,
+                                PLATE_SETUP_BY_UNIT[weightUnit].plates
+                              ),
+                              PLATE_SETUP_BY_UNIT[weightUnit].label
                             )}
                           </Text>
                         ) : null}

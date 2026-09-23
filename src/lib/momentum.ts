@@ -2,6 +2,8 @@ import type { EnergyScore } from '@/components/home/energy-gauge';
 import { localDateStr } from '@/lib/local-date';
 import type { SessionHistoryEntry } from '@/lib/session-history';
 import type { RecordPerformanceResult } from '@/lib/exercise-performance';
+import type { UnitSystem } from '@/lib/unit-preference';
+import { formatWeight } from '@/lib/weight-units';
 
 /**
  * The vault's actual prescribed pattern, not a streak counter — see the
@@ -111,12 +113,13 @@ export function getLoadImprovementNote(
  */
 export function getShareableWeeklyRecapText(
   weekActivity: { completedCount: number; scheduledCount: number },
-  recentStrengthGain?: { exerciseName: string; estimatedOneRepMaxKg: number } | null
+  recentStrengthGain?: { exerciseName: string; estimatedOneRepMaxKg: number } | null,
+  unit: UnitSystem = 'metric'
 ): string | null {
   const recap = getWeeklyRecap(weekActivity);
   if (!recap) return null;
   const highlight = recentStrengthGain
-    ? ` Also hit a new estimated 1RM on ${recentStrengthGain.exerciseName}: ${Math.round(recentStrengthGain.estimatedOneRepMaxKg)} kg.`
+    ? ` Also hit a new estimated 1RM on ${recentStrengthGain.exerciseName}: ${formatWeight(recentStrengthGain.estimatedOneRepMaxKg, unit)}.`
     : '';
   return `${recap} on VerveIn.${highlight}`;
 }

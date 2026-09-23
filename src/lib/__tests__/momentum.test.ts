@@ -121,7 +121,14 @@ describe('getShareableWeeklyRecapText', () => {
       { exerciseName: 'Deadlift', estimatedOneRepMaxKg: 123.4 }
     );
     expect(withGain).toContain('Deadlift');
-    expect(withGain).toContain('123 kg');
+    expect(withGain).toContain('123.4 kg');
+
+    const inPounds = getShareableWeeklyRecapText(
+      { completedCount: 1, scheduledCount: 5 },
+      { exerciseName: 'Deadlift', estimatedOneRepMaxKg: 102.0582 },
+      'imperial'
+    );
+    expect(inPounds).toContain('225 lb');
 
     const withoutGain = getShareableWeeklyRecapText({ completedCount: 1, scheduledCount: 5 }, null);
     expect(withoutGain).not.toContain('1RM');

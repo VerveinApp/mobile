@@ -1,8 +1,22 @@
+import type { UnitSystem } from '@/lib/unit-preference';
+
 // Standard Olympic bar (kg) and the plate sizes actually found on a
-// kg-loaded rack, largest first — matches this app's own weight input,
-// which is always kg (see check-in.tsx's "Weight used (optional)" field).
+// kg-loaded rack, largest first.
 const BARBELL_KG = 20;
 const AVAILABLE_PLATES_KG = [25, 20, 15, 10, 5, 2.5, 1.25];
+
+/**
+ * The bar and plates someone actually has in front of them, by unit system —
+ * a US gym is a 45 lb bar with 45/35/25/10/5/2.5 lb plates, not a 20 kg bar
+ * with kg plates, so breaking a pound target into kg plates (the old
+ * behavior, when check-in's weight field was kg-only) described a rack that
+ * doesn't exist there. All math below is unit-agnostic; only this table
+ * and the label differ.
+ */
+export const PLATE_SETUP_BY_UNIT: Record<UnitSystem, { barbell: number; plates: readonly number[]; label: 'kg' | 'lb' }> = {
+  metric: { barbell: BARBELL_KG, plates: AVAILABLE_PLATES_KG, label: 'kg' },
+  imperial: { barbell: 45, plates: [45, 35, 25, 10, 5, 2.5], label: 'lb' },
+};
 
 // A real physical constraint, not an arbitrary weight ceiling: a standard
 // Olympic bar's loadable sleeve is roughly 415mm, which fits about this many
@@ -21,12 +35,13 @@ export type PlateBreakdown = {
   /** Plates for ONE side of the bar, largest first — double this (plus the
    * bar) to get the total loaded weight. */
   platesPerSide: number[];
-  /** The actual loaded weight this breakdown produces — may differ from the
+  /** The actual loaded weight this breakdown produces, in the same unit as
+   * the target — may differ from the
    * requested target when it can't be hit exactly with real plate
    * increments (rounded down, never up, so this never overstates the load
    * someone's about to lift), or when the target exceeds what a standard
    * bar can realistically hold (see exceedsBarCapacity). */
-  actualWeightKg: number;
+  actualWeight: number;
   /** True when MAX_PLATES_PER_SIDE was hit before actually reaching the
    * target — the breakdown is real and loadable, just not the full amount
    * asked for, since nothing past this is a realistic single-bar setup. */
@@ -39,18 +54,22 @@ export type PlateBreakdown = {
  * target below the bar's own weight has nothing to load (empty bar is the
  * honest answer, not an error).
  */
-export function calculatePlates(targetWeightKg: number, barbellKg: number = BARBELL_KG): PlateBreakdown {
-  if (targetWeightKg <= barbellKg) {
-    return { platesPerSide: [], actualWeightKg: barbellKg, exceedsBarCapacity: false };
+export function calculatePlates(
+  targetWeight: number,
+  barbell: number = BARBELL_KG,
+  plates: readonly number[] = AVAILABLE_PLATES_KG
+): PlateBreakdown {
+  if (targetWeight <= barbell) {
+    return { platesPerSide: [], actualWeight: barbell, exceedsBarCapacity: false };
   }
-  let perSideRemaining = (targetWeightKg - barbellKg) / 2;
+  let perSideRemaining = (targetWeight - barbell) / 2;
   const platesPerSide: number[] = [];
   // Distinct from the pre-existing granularity round-down below (e.g. a
   // 21kg target rounds to a 20kg empty bar since 0.5kg/side isn't a real
   // plate size) — that's "not exactly hittable," this is "hit the cap
   // before even trying the smaller plates that would close the gap."
   let hitCapacityCap = false;
-  for (const plate of AVAILABLE_PLATES_KG) {
+  for (const plate of plates) {
     while (perSideRemaining >= plate) {
       if (platesPerSide.length >= MAX_PLATES_PER_SIDE) {
         hitCapacityCap = true;
@@ -61,8 +80,8 @@ export function calculatePlates(targetWeightKg: number, barbellKg: number = BARB
     }
     if (hitCapacityCap) break;
   }
-  const actualWeightKg = barbellKg + platesPerSide.reduce((sum, p) => sum + p, 0) * 2;
-  return { platesPerSide, actualWeightKg, exceedsBarCapacity: hitCapacityCap };
+  const actualWeight = barbell + platesPerSide.reduce((sum, p) => sum + p, 0) * 2;
+  return { platesPerSide, actualWeight, exceedsBarCapacity: hitCapacityCap };
 }
 
 /** Shared by formatPlateBreakdown below and check-in.tsx's own "Last time"
@@ -74,8 +93,10 @@ export function formatKg(kg: number): string {
 /** "25 + 5 + 2.5 per side" / "Empty bar" — the one-line summary check-in.tsx
  * actually renders. Separate from calculatePlates itself so the pure
  * breakdown stays trivially testable without string formatting noise. */
-export function formatPlateBreakdown(breakdown: PlateBreakdown): string {
+export function formatPlateBreakdown(breakdown: PlateBreakdown, unitLabel: 'kg' | 'lb' = 'kg'): string {
   if (breakdown.platesPerSide.length === 0) return 'Empty bar';
   const base = breakdown.platesPerSide.map(formatKg).join(' + ') + ' per side';
-  return breakdown.exceedsBarCapacity ? `${base} (max a standard bar holds — ${formatKg(breakdown.actualWeightKg)}kg loaded)` : base;
+  return breakdown.exceedsBarCapacity
+    ? `${base} (max a standard bar holds — ${formatKg(breakdown.actualWeight)} ${unitLabel} loaded)`
+    : base;
 }

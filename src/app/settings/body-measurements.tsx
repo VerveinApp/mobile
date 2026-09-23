@@ -20,6 +20,7 @@ import { localDateStr } from '@/lib/local-date';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { getUnitSystem, type UnitSystem } from '@/lib/unit-preference';
+import { parseDecimalInput } from '@/lib/weight-units';
 import { getProfile } from '@/lib/user-profile';
 import { HealthConsentGate } from '@/components/settings/health-consent-gate';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
@@ -46,8 +47,10 @@ function cmToDisplay(cm: number, unit: UnitSystem): string {
   return unit === 'metric' ? String(Math.round(cm * 10) / 10) : String(Math.round((cm / 2.54) * 10) / 10);
 }
 function displayToCm(value: string, unit: UnitSystem): number | undefined {
-  const n = Number(value);
-  if (!value.trim() || Number.isNaN(n)) return undefined;
+  // parseDecimalInput, not Number(): a comma-decimal keypad ("72,5") used to
+  // parse as NaN and the measurement was silently dropped.
+  const n = parseDecimalInput(value);
+  if (n === null) return undefined;
   return unit === 'metric' ? n : n * 2.54;
 }
 

@@ -20,7 +20,9 @@ import { getRecentWeeks, type WeekDay } from '@/lib/session-history';
 import { useAppTheme } from '@/lib/theme-context';
 import { getTrainingState } from '@/lib/training-state-loader';
 import type { TrainingState } from '@/lib/engine/training-state';
+import { getUnitSystem, type UnitSystem } from '@/lib/unit-preference';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
+import { formatWeight } from '@/lib/weight-units';
 import {
   getBodyAreaBreakdown,
   getLoggedSessionCount,
@@ -132,6 +134,7 @@ export default function ProgressScreen() {
   const [exerciseHistories, setExerciseHistories] = useState<Record<string, ExercisePerformance[]>>({});
   const [strengthChartWidth, setStrengthChartWidth] = useState(0);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [unit, setUnit] = useState<UnitSystem>('imperial');
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [gridRange, setGridRange] = useState<'week' | 'month'>('month');
@@ -148,6 +151,7 @@ export default function ProgressScreen() {
       (async () => {
         const loadedProfile = await getProfile();
         setProfile(loadedProfile);
+        setUnit(await getUnitSystem());
         const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
         setWeeks(await getRecentWeeks(trainingDays, weekCount));
         setBodyAreaBreakdown(await getBodyAreaBreakdown(balanceSinceDays));
@@ -714,7 +718,7 @@ export default function ProgressScreen() {
                           <View style={styles.strengthProgressValue}>
                             <SymbolView name="arrow.up.right" size={12} tintColor="#5FBE84" />
                             <Text style={styles.debtValue} maxFontSizeMultiplier={1.2}>
-                              {Math.round(entry.performance.estimatedOneRepMax)} kg est. 1RM
+                              {formatWeight(entry.performance.estimatedOneRepMax, unit)} est. 1RM
                             </Text>
                           </View>
                           {weightKg > 0 ? (
