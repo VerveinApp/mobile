@@ -11,14 +11,33 @@ import NetInfo from '@react-native-community/netinfo';
  * lands, matching this app's own "never a false claim, but don't invent
  * alarm from a temporarily-unknown state either" bias.
  */
+// A dropped connection has to last this long before the app says so. On a
+// weak signal (a gym, an elevator) NetInfo flips offline/online every few
+// seconds, and the banner used to flicker in and out with every blip.
+// Coming back online is reported immediately.
+const OFFLINE_REPORT_DELAY_MS = 2000;
+
 export function useIsOffline(): boolean {
   const [isOffline, setIsOffline] = useState(false);
 
   useEffect(() => {
+    let pending: ReturnType<typeof setTimeout> | null = null;
     const unsubscribe = NetInfo.addEventListener((state) => {
-      setIsOffline(state.isConnected === false || state.isInternetReachable === false);
+      const offline = state.isConnected === false || state.isInternetReachable === false;
+      if (pending) {
+        clearTimeout(pending);
+        pending = null;
+      }
+      if (offline) {
+        pending = setTimeout(() => setIsOffline(true), OFFLINE_REPORT_DELAY_MS);
+      } else {
+        setIsOffline(false);
+      }
     });
-    return unsubscribe;
+    return () => {
+      if (pending) clearTimeout(pending);
+      unsubscribe();
+    };
   }, []);
 
   return isOffline;

@@ -41,6 +41,7 @@ export const ANDROID_ICON_MAP: Partial<Record<SFSymbol, AndroidSymbol>> = {
   'checkmark.circle.fill': 'check_circle',
   'chevron.left': 'chevron_left',
   'chevron.right': 'chevron_right',
+  'wifi.slash': 'wifi_off',
   'chevron.up': 'expand_less',
   'chevron.down': 'expand_more',
   'circle.dashed': 'radio_button_unchecked',
