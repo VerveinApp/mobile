@@ -120,3 +120,57 @@ export async function clearProgressPhotos() {
   }
   await clearStoredValue(KEY);
 }
+
+// Account switching (see account-switch.ts): when a different account signs
+// in on this device, the previous account's photos are set aside under that
+// account's id — never shown to the new account, never deleted — and moved
+// back if that account signs in again. A rename, not a copy, so it's instant
+// and never doubles the storage these full-resolution files take up.
+function stashedPhotosDirectory(ownerId: string): Directory {
+  return new Directory(Paths.document, `${DIR_NAME}-account-${ownerId}`);
+}
+
+function stashedIndexKey(ownerId: string): string {
+  return `vervein.progressPhotosStash.${ownerId}.v1`;
+}
+
+export async function stashProgressPhotos(ownerId: string): Promise<void> {
+  // Raw Directory, not photosDirectory() — that helper creates the folder
+  // when missing, and move() below needs its destination NOT to exist (it
+  // follows Unix semantics: moving onto an existing folder nests inside it).
+  const current = new Directory(Paths.document, DIR_NAME);
+  const stash = stashedPhotosDirectory(ownerId);
+  try {
+    if (stash.exists) stash.delete();
+    if (current.exists) await current.move(stash);
+  } catch {
+    // Worst case the files stay where they are; clearAllLocalData removes them.
+  }
+  try {
+    const index = await AsyncStorage.getItem(KEY);
+    if (index) await AsyncStorage.setItem(stashedIndexKey(ownerId), index);
+    await AsyncStorage.removeItem(KEY);
+  } catch {
+    // Best-effort, same contract as every other store here.
+  }
+}
+
+export async function restoreStashedProgressPhotos(ownerId: string): Promise<void> {
+  const current = new Directory(Paths.document, DIR_NAME);
+  const stash = stashedPhotosDirectory(ownerId);
+  try {
+    if (stash.exists) {
+      if (current.exists) current.delete();
+      await stash.move(current);
+    }
+  } catch {
+    // Leave the stash in place rather than lose it.
+  }
+  try {
+    const index = await AsyncStorage.getItem(stashedIndexKey(ownerId));
+    if (index) await AsyncStorage.setItem(KEY, index);
+    await AsyncStorage.removeItem(stashedIndexKey(ownerId));
+  } catch {
+    // Best-effort.
+  }
+}

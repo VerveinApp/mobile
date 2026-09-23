@@ -17,6 +17,7 @@ import ReanimatedAnimated, { FadeIn } from 'react-native-reanimated';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight, hapticSuccess } from '@/lib/haptics';
 import { MOTION_DURATION } from '@/lib/motion';
+import { prepareLocalDataForAccount } from '@/lib/account-switch';
 import { hasCompletedOnboarding, markOnboardingComplete } from '@/lib/onboarding-draft';
 import { goBack } from '@/lib/onboarding-nav';
 import { pullProfileFromRemote } from '@/lib/profile-sync';
@@ -154,13 +155,18 @@ export default function VerifyEmailScreen() {
     // The real check — Supabase rejects a wrong or expired code here.
     // Previously this accepted any 4 digits typed in; that's the whole gap
     // this wiring closes.
-    const { error } = await supabase.auth.verifyOtp({ email: params.email, token: code, type: 'email' });
-    setVerifying(false);
+    const { data, error } = await supabase.auth.verifyOtp({ email: params.email, token: code, type: 'email' });
     if (error) {
+      setVerifying(false);
       setCodeError(error.message);
       hapticError();
       return;
     }
+    // Before anything below reads the local profile or onboarding state: if
+    // this device's data belongs to a DIFFERENT account, it's set aside for
+    // that account and this one gets its own (see account-switch.ts).
+    if (data.user) await prepareLocalDataForAccount(data.user.id);
+    setVerifying(false);
     hapticSuccess();
     // This screen has three real entry points now, not one: mid-onboarding
     // (real profile params in the route, onboarding not complete yet),

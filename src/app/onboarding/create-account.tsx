@@ -19,7 +19,8 @@ import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight, hapticSuccess } from '@/lib/haptics';
 import { MOTION_DURATION } from '@/lib/motion';
-import { markOnboardingComplete } from '@/lib/onboarding-draft';
+import { prepareLocalDataForAccount } from '@/lib/account-switch';
+import { hasCompletedOnboarding, markOnboardingComplete } from '@/lib/onboarding-draft';
 import { goBack } from '@/lib/onboarding-nav';
 import { pullProfileFromRemote } from '@/lib/profile-sync';
 import { signInWithApple, signInWithGoogle } from '@/lib/social-auth';
@@ -246,9 +247,26 @@ export default function CreateAccountScreen() {
   // straight through when that chain reaches here again at the end.
   const handleSocialAuthSuccess = async (email: string) => {
     hapticSuccess();
+    // Same account-ownership step as auth/verify.tsx's email path — must run
+    // before anything reads or writes the local profile (see
+    // account-switch.ts for the cross-account leak this closes).
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (session) await prepareLocalDataForAccount(session.user.id);
     if (onboardingParams.name) {
       await finishOnboarding(onboardingParams, email);
       router.replace('/onboarding/all-set' as never);
+      return;
+    }
+    // Same as verify.tsx's own first branch: this account's data is already
+    // on this device (a plain sign-out and back in, or set-aside data that
+    // was just restored) — straight back in, no network round-trip needed.
+    // Previously this path always went to the remote profile first, so an
+    // offline sign-in bounced a fully set-up account into the questionnaire.
+    if (await hasCompletedOnboarding()) {
+      router.dismissAll();
+      router.replace('/(tabs)' as never);
       return;
     }
     const remoteProfile = await pullProfileFromRemote();

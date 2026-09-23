@@ -70,3 +70,29 @@ export async function registerForRemotePushNotifications(): Promise<void> {
     // every other optional integration in this app already follows.
   }
 }
+
+/**
+ * Removes THIS device's token for the signed-in account — call before
+ * signing out. Without it a signed-out phone kept receiving the previous
+ * account's pushes (re-engagement nudges, referral notices), including after
+ * someone else signed in on it. Same best-effort contract as registration;
+ * the server-side cascade already covers Delete Account.
+ */
+export async function unregisterPushTokenForThisDevice(): Promise<void> {
+  const Notifications = getModule();
+  if (!Notifications || !Constants.isDevice) return;
+  try {
+    const { supabase } = await import('@/lib/supabase');
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) return;
+    if ((await getNotificationPermissionState()) !== 'granted') return;
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+    if (!projectId) return;
+    const { data: expoPushToken } = await Notifications.getExpoPushTokenAsync({ projectId });
+    await supabase.from('push_tokens').delete().eq('user_id', session.user.id).eq('expo_push_token', expoPushToken);
+  } catch {
+    // Worst case the server prunes it later (DeviceNotRegistered) — never a crash.
+  }
+}

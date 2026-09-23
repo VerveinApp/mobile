@@ -38,7 +38,8 @@ import {
 } from '@/lib/health-kit';
 import { CONTACT_EMAIL } from '@/lib/legal/terms-content';
 import { localDateStr } from '@/lib/local-date';
-import { registerForRemotePushNotifications } from '@/lib/push-notifications';
+import { registerForRemotePushNotifications, unregisterPushTokenForThisDevice } from '@/lib/push-notifications';
+import { forgetLocalDataOwner } from '@/lib/account-switch';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import {
   disableSessionReminders,
@@ -399,6 +400,8 @@ export default function SettingsScreen() {
   // overwriting the real profile with the empty params this path carries.
   const handleSignOut = async () => {
     hapticImpactLight();
+    // While still signed in — the delete is scoped to this account's own row.
+    await unregisterPushTokenForThisDevice();
     await supabase.auth.signOut();
     setAccountEmail(null);
     // dismissAll() first, not just replace() — this whole app lives in one
@@ -569,6 +572,7 @@ export default function SettingsScreen() {
       return;
     }
     await clearAllLocalData();
+    await forgetLocalDataOwner();
     await supabase.auth.signOut();
     setShowDeleteAccountModal(false);
     setDeletingAccount(false);

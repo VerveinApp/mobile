@@ -157,6 +157,21 @@ export async function backdateAccountStartDateForTesting(date: string): Promise<
   }
 }
 
+/**
+ * Puts back a completed onboarding exactly as it was, original start date
+ * included — account-switch.ts uses this when an account's set-aside data
+ * returns to this device, so its week history doesn't restart "today" the
+ * way a fresh markOnboardingComplete() would.
+ */
+export async function restoreOnboardingCompleted(startDate: string | null) {
+  try {
+    await AsyncStorage.setItem(COMPLETED_KEY, 'true');
+    if (startDate) await AsyncStorage.setItem(START_DATE_KEY, startDate);
+  } catch {
+    // Worst case the start date backfills to today — see getAccountStartDate.
+  }
+}
+
 /** Un-does markOnboardingComplete — used by Profile's "Reset & Restart" action. */
 export async function clearOnboardingCompleted() {
   try {
