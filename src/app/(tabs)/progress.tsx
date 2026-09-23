@@ -147,41 +147,50 @@ export default function ProgressScreen() {
   const balanceSinceDays = balanceRange === 'recent' ? RECENT_BALANCE_WINDOW_DAYS : undefined;
   const [consistencyMeterWidth, setConsistencyMeterWidth] = useState(0);
 
+  // BUG FIX: this used to await each store one after another, setting state
+  // after every step — seven sequential reads and as many re-renders of
+  // this whole screen per focus, with the calendar, radar, load and strength
+  // sections each filling in separately (and all of it again on every
+  // Week/Month or 7 Days/All toggle). One parallel batch, applied together,
+  // means one render with everything in place.
+  const loadProgress = useCallback(async () => {
+    const loadedProfile = await getProfile();
+    const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
+    const [loadedUnit, loadedWeeks, areas, patterns, sessionCount, state, improved] = await Promise.all([
+      getUnitSystem(),
+      getRecentWeeks(trainingDays, weekCount),
+      getBodyAreaBreakdown(balanceSinceDays),
+      getMovementPatternBreakdown(balanceSinceDays),
+      getLoggedSessionCount(balanceSinceDays),
+      getTrainingState(),
+      getImprovedExercises(),
+    ]);
+    const histories = await loadExerciseHistories(improved);
+    setProfile(loadedProfile);
+    setUnit(loadedUnit);
+    setWeeks(loadedWeeks);
+    setBodyAreaBreakdown(areas);
+    setMovementPatternBreakdown(patterns);
+    setLoggedSessionCount(sessionCount);
+    setTrainingState(state);
+    setImprovedExercises(improved);
+    setExerciseHistories(histories);
+  }, [weekCount, balanceSinceDays]);
+
   useFocusEffect(
     useCallback(() => {
       (async () => {
-        const loadedProfile = await getProfile();
-        setProfile(loadedProfile);
-        setUnit(await getUnitSystem());
-        const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
-        setWeeks(await getRecentWeeks(trainingDays, weekCount));
-        setBodyAreaBreakdown(await getBodyAreaBreakdown(balanceSinceDays));
-        setMovementPatternBreakdown(await getMovementPatternBreakdown(balanceSinceDays));
-        setLoggedSessionCount(await getLoggedSessionCount(balanceSinceDays));
-        setTrainingState(await getTrainingState());
-        const improved = await getImprovedExercises();
-        setImprovedExercises(improved);
-        setExerciseHistories(await loadExerciseHistories(improved));
+        await loadProgress();
         setLoaded(true);
       })();
-    }, [weekCount, balanceSinceDays])
+    }, [loadProgress])
   );
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    const loadedProfile = await getProfile();
-    setProfile(loadedProfile);
-    const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
-    setWeeks(await getRecentWeeks(trainingDays, weekCount));
-    setBodyAreaBreakdown(await getBodyAreaBreakdown(balanceSinceDays));
-    setMovementPatternBreakdown(await getMovementPatternBreakdown(balanceSinceDays));
-    setLoggedSessionCount(await getLoggedSessionCount(balanceSinceDays));
-    setTrainingState(await getTrainingState());
-    const improved = await getImprovedExercises();
-    setImprovedExercises(improved);
-    setExerciseHistories(await loadExerciseHistories(improved));
+    await loadProgress();
     setRefreshing(false);
-  }, [weekCount, balanceSinceDays]);
+  }, [loadProgress]);
 
   if (!loaded) {
     return (
