@@ -99,6 +99,28 @@ export async function updateProfile(partial: UserProfile): Promise<UserProfile> 
 }
 
 /**
+ * Withdraws health-data consent: clears every health field consent covered
+ * — sex, height, weight, age, health conditions, movement restrictions —
+ * and the consent itself. Because saveProfile mirrors to the server, the
+ * synced copy is cleared too (those columns go back to null). The Privacy
+ * Policy promises consent can be withdrawn at any time; before this there
+ * was no way to do it short of deleting everything. On-device logs aren't
+ * touched — they never leave the device, and Delete My Data removes them.
+ */
+export async function withdrawHealthConsent(): Promise<UserProfile> {
+  return updateProfile({
+    healthConsent: 'false',
+    healthConsentedAt: undefined,
+    sex: undefined,
+    heightCm: undefined,
+    weightKg: undefined,
+    age: undefined,
+    conditions: undefined,
+    movementRestrictions: undefined,
+  });
+}
+
+/**
  * The one place healthConsent gets set — stamps healthConsentedAt with the
  * real moment consent was given whenever it's 'true'. Never call
  * saveProfile/updateProfile with a bare `healthConsent: 'true'` directly;

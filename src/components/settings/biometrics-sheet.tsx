@@ -6,7 +6,7 @@ import { SymbolView } from '@/components/ui/app-symbol';
 
 import { Type } from '@/constants/theme';
 import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
-import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
+import { hapticImpactLight, hapticSelect, hapticWarning } from '@/lib/haptics';
 import {
   HorizontalRuler,
   RULER_HEIGHT,
@@ -15,7 +15,7 @@ import {
 } from '@/components/onboarding/horizontal-ruler';
 import { useAppColors } from '@/lib/theme-context';
 import { getUnitSystem, setUnitSystem, type UnitSystem } from '@/lib/unit-preference';
-import { getProfile, updateProfile, withHealthConsent } from '@/lib/user-profile';
+import { getProfile, updateProfile, withHealthConsent, withdrawHealthConsent } from '@/lib/user-profile';
 
 type SexId = 'female' | 'male';
 
@@ -181,7 +181,10 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
 
   const handleSheetChange = useCallback(
     (index: number) => {
-      if (index >= 0) loadFromProfile();
+      if (index >= 0) {
+        setConfirmingWithdraw(false);
+        loadFromProfile();
+      }
     },
     [loadFromProfile]
   );
@@ -207,6 +210,21 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
     hapticSelect();
     setUnit(id);
     setUnitSystem(id);
+  };
+
+  const [confirmingWithdraw, setConfirmingWithdraw] = useState(false);
+  const handleWithdrawConsent = async () => {
+    if (!confirmingWithdraw) {
+      hapticWarning();
+      setConfirmingWithdraw(true);
+      return;
+    }
+    setSaving(true);
+    await withdrawHealthConsent();
+    setSaving(false);
+    setConfirmingWithdraw(false);
+    hapticImpactLight();
+    sheetRef.current?.dismiss();
   };
 
   const handleSave = async () => {
@@ -473,6 +491,32 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
             </Text>
           </View>
         </Pressable>
+
+        {/* Withdrawing consent — promised by the Privacy Policy, and until
+            now impossible short of deleting everything. Two taps, not a
+            modal-in-a-sheet: the first explains what happens, the second
+            does it. */}
+        {hadConsent ? (
+          <Pressable
+            style={({ pressed }) => [styles.withdrawHit, pressed && PRESSED_DIM]}
+            onPress={handleWithdrawConsent}
+            disabled={saving}
+            accessibilityRole="button"
+            accessibilityLabel={
+              confirmingWithdraw ? 'Confirm: stop sharing and clear health info' : 'Stop sharing health info'
+            }
+          >
+            <Text style={styles.withdrawText} maxFontSizeMultiplier={1.3}>
+              {confirmingWithdraw ? 'Tap again to stop sharing and clear it' : 'Stop sharing health info'}
+            </Text>
+            {confirmingWithdraw ? (
+              <Text style={styles.withdrawHint} maxFontSizeMultiplier={1.3}>
+                Clears your sex, height, weight, age, conditions, and movement restrictions here and from your
+                account. Logs on this device stay until you use Delete My Data.
+              </Text>
+            ) : null}
+          </Pressable>
+        ) : null}
       </BottomSheetScrollView>
     </BottomSheetModal>
   );
@@ -481,6 +525,24 @@ BiometricsSheet.displayName = 'BiometricsSheet';
 
 function createStyles(colors: ReturnType<typeof useAppColors>) {
   return StyleSheet.create({
+    withdrawHit: {
+      marginTop: 18,
+      alignItems: 'center',
+      paddingVertical: 8,
+    },
+    withdrawText: {
+      color: '#E5484D',
+      fontSize: Type.body,
+      fontFamily: 'Geist-Medium',
+    },
+    withdrawHint: {
+      marginTop: 6,
+      color: colors.textTertiary,
+      fontSize: Type.caption,
+      lineHeight: 15,
+      textAlign: 'center',
+      fontFamily: 'Geist-Regular',
+    },
     headerRow: {
       flexDirection: 'row',
       alignItems: 'center',
