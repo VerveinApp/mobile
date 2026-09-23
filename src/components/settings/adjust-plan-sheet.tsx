@@ -44,7 +44,7 @@ const DAY_OPTIONS: { id: string; label: string }[] = [
  * `BottomSheetModal` stays mounted across opens, so data is (re)loaded on
  * `onChange` rather than a route-focus effect.
  */
-export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRef) => {
+export const AdjustPlanSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void }>(({ onDismiss }, forwardedRef) => {
   const sheetRef = useRef<BottomSheetModal>(null);
   useImperativeHandle(forwardedRef, () => sheetRef.current as BottomSheetModal, []);
   const insets = useSafeAreaInsets();
@@ -127,6 +127,7 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
       ref={sheetRef}
       snapPoints={['90%']}
       onChange={handleSheetChange}
+      onDismiss={onDismiss}
       backdropComponent={renderBackdrop}
       backgroundStyle={Platform.OS === 'android' ? { backgroundColor: colors.background, borderTopLeftRadius: 28, borderTopRightRadius: 28 } : { backgroundColor: colors.background }}
       handleIndicatorStyle={{ backgroundColor: Platform.OS === 'android' ? 'rgba(95,190,132,0.5)' : colors.surfaceBorder, width: Platform.OS === 'android' ? 36 : undefined }}

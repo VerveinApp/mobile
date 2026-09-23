@@ -25,6 +25,7 @@ import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppTheme } from '@/lib/theme-context';
 import { usePremiumEntitlement } from '@/lib/purchases';
 import { getProfile, updateProfile, type UserProfile } from '@/lib/user-profile';
+import { AdjustPlanSheet } from '@/components/settings/adjust-plan-sheet';
 import { GoalsSheet } from '@/components/settings/goals-sheet';
 import { PremiumGate } from '@/components/premium-gate';
 import { ProgressRing } from '@/components/ui/progress-ring';
@@ -76,6 +77,7 @@ export default function ProfileScreen() {
   // targetWeightKg's own progress already follows.
   const [currentLiftBestKg, setCurrentLiftBestKg] = useState<number | null>(null);
   const goalsSheetRef = useRef<BottomSheetModal>(null);
+  const adjustPlanSheetRef = useRef<BottomSheetModal>(null);
 
   const loadProfileData = useCallback(async () => {
     const [p, globalUnit, weightLog] = await Promise.all([getProfile(), getUnitSystem(), getWeightLog()]);
@@ -305,7 +307,18 @@ export default function ProfileScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>YOUR PLAN</Text>
-          <View style={styles.card}>
+          {/* Tappable — these rows looked like settings you could change,
+              but tapping did nothing; editing lived only in Settings. Opens
+              the same Adjust My Plan sheet directly. */}
+          <Pressable
+            style={({ pressed }) => [styles.card, pressed && PRESSED_DIM]}
+            onPress={() => {
+              hapticImpactLight();
+              adjustPlanSheetRef.current?.present();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Your plan. Tap to adjust it"
+          >
             <View pointerEvents="none" style={styles.cardSheen} />
             <PlanRow styles={styles} icon="target" label="Objective" value={GOAL_LABELS[profile?.goal ?? ''] ?? 'Not set'} />
             <PlanRow styles={styles} icon="chart.bar.fill" label="Experience" value={EXPERIENCE_LABELS[profile?.experience ?? ''] ?? 'Not set'} />
@@ -313,7 +326,11 @@ export default function ProfileScreen() {
             <PlanRow styles={styles} icon="clock.fill" label="Session Length" value={DURATION_LABELS[profile?.duration ?? ''] ?? 'Not set'} />
             <PlanRow styles={styles} icon="calendar" label="Training Days" value={formatDays(profile?.days)} />
             <PlanRow styles={styles} icon="flame.fill" label="Commitment" value={commitmentName} last />
-          </View>
+            <View style={styles.planEditRow}>
+              <Text style={styles.planEditText} maxFontSizeMultiplier={1.2}>Adjust my plan</Text>
+              <SymbolView name="chevron.right" size={11} tintColor={colors.accentText} />
+            </View>
+          </Pressable>
         </View>
 
         <View style={styles.section}>
@@ -341,9 +358,13 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
 
-        <PremiumGate isPremium={isPremium} label="Goals">
+        {/* Kicker outside the gate, same as every PremiumGate on Progress —
+            wrapping the whole section used to hide the GOALS heading (and
+            its section spacing) from free users, leaving a bare teaser card
+            jammed against the LOG section above it. */}
         <View style={styles.section}>
           <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>GOALS</Text>
+          <PremiumGate isPremium={isPremium} label="Goals">
           <Pressable
             style={({ pressed }) => [styles.card, pressed && PRESSED_DIM]}
             onPress={() => goalsSheetRef.current?.present()}
@@ -413,11 +434,12 @@ export default function ProfileScreen() {
               )}
             </View>
           </Pressable>
+          </PremiumGate>
         </View>
-        </PremiumGate>
       </ScrollView>
       </ReanimatedAnimated.View>
       <GoalsSheet ref={goalsSheetRef} onDismiss={loadProfileData} />
+      <AdjustPlanSheet ref={adjustPlanSheetRef} onDismiss={loadProfileData} />
     </View>
   );
 }
@@ -587,6 +609,21 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors']) {
     planRowValue: {
       color: colors.text,
       fontSize: Type.body,
+      fontFamily: 'Geist-SemiBold',
+    },
+    planEditRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      gap: 4,
+      paddingTop: 12,
+      paddingBottom: 14,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.surfaceDivider,
+    },
+    planEditText: {
+      color: colors.accentText,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     logRow: {
