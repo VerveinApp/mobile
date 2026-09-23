@@ -2,10 +2,11 @@ import { router } from 'expo-router';
 import { useMemo } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { SymbolView } from '@/components/ui/app-symbol';
 import { AndroidRaisedElevation, AndroidRipple, Type } from '@/constants/theme';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticImpactLight } from '@/lib/haptics';
-import { useAppColors } from '@/lib/theme-context';
+import { useAppTheme } from '@/lib/theme-context';
 import type { TodaySession } from '@/lib/today-session';
 
 /**
@@ -39,8 +40,9 @@ export function TodaysTrainingCard({
   // island with white text inside an otherwise light-themed screen in
   // light mode. The literal hex match to Colors.dark rules out "deliberately
   // always dark" as the explanation.
-  const colors = useAppColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors, resolvedScheme } = useAppTheme();
+  const isDark = resolvedScheme === 'dark';
+  const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
 
   const handlePress = () => {
     hapticImpactLight();
@@ -59,6 +61,8 @@ export function TodaysTrainingCard({
           onHoverIn={hover.onHoverIn}
           onHoverOut={hover.onHoverOut}
           android_ripple={AndroidRipple}
+          hitSlop={12}
+          style={({ pressed }) => [styles.restLinkHit, pressed && styles.linkPressed]}
           accessibilityRole="button"
           accessibilityLabel="Check in anyway"
         >
@@ -69,6 +73,11 @@ export function TodaysTrainingCard({
   }
 
   const resolved = todaySession !== null;
+  // BUG FIX: a finished day read exactly like an unfinished one — "Continue
+  // session →" — because resolved only means "checked in today", and a
+  // completed session is still a checked-in one.
+  const completed = todaySession?.completed === true;
+  const actionLabel = completed ? 'View summary' : resolved ? 'Continue session' : 'Check in & start';
 
   return (
     <Pressable
@@ -79,28 +88,50 @@ export function TodaysTrainingCard({
       onPressOut={press.onPressOut}
       android_ripple={AndroidRipple}
       accessibilityRole="button"
-      accessibilityLabel={`${sessionLabel}. ${resolved ? '' : 'Estimated '}${exerciseCount} exercises, ${durationMin} minutes. ${resolved ? 'Continue session' : 'Check in and start'}.`}
+      accessibilityLabel={
+        completed
+          ? `${sessionLabel}. Done for today. View summary.`
+          : `${sessionLabel}. ${resolved ? '' : 'Estimated '}${exerciseCount} exercises, ${durationMin} minutes. ${actionLabel}.`
+      }
     >
-      <Animated.View style={[styles.card, { transform: [{ scale: press.scale }] }]}>
+      <View style={styles.card}>
         <View pointerEvents="none" style={styles.cardSheen} />
+        {/* The press glow useLiquidPress already animates — this card used
+            to wire up the handlers but only ever applied press.scale (pinned
+            at 1), so the app's main CTA gave no visual response to a tap. */}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            styles.pressWash,
+            { opacity: press.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 1] }) },
+          ]}
+        />
         <Text style={styles.cardKicker} maxFontSizeMultiplier={1.2}>TODAY</Text>
         <Text style={styles.cardTitle} maxFontSizeMultiplier={1.2}>{sessionLabel}</Text>
-        <Text style={styles.cardMeta} maxFontSizeMultiplier={1.3}>
-          {resolved ? '' : 'Est. '}
-          {exerciseCount} exercises · {durationMin} min
-        </Text>
+        {completed ? (
+          <View style={styles.doneRow}>
+            <SymbolView name="checkmark.circle.fill" size={14} tintColor="#5FBE84" />
+            <Text style={[styles.cardMeta, styles.doneText]} maxFontSizeMultiplier={1.3}>Done for today</Text>
+          </View>
+        ) : (
+          <Text style={styles.cardMeta} maxFontSizeMultiplier={1.3}>
+            {resolved ? '' : 'Est. '}
+            {exerciseCount} exercises · {durationMin} min
+          </Text>
+        )}
         {resolved && explanation ? (
           <Text style={styles.cardReason} maxFontSizeMultiplier={1.4}>{explanation}</Text>
         ) : null}
         <Text style={styles.cardLinkText} maxFontSizeMultiplier={1.2}>
-          {resolved ? 'Continue session' : 'Check in & start'} →
+          {actionLabel} →
         </Text>
-      </Animated.View>
+      </View>
     </Pressable>
   );
 }
 
-function createStyles(colors: ReturnType<typeof useAppColors>) {
+function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], isDark: boolean) {
   return StyleSheet.create({
     card: {
       padding: 20,
@@ -110,6 +141,26 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       ...(Platform.OS === 'android'
         ? AndroidRaisedElevation
         : { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.surfaceBorder }),
+    },
+    pressWash: {
+      // Low-alpha wash of the text color — reads as a subtle press
+      // highlight on both the near-black dark card and the white light one.
+      backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
+    },
+    doneRow: {
+      marginTop: 4,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    doneText: {
+      marginTop: 0,
+    },
+    restLinkHit: {
+      alignSelf: 'flex-start',
+    },
+    linkPressed: {
+      opacity: 0.6,
     },
     cardSheen: {
       position: 'absolute',
