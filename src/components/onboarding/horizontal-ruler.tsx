@@ -118,6 +118,71 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width }: Horiz
     if (Math.abs(e.nativeEvent.velocity?.x ?? 0) < 0.01) commitAtOffset(e.nativeEvent.contentOffset.x);
   };
 
+  // Every tick's two interpolations, built once per item list. This is its
+  // own memo on purpose: left inline, the React Compiler grouped the list
+  // with the ScrollView's contentOffset, which reads selectedIndex — so
+  // every committed value rebuilt every tick (up to 601 ticks × 2
+  // native-driven nodes, each detached and re-attached) right as the
+  // scroll settled.
+  const ticks = useMemo(
+    () =>
+      items.map((label, index) => {
+        const tickRange = [
+          (index - TICK_FADE_SPAN) * RULER_TICK_SPACING,
+          index * RULER_TICK_SPACING,
+          (index + TICK_FADE_SPAN) * RULER_TICK_SPACING,
+        ];
+        const tickOpacity = scrollX.interpolate({
+          inputRange: tickRange,
+          outputRange: [0.3, 1, 0.3],
+          extrapolate: 'clamp',
+        });
+        // BUG FIX: this used to fade across a full tick spacing on each
+        // side, so two neighboring labels (e.g. "5 ft" and "6 ft") were
+        // simultaneously partway visible for the whole distance between
+        // them — wide enough that both rendered legibly at once, reading
+        // as garbled overlapping text mid-swipe. Halving the fade distance
+        // means a label reaches 0 opacity exactly where its neighbor's own
+        // fade-in starts, so only one is ever meaningfully visible.
+        const labelRange = [
+          (index - 0.5) * RULER_TICK_SPACING,
+          index * RULER_TICK_SPACING,
+          (index + 0.5) * RULER_TICK_SPACING,
+        ];
+        const labelOpacity = scrollX.interpolate({
+          inputRange: labelRange,
+          outputRange: [0, 1, 0],
+          extrapolate: 'clamp',
+        });
+        return (
+          <View key={label + index} style={styles.tickSlot}>
+            {/* Absolutely positioned and centered on its own tick slot so
+                it never nudges neighboring ticks apart while animating —
+                same reason WheelPicker keeps its scale/opacity animation
+                on a wrapping view rather than the Text node directly.
+                BUG FIX: this used to also animate `transform: [{ scale }]`
+                on the Text node itself (0.7 → 1 → 0.7, same range as the
+                opacity fade) — scaling a rasterized text layer mid-motion
+                is exactly the kind of transform iOS doesn't always
+                re-rasterize crisply for, and swiping is when a label
+                spends the most time at an intermediate, blurry-looking
+                scale value rather than settled at a clean 1.0 or 0. Opacity
+                alone gives the same "coming into focus" feel without ever
+                touching how the glyphs themselves are rendered. */}
+            <Animated.Text
+              style={[styles.tickLabel, { opacity: labelOpacity }]}
+              maxFontSizeMultiplier={1.15}
+              numberOfLines={1}
+            >
+              {label}
+            </Animated.Text>
+            <Animated.View style={[styles.tick, { opacity: tickOpacity }]} />
+          </View>
+        );
+      }),
+    [items, scrollX, styles]
+  );
+
   return (
     <View
       style={[styles.wrap, { height: RULER_HEIGHT }, width != null ? { width } : styles.wrapFill]}
@@ -138,60 +203,7 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width }: Horiz
         onContentSizeChange={handleContentSizeChange}
         contentOffset={{ x: selectedIndex * RULER_TICK_SPACING, y: 0 }}
       >
-        {items.map((label, index) => {
-          const tickRange = [
-            (index - TICK_FADE_SPAN) * RULER_TICK_SPACING,
-            index * RULER_TICK_SPACING,
-            (index + TICK_FADE_SPAN) * RULER_TICK_SPACING,
-          ];
-          const tickOpacity = scrollX.interpolate({
-            inputRange: tickRange,
-            outputRange: [0.3, 1, 0.3],
-            extrapolate: 'clamp',
-          });
-          // BUG FIX: this used to fade across a full tick spacing on each
-          // side, so two neighboring labels (e.g. "5 ft" and "6 ft") were
-          // simultaneously partway visible for the whole distance between
-          // them — wide enough that both rendered legibly at once, reading
-          // as garbled overlapping text mid-swipe. Halving the fade distance
-          // means a label reaches 0 opacity exactly where its neighbor's own
-          // fade-in starts, so only one is ever meaningfully visible.
-          const labelRange = [
-            (index - 0.5) * RULER_TICK_SPACING,
-            index * RULER_TICK_SPACING,
-            (index + 0.5) * RULER_TICK_SPACING,
-          ];
-          const labelOpacity = scrollX.interpolate({
-            inputRange: labelRange,
-            outputRange: [0, 1, 0],
-            extrapolate: 'clamp',
-          });
-          return (
-            <View key={label + index} style={styles.tickSlot}>
-              {/* Absolutely positioned and centered on its own tick slot so
-                  it never nudges neighboring ticks apart while animating —
-                  same reason WheelPicker keeps its scale/opacity animation
-                  on a wrapping view rather than the Text node directly.
-                  BUG FIX: this used to also animate `transform: [{ scale }]`
-                  on the Text node itself (0.7 → 1 → 0.7, same range as the
-                  opacity fade) — scaling a rasterized text layer mid-motion
-                  is exactly the kind of transform iOS doesn't always
-                  re-rasterize crisply for, and swiping is when a label
-                  spends the most time at an intermediate, blurry-looking
-                  scale value rather than settled at a clean 1.0 or 0. Opacity
-                  alone gives the same "coming into focus" feel without ever
-                  touching how the glyphs themselves are rendered. */}
-              <Animated.Text
-                style={[styles.tickLabel, { opacity: labelOpacity }]}
-                maxFontSizeMultiplier={1.15}
-                numberOfLines={1}
-              >
-                {label}
-              </Animated.Text>
-              <Animated.View style={[styles.tick, { opacity: tickOpacity }]} />
-            </View>
-          );
-        })}
+        {ticks}
       </Animated.ScrollView>
       )}
       <View pointerEvents="none" style={styles.pointer} />
