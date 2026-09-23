@@ -1,7 +1,7 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppState, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
-import ReanimatedAnimated from 'react-native-reanimated';
+import ReanimatedAnimated, { FadeOut, LinearTransition, useReducedMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
@@ -30,6 +30,7 @@ import { SESSION_LABEL_BY_GOAL, WEEKDAY_NAMES } from '@/lib/profile-labels';
 import { usePremiumEntitlement } from '@/lib/purchases';
 import { PremiumGate } from '@/components/premium-gate';
 import { getWeekActivity, type WeekDay } from '@/lib/session-history';
+import { MOTION_DURATION, MOTION_EASING } from '@/lib/motion';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { getTodaySession, type TodaySession } from '@/lib/today-session';
@@ -88,6 +89,9 @@ export default function SummaryScreen() {
   // previously hard-cut with no transition at all, the one clear motion-
   // language gap against the rest of the app.
   const entering = useFadeInEntering();
+  const reducedMotion = useReducedMotion();
+  const bannerExiting = reducedMotion ? undefined : FadeOut.duration(MOTION_DURATION.fast).easing(MOTION_EASING.standard);
+  const contentLayout = reducedMotion ? undefined : LinearTransition.springify(280).dampingRatio(0.8);
   const [status, setStatus] = useState<'checking' | 'ready'>('checking');
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [todaySession, setTodaySession] = useState<TodaySession | null>(null);
@@ -226,21 +230,19 @@ export default function SummaryScreen() {
       setTrainingState(loadedTrainingState);
 
       const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
-      const activity = await getWeekActivity(trainingDays);
-      if (cancelled) return;
-      setWeekActivity(activity);
-      setStatus('ready');
-
-      // Own effect below would also work, but this keeps the check
-      // alongside the same "only after onboarding is confirmed complete"
-      // gate as everything else this screen loads.
-      const [available, connected, dismissed] = await Promise.all([
+      // Resolved BEFORE status flips to ready — this used to run after, so
+      // the banner popped in above Today's card a beat after the screen had
+      // already appeared, shoving everything below it down.
+      const [activity, available, connected, dismissed] = await Promise.all([
+        getWeekActivity(trainingDays),
         isHealthKitAvailable(),
         hasConnectedHealthKit(),
         isHealthKitBannerDismissed(),
       ]);
       if (cancelled) return;
+      setWeekActivity(activity);
       setShowHealthKitBanner(available && !connected && !dismissed);
+      setStatus('ready');
     })();
     return () => {
       cancelled = true;
@@ -456,6 +458,7 @@ export default function SummaryScreen() {
         <Header styles={styles} firstName={firstName} weeklyRecap={weeklyRecap} />
 
         {deloadNudge?.triggered && deloadNudge.message ? (
+          <ReanimatedAnimated.View exiting={bannerExiting}>
           <Pressable
             style={({ pressed }) => [styles.deloadBanner, pressed && PRESSED_DIM]}
             onPress={() => {
@@ -472,10 +475,14 @@ export default function SummaryScreen() {
               Check in →
             </Text>
           </Pressable>
+          </ReanimatedAnimated.View>
         ) : null}
 
+        {/* Fades out when dismissed or connected, and everything below
+            glides up into its space (contentLayout) — it used to vanish
+            and let the whole screen jump. */}
         {showHealthKitBanner ? (
-          <View style={styles.healthKitBanner}>
+          <ReanimatedAnimated.View exiting={bannerExiting} style={styles.healthKitBanner}>
             <View style={styles.healthKitBannerRow}>
               <SymbolView name="heart.fill" size={15} tintColor="#5FBE84" />
               <Text style={styles.healthKitBannerText} maxFontSizeMultiplier={1.4}>
@@ -504,9 +511,10 @@ export default function SummaryScreen() {
                 </Text>
               </Pressable>
             </View>
-          </View>
+          </ReanimatedAnimated.View>
         ) : null}
 
+        <ReanimatedAnimated.View layout={contentLayout} style={styles.contentStack}>
         <TodaysTrainingCard
           isRestDay={isRestDay}
           todaySession={todaySession}
@@ -526,6 +534,7 @@ export default function SummaryScreen() {
           calibration={calibration}
           isPremium={isPremium}
         />
+        </ReanimatedAnimated.View>
       </ScrollView>
       </ReanimatedAnimated.View>
     </View>
@@ -811,6 +820,11 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     scrollContent: {
       paddingHorizontal: 20,
+      gap: 28,
+    },
+    // Same spacing as scrollContent's own gap — the cards below the banners
+    // are grouped only so they can move together when a banner leaves.
+    contentStack: {
       gap: 28,
     },
     header: {
