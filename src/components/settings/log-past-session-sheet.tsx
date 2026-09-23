@@ -1,6 +1,12 @@
-import { BottomSheetBackdrop, type BottomSheetBackdropProps, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import {
+  BottomSheetBackdrop,
+  type BottomSheetBackdropProps,
+  BottomSheetModal,
+  BottomSheetScrollView,
+  BottomSheetTextInput,
+} from '@gorhom/bottom-sheet';
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
@@ -175,6 +181,9 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
     <BottomSheetModal
       ref={sheetRef}
       snapPoints={['85%']}
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
+      android_keyboardInputMode="adjustResize"
       onChange={handleSheetChange}
       backdropComponent={renderBackdrop}
       backgroundStyle={Platform.OS === 'android' ? { backgroundColor: colors.background, borderTopLeftRadius: 28, borderTopRightRadius: 28 } : { backgroundColor: colors.background }}
@@ -307,7 +316,11 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
 
         <View style={styles.section}>
           <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>Note (optional)</Text>
-          <TextInput
+          {/* BottomSheetTextInput, not TextInput — only the sheet's own input
+              registers focus with the sheet's keyboard handling. A plain
+              TextInput here left the note field (and Save under it) behind
+              the keyboard, since it sits at the very bottom of the sheet. */}
+          <BottomSheetTextInput
             style={styles.noteInput}
             value={note}
             onChangeText={setNote}
