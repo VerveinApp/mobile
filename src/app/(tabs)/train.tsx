@@ -71,6 +71,13 @@ export default function TrainScreen() {
   // an unverified session should never silently get the paid trim.
   const effectiveHealthReadinessModifier = isPremium ? healthReadinessModifier : 1;
   const effectiveHealthReadinessReasons = isPremium ? healthReadinessReasons : undefined;
+  // Once today's session has started, its readiness adjustment is frozen
+  // (TodaySession.planHealthReadiness) — reading the same frozen value here
+  // keeps this card's counts identical to the session actually being done.
+  const planHealthReadinessModifier = todaySession?.planHealthReadiness?.modifier ?? effectiveHealthReadinessModifier;
+  const planHealthReadinessReasons = todaySession?.planHealthReadiness
+    ? todaySession.planHealthReadiness.reasons
+    : effectiveHealthReadinessReasons;
 
   // `today` below (WEEKDAY_NAMES[new Date().getDay()]) has no other reason
   // to re-run once this screen renders — useFocusEffect already refreshes
@@ -137,12 +144,12 @@ export default function TrainScreen() {
         calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
         todaySession?.symptomTags ?? [],
         trainingState ?? undefined,
-        effectiveHealthReadinessModifier,
+        planHealthReadinessModifier,
         undefined,
         todaySession?.timeAvailableMin,
         undefined,
         undefined,
-        effectiveHealthReadinessReasons,
+        planHealthReadinessReasons,
         todaySession?.preferredBodyArea,
         todaySession?.equipmentOverride
       ),
@@ -155,8 +162,8 @@ export default function TrainScreen() {
       todaySession?.equipmentOverride,
       calibration,
       trainingState,
-      effectiveHealthReadinessModifier,
-      effectiveHealthReadinessReasons,
+      planHealthReadinessModifier,
+      planHealthReadinessReasons,
     ]
   );
 

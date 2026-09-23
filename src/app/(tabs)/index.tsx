@@ -138,6 +138,13 @@ export default function SummaryScreen() {
   // too — an unverified session should never silently get the paid trim.
   const effectiveHealthReadinessModifier = isPremium ? healthReadinessModifier : 1;
   const effectiveHealthReadinessReasons = isPremium ? healthReadinessReasons : undefined;
+  // Once today's session has started, its readiness adjustment is frozen
+  // (TodaySession.planHealthReadiness) — reading the same frozen value here
+  // keeps this card's counts identical to the session actually being done.
+  const planHealthReadinessModifier = todaySession?.planHealthReadiness?.modifier ?? effectiveHealthReadinessModifier;
+  const planHealthReadinessReasons = todaySession?.planHealthReadiness
+    ? todaySession.planHealthReadiness.reasons
+    : effectiveHealthReadinessReasons;
 
   // Memoized — this now runs the real engine's filtering over the full
   // exercise library (see plan-preview.ts), not a cheap lookup, so it
@@ -153,12 +160,12 @@ export default function SummaryScreen() {
         calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
         todaySession?.symptomTags ?? [],
         trainingState ?? undefined,
-        effectiveHealthReadinessModifier,
+        planHealthReadinessModifier,
         undefined,
         todaySession?.timeAvailableMin,
         undefined,
         undefined,
-        effectiveHealthReadinessReasons,
+        planHealthReadinessReasons,
         todaySession?.preferredBodyArea,
         todaySession?.equipmentOverride
       ),
@@ -171,8 +178,8 @@ export default function SummaryScreen() {
       todaySession?.equipmentOverride,
       calibration,
       trainingState,
-      effectiveHealthReadinessModifier,
-      effectiveHealthReadinessReasons,
+      planHealthReadinessModifier,
+      planHealthReadinessReasons,
     ]
   );
 

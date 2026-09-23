@@ -80,7 +80,7 @@ import {
 } from '@/lib/session-history';
 import { SYMPTOM_TAG_LABELS, SYMPTOM_TAGS, type SymptomTag } from '@/lib/symptom-tags';
 import { TIME_AVAILABLE_LABELS, TIME_AVAILABLE_OPTIONS } from '@/lib/time-available';
-import { getTodaySession, saveTodaySession } from '@/lib/today-session';
+import { getTodaySession, saveTodaySession, type TodaySession, type TodaySessionInput } from '@/lib/today-session';
 import { getUnitSystem, type UnitSystem } from '@/lib/unit-preference';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
 import {
@@ -93,6 +93,7 @@ import {
 import {
   getBodyAreaBreakdown,
   getCompletionStatus,
+  getWorkoutLog,
   saveWorkoutLog,
   type BodyAreaBreakdown,
   type WorkoutLogExercise,
@@ -304,6 +305,12 @@ export default function EnergyCheckInScreen() {
   // an unverified session should never silently get the paid trim.
   const effectiveHealthReadinessModifier = isPremium ? healthReadinessModifier : 1;
   const effectiveHealthReadinessReasons = isPremium ? healthReadinessReasons : undefined;
+  // Frozen the moment a session starts (see TodaySession.planHealthReadiness)
+  // so the plan is rebuilt identically for the rest of the day — new Health
+  // data or the Plus check resolving late can't re-plan a session mid-way.
+  const [frozenReadiness, setFrozenReadiness] = useState<TodaySession['planHealthReadiness'] | null>(null);
+  const planHealthReadinessModifier = frozenReadiness?.modifier ?? effectiveHealthReadinessModifier;
+  const planHealthReadinessReasons = frozenReadiness ? frozenReadiness.reasons : effectiveHealthReadinessReasons;
   // The one post-session question (M14-lite) — null until the user taps one
   // of the three buttons, then locked to whatever they picked (real feedback
   // isn't editable after the fact any more than the session itself is).
@@ -332,35 +339,8 @@ export default function EnergyCheckInScreen() {
   // were entered in (so a raw "135" keeps meaning what it meant). Storage
   // stays kg regardless; see weight-units.ts.
   const [weightUnit, setWeightUnit] = useState<UnitSystem>('imperial');
-  // BUG FIX (found in a later full-app audit): loggedWeightsKg used to live
-  // only in this state, with nothing persisting it until Finish — an app
-  // kill mid-session (OS memory pressure, an incoming call, a force-quit)
-  // silently lost every typed weight even though exercise *completion*
-  // already autosaved per-exercise. Debounced (not on every keystroke) the
-  // same way notes/[id].tsx's own autosave is, and gated to the active
-  // 'resolved' session only — energy === null covers this component's very
-  // first render, before the load effect below has restored real state, and
-  // 'done' is already handled by handleFinishSession's own explicit
-  // saveTodaySession call, which intentionally omits this field once
-  // exercise-performance.ts has durably recorded the real weights.
-  useEffect(() => {
-    if (energy === null || sessionState !== 'resolved') return;
-    const timeout = setTimeout(() => {
-      saveTodaySession(
-        energy,
-        false,
-        Array.from(symptomTags),
-        timeAvailableMin ?? undefined,
-        finisherAccepted,
-        preferredBodyArea ?? undefined,
-        equipmentOverride ?? undefined,
-        loggedWeightsKg,
-        weightUnit
-      );
-    }, 600);
-    return () => clearTimeout(timeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loggedWeightsKg]);
+  // (The mid-session autosave for these weights lives below, after
+  // currentExerciseIndex — it also persists swaps and position now.)
   const [loadImprovementNote, setLoadImprovementNote] = useState<string | null>(null);
   // Keyed by exercise NAME (matching exercise-performance.ts's own store),
   // not index — a swap mid-session shouldn't carry the old exercise's last
@@ -446,22 +426,20 @@ export default function EnergyCheckInScreen() {
   const isStartingSessionRef = useRef(false);
   const [isStartingSession, setIsStartingSession] = useState(false);
   // Real wall-clock start time for the HealthKit workout write at Finish —
-  // see saveCompletedWorkout's own doc comment. Not persisted (same
-  // simplification as currentExerciseIndex above not surviving an app
-  // kill) — a resumed 'resolved' session just won't get a HealthKit entry,
-  // which is an acceptable gap for a nice-to-have sync.
+  // see saveCompletedWorkout's own doc comment. Persisted with today's
+  // session (TodaySession.startedAt), so a session resumed after an app
+  // kill still gets its Health entry.
   const sessionStartedAtRef = useRef<Date | null>(null);
   // Guided per-exercise timer — exercises are worked one at a time, in
   // order; the next one only unlocks once the current one's timer reaches
   // 0 (the countdown itself lives in the ExerciseTimer subcomponent below,
   // keyed by this index so switching exercises remounts it with a fresh
-  // timer rather than needing an effect to reset one). Doesn't persist
-  // across an app kill mid-session (today-session.ts only remembers energy/
-  // symptoms/completion, not workout progress) — reopening mid-'resolved'
-  // restarts at exercise 0. A real, deliberate simplification, not an
-  // oversight.
+  // timer rather than needing an effect to reset one). Persisted with
+  // today's session (TodaySession.currentExerciseIndex), so reopening
+  // mid-session picks up where it left off; the timer itself restarts.
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
   const [showReasoning, setShowReasoning] = useState(false);
+
 
   const toggleSymptomTag = (tag: string) => {
     hapticSelect();
@@ -560,6 +538,20 @@ export default function EnergyCheckInScreen() {
         // on TodaySession. Naturally empty for a completed session (Finish
         // clears this field once weights are durably recorded elsewhere).
         setLoggedWeightsKg(loadedTodaySession.loggedWeightsKg ?? {});
+        // The rest of a started session's exact state — see the fields' own
+        // doc comments on TodaySession for the resume bugs each one closes.
+        setSwappedExercises(loadedTodaySession.swappedExercises ?? {});
+        setFrozenReadiness(loadedTodaySession.planHealthReadiness ?? null);
+        if (loadedTodaySession.startedAt) sessionStartedAtRef.current = new Date(loadedTodaySession.startedAt);
+        if (!loadedTodaySession.completed) {
+          setCurrentExerciseIndex(loadedTodaySession.currentExerciseIndex ?? 0);
+          // Completion is already autosaved per exercise, in plan order —
+          // which, with the plan now frozen, is the same order on resume.
+          const partialLog = await getWorkoutLog(localDateStr());
+          if (partialLog) {
+            setCompletedExercises(new Set(partialLog.exercises.flatMap((exercise, i) => (exercise.completed ? [i] : []))));
+          }
+        }
         if (loadedTodaySession.completed) {
           const [existingNote, existingFeedback, insight] = await Promise.all([
             getSessionNote(localDateStr()),
@@ -830,12 +822,12 @@ export default function EnergyCheckInScreen() {
             calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
             Array.from(symptomTags),
             trainingState ?? undefined,
-            effectiveHealthReadinessModifier,
+            planHealthReadinessModifier,
             verifiedYesterdayEnergy,
             timeAvailableMin ?? undefined,
             daysSinceLastCheckIn,
             finisherAccepted,
-            effectiveHealthReadinessReasons,
+            planHealthReadinessReasons,
             preferredBodyArea ?? undefined,
             equipmentOverride ?? undefined
           )
@@ -846,12 +838,12 @@ export default function EnergyCheckInScreen() {
       calibration,
       symptomTags,
       trainingState,
-      effectiveHealthReadinessModifier,
+      planHealthReadinessModifier,
       verifiedYesterdayEnergy,
       timeAvailableMin,
       daysSinceLastCheckIn,
       finisherAccepted,
-      effectiveHealthReadinessReasons,
+      planHealthReadinessReasons,
       preferredBodyArea,
       equipmentOverride,
     ]
@@ -869,14 +861,14 @@ export default function EnergyCheckInScreen() {
         calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
         Array.from(symptomTags),
         undefined,
-        effectiveHealthReadinessModifier,
+        planHealthReadinessModifier,
         undefined,
         undefined,
         undefined,
         undefined,
-        effectiveHealthReadinessReasons
+        planHealthReadinessReasons
       ),
-    [profile, calibration, symptomTags, effectiveHealthReadinessModifier, effectiveHealthReadinessReasons]
+    [profile, calibration, symptomTags, planHealthReadinessModifier, planHealthReadinessReasons]
   );
   const exerciseDelta = preview ? baseline.exerciseCount - preview.exerciseCount : 0;
   // BUG FIX: exerciseDelta alone can't tell "genuinely standard" apart from
@@ -1098,6 +1090,47 @@ export default function EnergyCheckInScreen() {
     setSwapModalIndex(null);
   };
 
+  // Everything today's record carries regardless of which save it is —
+  // one place, so no call site can forget a field and silently wipe it
+  // (the old positional saveTodaySession's standing hazard).
+  const todaySessionBase = (sessionEnergy: EnergyScore, completed: boolean): TodaySessionInput => ({
+    energy: sessionEnergy,
+    completed,
+    symptomTags: Array.from(symptomTags),
+    timeAvailableMin: timeAvailableMin ?? undefined,
+    finisherAccepted,
+    preferredBodyArea: preferredBodyArea ?? undefined,
+    equipmentOverride: equipmentOverride ?? undefined,
+    swappedExercises,
+    planHealthReadiness: frozenReadiness ?? undefined,
+    startedAt: sessionStartedAtRef.current?.toISOString(),
+  });
+
+  // BUG FIX (found in a later full-app audit): loggedWeightsKg used to live
+  // only in state, with nothing persisting it until Finish — an app kill
+  // mid-session (OS memory pressure, an incoming call, a force-quit)
+  // silently lost every typed weight. Swaps and the current position are
+  // persisted alongside now too: weights are keyed by exercise index, so
+  // restoring them without the swaps that produced those indexes attached a
+  // weight to the wrong exercise. Debounced (not on every keystroke) the
+  // same way notes/[id].tsx's own autosave is, and gated to the active
+  // 'resolved' session only — 'done' is handled by handleFinishSession's own
+  // explicit save, which intentionally drops the weights once
+  // exercise-performance.ts has durably recorded them.
+  useEffect(() => {
+    if (energy === null || sessionState !== 'resolved') return;
+    const timeout = setTimeout(() => {
+      saveTodaySession({
+        ...todaySessionBase(energy, false),
+        loggedWeightsKg,
+        loggedWeightsUnit: weightUnit,
+        currentExerciseIndex,
+      });
+    }, 600);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loggedWeightsKg, swappedExercises, currentExerciseIndex]);
+
   const handleStartSession = async () => {
     if (energy === null || isStartingSessionRef.current) return;
     isStartingSessionRef.current = true;
@@ -1108,7 +1141,9 @@ export default function EnergyCheckInScreen() {
     else if (energy === 5) hapticSuccess();
     else hapticImpactLight();
     recordCheckIn(energy);
-    saveTodaySession(energy, false, Array.from(symptomTags), timeAvailableMin ?? undefined, finisherAccepted, preferredBodyArea ?? undefined, equipmentOverride ?? undefined);
+    const readinessAtStart = { modifier: effectiveHealthReadinessModifier, reasons: effectiveHealthReadinessReasons };
+    setFrozenReadiness(readinessAtStart);
+    saveTodaySession({ ...todaySessionBase(energy, false), planHealthReadiness: readinessAtStart });
     // Already showed up today — a "Training day" nudge later would be noise.
     cancelTodaysReminder();
     // The honest starting point for today's completion signal — a real
@@ -1142,7 +1177,7 @@ export default function EnergyCheckInScreen() {
     // Re-passes the same tags/time/finisher choice picked at Start —
     // saveTodaySession replaces the whole record each call, so omitting any
     // of them would silently wipe them.
-    saveTodaySession(energy, true, Array.from(symptomTags), timeAvailableMin ?? undefined, finisherAccepted, preferredBodyArea ?? undefined, equipmentOverride ?? undefined);
+    saveTodaySession(todaySessionBase(energy, true));
     const finalExercises = buildWorkoutLogExercises(completedExercises);
     const status = getCompletionStatus(finalExercises);
     const completedSomething = status !== 'skipped';

@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { EnergyScore } from '@/components/home/energy-gauge';
 import { localDateStr } from '@/lib/local-date';
 import type { UnitSystem } from '@/lib/unit-preference';
-import type { BodyArea } from '@/lib/plan-preview';
+import type { BodyArea, PlanExercise } from '@/lib/plan-preview';
 
 const KEY = 'vervein.todaySession.v1';
 
@@ -67,7 +67,33 @@ export type TodaySession = {
    * the (persisted, so kept) field name, those are raw text in the user's
    * display unit, not kg. Absent on sessions saved before units existed. */
   loggedWeightsUnit?: UnitSystem;
+  /** Mid-workout exercise swaps, keyed by exercise index — the same
+   * index-keyed shape check-in.tsx's own swappedExercises state uses.
+   * BUG FIX: swaps used to live only in React state, so an app kill
+   * mid-session dropped them while typed weights (keyed by the same index)
+   * were restored — a weight entered for the swapped-in exercise got saved
+   * against the original one. */
+  swappedExercises?: Record<number, PlanExercise>;
+  /** The Apple Health readiness adjustment the session was STARTED with,
+   * frozen so reopening mid-session rebuilds the identical plan. Without
+   * this, new Health data arriving during the workout (or the Plus check
+   * resolving a moment later) re-planned the session under the user —
+   * exercise indexes shifted, and index-keyed weights/completion with them. */
+  planHealthReadiness?: {
+    modifier: number;
+    reasons?: { rhrElevated: boolean; sleepDeficit: boolean };
+  };
+  /** Which exercise the session was on, so a resumed session picks up
+   * there instead of back at the first exercise. */
+  currentExerciseIndex?: number;
+  /** When the session was started (ISO) — the Apple Health workout written
+   * at Finish needs a real start time, and a resumed session used to skip
+   * that write entirely for lack of one. */
+  startedAt?: string;
 };
+
+/** Everything but the date, which is always "today" when saving. */
+export type TodaySessionInput = Omit<TodaySession, 'date' | 'symptomTags'> & { symptomTags?: string[] };
 
 function today() {
   return localDateStr();
@@ -87,30 +113,14 @@ export async function getTodaySession(): Promise<TodaySession | null> {
   }
 }
 
-export async function saveTodaySession(
-  energy: EnergyScore,
-  completed: boolean,
-  symptomTags: string[] = [],
-  timeAvailableMin?: number,
-  finisherAccepted?: boolean,
-  preferredBodyArea?: BodyArea,
-  equipmentOverride?: string,
-  loggedWeightsKg?: Record<number, string>,
-  loggedWeightsUnit?: UnitSystem
-) {
+/**
+ * Replaces today's record wholesale — an object, not the old positional
+ * list, which had grown to nine optional parameters where every caller had
+ * to re-pass every field in order or silently wipe it.
+ */
+export async function saveTodaySession(input: TodaySessionInput) {
   try {
-    const session: TodaySession = {
-      date: today(),
-      energy,
-      completed,
-      symptomTags,
-      timeAvailableMin,
-      finisherAccepted,
-      preferredBodyArea,
-      equipmentOverride,
-      loggedWeightsKg,
-      loggedWeightsUnit,
-    };
+    const session: TodaySession = { ...input, date: today(), symptomTags: input.symptomTags ?? [] };
     await AsyncStorage.setItem(KEY, JSON.stringify(session));
   } catch {
     // Worst case the app re-asks for a check-in it already had — same as a first check-in.
