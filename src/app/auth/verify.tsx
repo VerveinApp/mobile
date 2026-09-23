@@ -80,6 +80,8 @@ export default function VerifyEmailScreen() {
   const [verifying, setVerifying] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
   const inputRefs = useRef<(TextInput | null)[]>([]);
+  // True once this screen's code has been verified — see handleContinue.
+  const verifiedRef = useRef(false);
 
   const [cooldown, setCooldown] = useState(RESEND_COOLDOWN_SECONDS);
 
@@ -152,20 +154,26 @@ export default function VerifyEmailScreen() {
     }
     setCodeError(null);
     setVerifying(true);
-    // The real check — Supabase rejects a wrong or expired code here.
-    // Previously this accepted any 4 digits typed in; that's the whole gap
-    // this wiring closes.
-    const { data, error } = await supabase.auth.verifyOtp({ email: params.email, token: code, type: 'email' });
-    if (error) {
-      setVerifying(false);
-      setCodeError(error.message);
-      hapticError();
-      return;
+    // A code can only be verified once — if an earlier tap already verified
+    // it and only the profile restore below failed (offline), a retry must
+    // skip straight to that step instead of re-sending a now-used code.
+    if (!verifiedRef.current) {
+      // The real check — Supabase rejects a wrong or expired code here.
+      // Previously this accepted any 4 digits typed in; that's the whole gap
+      // this wiring closes.
+      const { data, error } = await supabase.auth.verifyOtp({ email: params.email, token: code, type: 'email' });
+      if (error) {
+        setVerifying(false);
+        setCodeError(error.message);
+        hapticError();
+        return;
+      }
+      verifiedRef.current = true;
+      // Before anything below reads the local profile or onboarding state: if
+      // this device's data belongs to a DIFFERENT account, it's set aside for
+      // that account and this one gets its own (see account-switch.ts).
+      if (data.user) await prepareLocalDataForAccount(data.user.id);
     }
-    // Before anything below reads the local profile or onboarding state: if
-    // this device's data belongs to a DIFFERENT account, it's set aside for
-    // that account and this one gets its own (see account-switch.ts).
-    if (data.user) await prepareLocalDataForAccount(data.user.id);
     setVerifying(false);
     hapticSuccess();
     // This screen has three real entry points now, not one: mid-onboarding
@@ -198,13 +206,21 @@ export default function VerifyEmailScreen() {
       // sign-in should mean something for a real returning account, not
       // force the entire questionnaire again just because this specific
       // device has never seen it.
-      const remoteProfile = await pullProfileFromRemote();
-      if (remoteProfile) {
-        await saveProfile(remoteProfile);
+      const remote = await pullProfileFromRemote();
+      if (remote.kind === 'found') {
+        await saveProfile(remote.profile);
         await markOnboardingComplete();
         // Same dismissAll() fix as the branch above — see that comment.
         router.dismissAll();
         router.replace('/(tabs)' as never);
+        return;
+      }
+      if (remote.kind === 'error') {
+        // Couldn't tell whether a synced profile exists — never assume "no"
+        // and start the questionnaire over (finishing it would overwrite the
+        // real one). Already verified, so Continue retries just this step.
+        hapticError();
+        setCodeError("Signed in, but couldn't reach your account to restore your plan. Check your connection and tap Continue.");
         return;
       }
       // Genuinely nothing to restore — route into the real questionnaire

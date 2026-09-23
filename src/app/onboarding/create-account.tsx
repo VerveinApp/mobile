@@ -269,9 +269,16 @@ export default function CreateAccountScreen() {
       router.replace('/(tabs)' as never);
       return;
     }
-    const remoteProfile = await pullProfileFromRemote();
-    if (remoteProfile) {
-      await saveProfile(remoteProfile);
+    const remote = await pullProfileFromRemote();
+    if (remote.kind === 'error') {
+      // Never read "couldn't check" as "nothing to restore" — see
+      // pullProfileFromRemote's own doc comment.
+      hapticError();
+      setSocialAuthNotice("Signed in, but couldn't reach your account to restore your plan. Check your connection and try again.");
+      return;
+    }
+    if (remote.kind === 'found') {
+      await saveProfile(remote.profile);
       await markOnboardingComplete();
       // dismissAll() first — same reason as auth/verify.tsx's matching
       // branch: this app's single flat root Stack means replace() alone

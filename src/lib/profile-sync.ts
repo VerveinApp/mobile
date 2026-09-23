@@ -59,26 +59,35 @@ export async function pushProfileToRemote(profile: UserProfile): Promise<void> {
   }
 }
 
+export type RemoteProfileResult =
+  | { kind: 'found'; profile: UserProfile }
+  | { kind: 'none' }
+  | { kind: 'error' };
+
 /**
- * Called from auth/verify.tsx's own "no local profile" branch, before it
- * falls back to routing a verified sign-in through onboarding — a real
- * account with a synced profile should never see the questionnaire again
- * just because it's a new device. Returns null both when signed out (never
- * expected here, verify.tsx only calls this right after a successful
- * verifyOtp/social sign-in) and when genuinely no row exists yet (a
- * pre-sync account, or one that was never fully onboarded) — callers treat
- * both the same way: nothing to restore.
+ * Called from auth/verify.tsx's and create-account.tsx's own "no local
+ * profile" branches, before they fall back to routing a verified sign-in
+ * through onboarding — a real account with a synced profile should never
+ * see the questionnaire again just because it's a new device.
+ *
+ * BUG FIX: this used to return null for BOTH "this account has no synced
+ * profile" and "couldn't reach the server" — so signing in on a new device
+ * with a weak connection sent a fully set-up account back through the
+ * whole questionnaire, and finishing it overwrote the real synced profile.
+ * 'error' now means "try again", never "start over".
  */
-export async function pullProfileFromRemote(): Promise<UserProfile | null> {
+export async function pullProfileFromRemote(): Promise<RemoteProfileResult> {
   try {
     const { supabase } = await import('@/lib/supabase');
     const {
       data: { user },
+      error: userError,
     } = await supabase.auth.getUser();
-    if (!user) return null;
-    const { data } = await supabase.from('profiles').select('*').eq('user_id', user.id).maybeSingle();
-    if (!data) return null;
-    return {
+    if (userError || !user) return { kind: 'error' };
+    const { data, error } = await supabase.from('profiles').select('*').eq('user_id', user.id).maybeSingle();
+    if (error) return { kind: 'error' };
+    if (!data) return { kind: 'none' };
+    const profile: UserProfile = {
       name: data.name ?? undefined,
       email: user.email ?? undefined,
       goal: data.goal ?? undefined,
@@ -99,7 +108,8 @@ export async function pullProfileFromRemote(): Promise<UserProfile | null> {
       targetLiftExercise: data.target_lift_exercise ?? undefined,
       targetLiftWeightKg: data.target_lift_weight_kg ?? undefined,
     };
+    return { kind: 'found', profile };
   } catch {
-    return null;
+    return { kind: 'error' };
   }
 }
