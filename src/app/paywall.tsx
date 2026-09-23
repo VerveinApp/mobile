@@ -498,11 +498,14 @@ export default function PaywallScreen() {
                 plan") rather than naming an actual thing you get. Naming
                 the real screens (strength curve, consistency, recovery)
                 does the same honest job with something concrete to picture
-                instead of an abstraction. */}
+                instead of an abstraction.
+                Trimmed from five centered lines (ending on an orphaned
+                "layered on top.") to three even ones on this 375pt canvas:
+                the header already says Plus, and "the deeper view" only
+                restated the first sentence. */}
             <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>
-              See the real shape behind every session — your strength curve, your consistency, your recovery — not
-              just today&apos;s plan. The check-in and adaptive engine stay free, always; Plus is the deeper view
-              layered on top.
+              See the real shape behind every session — your strength curve, your consistency, your recovery. The
+              check-in and adaptive engine stay free, always.
             </Text>
 
             {/* Moved above the carousel — price was previously the last
