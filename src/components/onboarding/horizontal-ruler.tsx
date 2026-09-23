@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   type LayoutChangeEvent,
@@ -78,20 +78,44 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width }: Horiz
     scrollRef.current?.scrollTo({ x: selectedIndex * RULER_TICK_SPACING, animated: false });
   };
 
+  // A light selection tick each time a new value passes the center pointer
+  // while scrolling — the feel of a native picker wheel, instead of a single
+  // haptic only once the scroll has fully settled. Tracked separately from
+  // lastIndex, which only ever means "the committed value".
+  const tickIndex = useRef(selectedIndex);
+  useEffect(() => {
+    // A JS listener on the natively-driven value — RN forwards native
+    // updates to it whenever one is attached.
+    const id = scrollX.addListener(({ value }) => {
+      const index = Math.max(0, Math.min(items.length - 1, Math.round(value / RULER_TICK_SPACING)));
+      if (index !== tickIndex.current) {
+        tickIndex.current = index;
+        hapticSelect();
+      }
+    });
+    return () => scrollX.removeListener(id);
+  }, [scrollX, items.length]);
   const handleScroll = Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], {
     useNativeDriver: true,
   });
 
-  const handleMomentumEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const index = Math.max(
-      0,
-      Math.min(items.length - 1, Math.round(e.nativeEvent.contentOffset.x / RULER_TICK_SPACING))
-    );
+  const commitAtOffset = (offsetX: number) => {
+    const index = Math.max(0, Math.min(items.length - 1, Math.round(offsetX / RULER_TICK_SPACING)));
     if (index !== lastIndex.current) {
       lastIndex.current = index;
-      hapticSelect();
       onChange(index);
     }
+  };
+  const handleMomentumEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    commitAtOffset(e.nativeEvent.contentOffset.x);
+  };
+  // BUG FIX: the value only ever committed on onMomentumScrollEnd — but a
+  // slow drag released with no velocity, already sitting on a tick, has no
+  // momentum phase at all, so that event never fired and the ruler showed a
+  // new value while the old one stayed saved. A zero-velocity release
+  // commits right here instead.
+  const handleScrollEndDrag = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (Math.abs(e.nativeEvent.velocity?.x ?? 0) < 0.01) commitAtOffset(e.nativeEvent.contentOffset.x);
   };
 
   return (
@@ -110,6 +134,7 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width }: Horiz
         onScroll={handleScroll}
         scrollEventThrottle={16}
         onMomentumScrollEnd={handleMomentumEnd}
+        onScrollEndDrag={handleScrollEndDrag}
         onContentSizeChange={handleContentSizeChange}
         contentOffset={{ x: selectedIndex * RULER_TICK_SPACING, y: 0 }}
       >
