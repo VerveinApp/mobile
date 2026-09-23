@@ -1,5 +1,17 @@
+import { useEffect } from 'react';
 import { View } from 'react-native';
+import ReanimatedAnimated, {
+  Easing,
+  useAnimatedProps,
+  useReducedMotion,
+  useSharedValue,
+  withDelay,
+  withTiming,
+} from 'react-native-reanimated';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
+
+const AnimatedPath = ReanimatedAnimated.createAnimatedComponent(Path);
+const AnimatedCircle = ReanimatedAnimated.createAnimatedComponent(Circle);
 
 export type SparklinePoint = {
   value: number;
@@ -74,6 +86,15 @@ function smoothPathD(points: Point[]): string {
  * any of the 6 screens using this component. Removed rather than left as
  * unused capability — if a real "this point is different" need comes up
  * again, it's cheap to re-add against a concrete use case.
+ *
+ * Draws itself in once, the first time it appears — the line traced left
+ * to right, the fill and the latest point fading in behind it — on the same
+ * curve and timing radar-chart.tsx's bloom uses, so every chart in the app
+ * arrives the same way instead of the radar alone animating. Later data
+ * updates re-render in place without replaying it. Instant under Reduce
+ * Motion. Only the LATEST point gets a dot now: a dot on every point
+ * crowded any history longer than a handful of entries, and the newest
+ * value is the one a trend line is read toward.
  */
 export function Sparkline({
   data,
@@ -86,7 +107,15 @@ export function Sparkline({
   referenceValue,
   referenceColor,
 }: SparklineProps) {
-  if (data.length === 0) return null;
+  const reducedMotion = useReducedMotion();
+  const reveal = useSharedValue(reducedMotion ? 1 : 0);
+  useEffect(() => {
+    if (reducedMotion) {
+      reveal.value = 1;
+      return;
+    }
+    reveal.value = withDelay(150, withTiming(1, { duration: 900, easing: Easing.out(Easing.cubic) }));
+  }, [reveal, reducedMotion]);
 
   const values = data.map((d) => d.value);
   let lo = min ?? Math.min(...values);
@@ -116,6 +145,20 @@ export function Sparkline({
     referenceValue !== undefined
       ? Math.max(inset, Math.min(height - inset, inset + plotHeight - ((referenceValue - lo) / range) * plotHeight))
       : null;
+  // Straight-line length between the points, padded for the curve's extra
+  // arc — only needs to be at least the real length for the dash trick.
+  let lineLength = 1;
+  for (let i = 1; i < points.length; i++) {
+    lineLength += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+  }
+  lineLength *= 1.15;
+  const lastPoint = points[points.length - 1];
+
+  const lineAnimatedProps = useAnimatedProps(() => ({ strokeDashoffset: lineLength * (1 - reveal.value) }));
+  const areaAnimatedProps = useAnimatedProps(() => ({ fillOpacity: 0.18 * reveal.value }));
+  const dotAnimatedProps = useAnimatedProps(() => ({ opacity: Math.max(0, (reveal.value - 0.8) / 0.2) }));
+
+  if (data.length === 0) return null;
 
   return (
     <View style={{ width, height }}>
@@ -132,11 +175,20 @@ export function Sparkline({
             opacity={0.5}
           />
         ) : null}
-        {filled && areaPath ? <Path d={areaPath} fill={color} fillOpacity={0.18} stroke="none" /> : null}
-        <Path d={linePath} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-        {points.map((p, i) => (
-          <Circle key={i} cx={p.x} cy={p.y} r={3.5} fill={color} />
-        ))}
+        {filled && areaPath ? (
+          <AnimatedPath d={areaPath} fill={color} stroke="none" animatedProps={areaAnimatedProps} />
+        ) : null}
+        <AnimatedPath
+          d={linePath}
+          fill="none"
+          stroke={color}
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeDasharray={lineLength}
+          animatedProps={lineAnimatedProps}
+        />
+        <AnimatedCircle cx={lastPoint.x} cy={lastPoint.y} r={3.5} fill={color} animatedProps={dotAnimatedProps} />
       </Svg>
     </View>
   );

@@ -1,7 +1,16 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppState, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
-import ReanimatedAnimated, { FadeOut, LinearTransition, useReducedMotion } from 'react-native-reanimated';
+import ReanimatedAnimated, {
+  Easing,
+  FadeOut,
+  LinearTransition,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withDelay,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
@@ -767,14 +776,11 @@ function YourFitness({
             const barColor = ratio > 0.66 ? LOAD_METER_COLORS[2] : ratio > 0.33 ? LOAD_METER_COLORS[1] : LOAD_METER_COLORS[0];
             return (
               <View key={day.date} style={styles.loadChartTrack}>
-                <View
-                  style={[
-                    styles.loadChartBar,
-                    hasData
-                      ? { height: `${Math.max(ratio, 0.12) * 100}%`, backgroundColor: barColor }
-                      : styles.loadChartBarEmpty,
-                  ]}
-                />
+                {hasData ? (
+                  <LoadChartBar styles={styles} heightPct={Math.max(ratio, 0.12) * 100} color={barColor} />
+                ) : (
+                  <View style={[styles.loadChartBar, styles.loadChartBarEmpty]} />
+                )}
               </View>
             );
           })}
@@ -806,6 +812,38 @@ function YourFitness({
       </View>
       </PremiumGate>
     </View>
+  );
+}
+
+/**
+ * One day's bar in Training Load — grows up from its baseline the first
+ * time it appears, on the same curve as the app's other charts (Sparkline,
+ * ProgressRing, RadarChart), rather than appearing fully drawn. Instant
+ * under Reduce Motion.
+ */
+function LoadChartBar({
+  styles,
+  heightPct,
+  color,
+}: {
+  styles: ReturnType<typeof createStyles>;
+  heightPct: number;
+  color: string;
+}) {
+  const reducedMotion = useReducedMotion();
+  const grow = useSharedValue(reducedMotion ? 1 : 0);
+  useEffect(() => {
+    if (reducedMotion) {
+      grow.value = 1;
+      return;
+    }
+    grow.value = withDelay(150, withTiming(1, { duration: 700, easing: Easing.out(Easing.cubic) }));
+  }, [grow, reducedMotion]);
+  const growStyle = useAnimatedStyle(() => ({ transform: [{ scaleY: grow.value }] }));
+  return (
+    <ReanimatedAnimated.View
+      style={[styles.loadChartBar, { height: `${heightPct}%`, backgroundColor: color, transformOrigin: 'bottom' }, growStyle]}
+    />
   );
 }
 
