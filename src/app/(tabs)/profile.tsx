@@ -22,6 +22,7 @@ import { getLastPerformance } from '@/lib/exercise-performance';
 import { getUnitSystem, type UnitSystem } from '@/lib/unit-preference';
 import { getWeightLog, resolveCurrentWeightKg } from '@/lib/weight-log';
 import { useFadeInEntering } from '@/lib/screen-transitions';
+import { unlessUnchanged } from '@/lib/stable-state';
 import { useAppTheme } from '@/lib/theme-context';
 import { usePremiumEntitlement } from '@/lib/purchases';
 import { getProfile, updateProfile, type UserProfile } from '@/lib/user-profile';
@@ -81,10 +82,14 @@ export default function ProfileScreen() {
 
   const loadProfileData = useCallback(async () => {
     const [p, globalUnit, weightLog] = await Promise.all([getProfile(), getUnitSystem(), getWeightLog()]);
-    setProfile(p);
+    // unlessUnchanged: a focus that finds nothing new keeps every object as
+    // it was, so a plain tab switch doesn't re-render this screen.
+    setProfile(unlessUnchanged(p));
     setUnit(globalUnit);
     setCurrentWeightKg(resolveCurrentWeightKg(weightLog, p?.weightKg));
-    setWeightTrendData(weightLog.length >= 2 ? [...weightLog].reverse().map((e) => ({ value: e.weightKg })) : []);
+    setWeightTrendData(
+      unlessUnchanged(weightLog.length >= 2 ? [...weightLog].reverse().map((e) => ({ value: e.weightKg })) : [])
+    );
     // Which exercise to look up only exists once the profile itself has
     // resolved, so this can't join the Promise.all above.
     const lastLiftPerformance = p?.targetLiftExercise ? await getLastPerformance(p.targetLiftExercise) : null;

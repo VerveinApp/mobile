@@ -22,6 +22,7 @@ import { DAY_ORDER, ENVIRONMENT_LABELS, SESSION_LABEL_BY_GOAL, WEEKDAY_NAMES } f
 import { getWeekActivity, type WeekDay } from '@/lib/session-history';
 import { getTodaySession, type TodaySession } from '@/lib/today-session';
 import { getTrainingState } from '@/lib/training-state-loader';
+import { unlessUnchanged } from '@/lib/stable-state';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 
@@ -118,14 +119,17 @@ export default function TrainScreen() {
           getHealthReadinessModifier(),
           getHealthReadinessReasons(),
         ]);
-        setProfile(loadedProfile);
-        setTodaySession(loadedSession);
-        setCalibration(loadedCalibration);
-        setTrainingState(loadedTrainingState);
+        // unlessUnchanged: a focus that finds nothing new keeps every object
+        // as it was, so both plan-engine runs below are skipped and a plain
+        // tab switch doesn't re-render this screen.
+        setProfile(unlessUnchanged(loadedProfile));
+        setTodaySession(unlessUnchanged(loadedSession));
+        setCalibration(unlessUnchanged(loadedCalibration));
+        setTrainingState(unlessUnchanged(loadedTrainingState));
         setHealthReadinessModifier(loadedReadinessModifier);
-        setHealthReadinessReasons(loadedReadinessReasons);
+        setHealthReadinessReasons(unlessUnchanged(loadedReadinessReasons));
         const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
-        setWeekDays((await getWeekActivity(trainingDays)).days);
+        setWeekDays(unlessUnchanged((await getWeekActivity(trainingDays)).days));
         setLoaded(true);
       })();
     }, [])

@@ -41,6 +41,7 @@ import { PremiumGate } from '@/components/premium-gate';
 import { getWeekActivity, type WeekDay } from '@/lib/session-history';
 import { MOTION_DURATION, MOTION_EASING } from '@/lib/motion';
 import { useFadeInEntering } from '@/lib/screen-transitions';
+import { unlessUnchanged } from '@/lib/stable-state';
 import { useAppColors } from '@/lib/theme-context';
 import { getTodaySession, type TodaySession } from '@/lib/today-session';
 import { getTrainingState } from '@/lib/training-state-loader';
@@ -75,6 +76,41 @@ function getGreeting(): string {
 
 function formatToday(): string {
   return new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+}
+
+// Everything Home shows, read in one place for the first load, every focus
+// and pull-to-refresh. This list used to be written out three times, and a
+// store added to one copy but not the others would quietly go stale.
+async function loadHomeData(isPremium: boolean | null) {
+  const [
+    profile,
+    todaySession,
+    calibration,
+    deloadNudge,
+    healthReadinessModifier,
+    healthReadinessReasons,
+    trainingState,
+  ] = await Promise.all([
+    getProfile(),
+    getTodaySession(),
+    getCalibration(),
+    getDeloadNudge(isPremium),
+    getHealthReadinessModifier(),
+    getHealthReadinessReasons(),
+    getTrainingState(),
+  ]);
+  const trainingDays = profile?.days ? profile.days.split(',') : null;
+  const weekActivity = await getWeekActivity(trainingDays);
+  return {
+    profile,
+    todaySession,
+    calibration,
+    deloadNudge,
+    healthReadinessModifier,
+    healthReadinessReasons,
+    trainingState,
+    weekActivity,
+  };
 }
 
 /**
@@ -196,6 +232,20 @@ export default function SummaryScreen() {
     ]
   );
 
+  // unlessUnchanged: a focus that finds nothing new keeps every object as
+  // it was, so the plan engine above doesn't re-run and the screen doesn't
+  // re-render on a plain tab switch.
+  const applyHomeData = useCallback((data: Awaited<ReturnType<typeof loadHomeData>>) => {
+    setProfile(unlessUnchanged(data.profile));
+    setTodaySession(unlessUnchanged(data.todaySession));
+    setCalibration(unlessUnchanged(data.calibration));
+    setDeloadNudge(unlessUnchanged(data.deloadNudge));
+    setHealthReadinessModifier(data.healthReadinessModifier);
+    setHealthReadinessReasons(unlessUnchanged(data.healthReadinessReasons));
+    setTrainingState(unlessUnchanged(data.trainingState));
+    setWeekActivity(unlessUnchanged(data.weekActivity));
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -212,44 +262,17 @@ export default function SummaryScreen() {
         return;
       }
 
-      const [
-        loadedProfile,
-        loadedSession,
-        loadedCalibration,
-        loadedDeloadNudge,
-        loadedReadinessModifier,
-        loadedReadinessReasons,
-        loadedTrainingState,
-      ] = await Promise.all([
-        getProfile(),
-        getTodaySession(),
-        getCalibration(),
-        getDeloadNudge(isPremium),
-        getHealthReadinessModifier(),
-        getHealthReadinessReasons(),
-        getTrainingState(),
-      ]);
-      if (cancelled) return;
-      setProfile(loadedProfile);
-      setTodaySession(loadedSession);
-      setCalibration(loadedCalibration);
-      setDeloadNudge(loadedDeloadNudge);
-      setHealthReadinessModifier(loadedReadinessModifier);
-      setHealthReadinessReasons(loadedReadinessReasons);
-      setTrainingState(loadedTrainingState);
-
-      const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
-      // Resolved BEFORE status flips to ready — this used to run after, so
-      // the banner popped in above Today's card a beat after the screen had
-      // already appeared, shoving everything below it down.
-      const [activity, available, connected, dismissed] = await Promise.all([
-        getWeekActivity(trainingDays),
+      // The banner check resolves BEFORE status flips to ready — it used to
+      // run after, so the banner popped in above Today's card a beat after
+      // the screen had already appeared, shoving everything below it down.
+      const [data, available, connected, dismissed] = await Promise.all([
+        loadHomeData(isPremium),
         isHealthKitAvailable(),
         hasConnectedHealthKit(),
         isHealthKitBannerDismissed(),
       ]);
       if (cancelled) return;
-      setWeekActivity(activity);
+      applyHomeData(data);
       setShowHealthKitBanner(available && !connected && !dismissed);
       setStatus('ready');
     })();
@@ -275,73 +298,21 @@ export default function SummaryScreen() {
     useCallback(() => {
       if (status !== 'ready') return;
       (async () => {
-        const [
-          loadedProfile,
-          loadedSession,
-          loadedCalibration,
-          loadedDeloadNudge,
-          loadedReadinessModifier,
-          loadedReadinessReasons,
-          loadedTrainingState,
-        ] = await Promise.all([
-          getProfile(),
-          getTodaySession(),
-          getCalibration(),
-          getDeloadNudge(isPremium),
-          getHealthReadinessModifier(),
-          getHealthReadinessReasons(),
-          getTrainingState(),
-        ]);
-        setProfile(loadedProfile);
-        setTodaySession(loadedSession);
-        setCalibration(loadedCalibration);
-        setDeloadNudge(loadedDeloadNudge);
-        setHealthReadinessModifier(loadedReadinessModifier);
-        setHealthReadinessReasons(loadedReadinessReasons);
-        setTrainingState(loadedTrainingState);
-        const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
-        const activity = await getWeekActivity(trainingDays);
-        setWeekActivity(activity);
+        applyHomeData(await loadHomeData(isPremium));
       })();
       // isPremium added alongside the getDeloadNudge/effectiveHealthReadinessModifier
       // gating fix — without it, this callback (and the isPremium value it
       // closes over when calling getDeloadNudge) would stay frozen at
       // whatever isPremium was the one time `status` flipped to 'ready',
       // never picking up entitlement resolving moments later.
-    }, [status, isPremium])
+    }, [status, isPremium, applyHomeData])
   );
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    const [
-      loadedProfile,
-      loadedSession,
-      loadedCalibration,
-      loadedDeloadNudge,
-      loadedReadinessModifier,
-      loadedReadinessReasons,
-      loadedTrainingState,
-    ] = await Promise.all([
-      getProfile(),
-      getTodaySession(),
-      getCalibration(),
-      getDeloadNudge(isPremium),
-      getHealthReadinessModifier(),
-      getHealthReadinessReasons(),
-      getTrainingState(),
-    ]);
-    setProfile(loadedProfile);
-    setTodaySession(loadedSession);
-    setCalibration(loadedCalibration);
-    setDeloadNudge(loadedDeloadNudge);
-    setHealthReadinessModifier(loadedReadinessModifier);
-    setHealthReadinessReasons(loadedReadinessReasons);
-    setTrainingState(loadedTrainingState);
-    const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
-    const activity = await getWeekActivity(trainingDays);
-    setWeekActivity(activity);
+    applyHomeData(await loadHomeData(isPremium));
     setRefreshing(false);
-  }, [isPremium]);
+  }, [isPremium, applyHomeData]);
 
   const handleConnectHealthKit = useCallback(async () => {
     hapticImpactLight();

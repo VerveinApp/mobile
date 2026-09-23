@@ -19,6 +19,7 @@ import { useFadeInEntering } from '@/lib/screen-transitions';
 import { getRecentWeeks, type WeekDay } from '@/lib/session-history';
 import { useAppTheme } from '@/lib/theme-context';
 import { getTrainingState } from '@/lib/training-state-loader';
+import { unlessUnchanged } from '@/lib/stable-state';
 import type { TrainingState } from '@/lib/engine/training-state';
 import { getUnitSystem, type UnitSystem } from '@/lib/unit-preference';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
@@ -166,15 +167,17 @@ export default function ProgressScreen() {
       getImprovedExercises(),
     ]);
     const histories = await loadExerciseHistories(improved);
-    setProfile(loadedProfile);
+    // unlessUnchanged: a focus that finds nothing new keeps every object as
+    // it was, so a plain tab switch doesn't re-render the charts.
+    setProfile(unlessUnchanged(loadedProfile));
     setUnit(loadedUnit);
-    setWeeks(loadedWeeks);
-    setBodyAreaBreakdown(areas);
-    setMovementPatternBreakdown(patterns);
+    setWeeks(unlessUnchanged(loadedWeeks));
+    setBodyAreaBreakdown(unlessUnchanged(areas));
+    setMovementPatternBreakdown(unlessUnchanged(patterns));
     setLoggedSessionCount(sessionCount);
-    setTrainingState(state);
-    setImprovedExercises(improved);
-    setExerciseHistories(histories);
+    setTrainingState(unlessUnchanged(state));
+    setImprovedExercises(unlessUnchanged(improved));
+    setExerciseHistories(unlessUnchanged(histories));
   }, [weekCount, balanceSinceDays]);
 
   useFocusEffect(
