@@ -16,7 +16,10 @@
 // very first day. push_tokens.updated_at, by contrast, is re-upserted on
 // every real cold launch (see src/lib/push-notifications.ts, called from
 // the root layout's own useEffect) — it's a direct measure of "did the app
-// actually open recently," not "did an auth event fire recently." It's also
+// actually open recently," not "did an auth event fire recently." (Only
+// true since 20260923000000_push_tokens_touch_updated_at.sql: before that,
+// re-registration never advanced updated_at, so every user read as
+// inactive three days after first registering.) It's also
 // exactly the right table to query anyway: a user with no row here has no
 // token to push to regardless of how active they are, so there's nothing
 // to gain from also joining against last_sign_in_at for those users.
@@ -118,11 +121,14 @@ Deno.serve(async (req: Request) => {
   const messages = toNotify.flatMap((userId) =>
     (tokensByUser.get(userId) ?? []).map((token) => ({
       to: token,
-      title: 'Your training is waiting',
-      body: 'Even 5 minutes counts — jump back in whenever you’re ready.',
+      // Readiness, not debt — "your training is waiting" framed a few quiet
+      // days as something owed, the exact register this app avoids
+      // everywhere else. A few days off reads as recovered, because it is.
+      title: 'Rested and ready',
+      body: 'A few days off means you’re recovered — even a short session counts, whenever you’re ready.',
     }))
   );
-  await sendExpoPushBatch(messages);
+  await sendExpoPushBatch(adminClient, messages);
 
   // Recorded regardless of whether Expo's API actually accepted every
   // message — sendExpoPushBatch already treats a delivery failure as a

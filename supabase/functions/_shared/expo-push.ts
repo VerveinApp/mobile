@@ -35,24 +35,45 @@ type ExpoPushMessage = {
 // request would.
 const EXPO_PUSH_BATCH_SIZE = 100;
 
+type ExpoPushTicket =
+  | { status: 'ok'; id: string }
+  | { status: 'error'; message?: string; details?: { error?: string } };
+
 /**
  * Raw batch send — Expo's API accepts an array in one request rather than
  * one call per token, chunked to respect EXPO_PUSH_BATCH_SIZE above.
+ *
+ * Reads Expo's push tickets (returned in the same order as the messages)
+ * and deletes any token Expo reports as DeviceNotRegistered — the app was
+ * uninstalled, or the token was rotated. Without this, every dead device
+ * stayed in push_tokens and got retried forever, and Expo's own guidance is
+ * to stop sending to those tokens.
  */
-export async function sendExpoPushBatch(messages: ExpoPushMessage[]): Promise<void> {
+export async function sendExpoPushBatch(adminClient: SupabaseClient, messages: ExpoPushMessage[]): Promise<void> {
+  const deadTokens: string[] = [];
   for (let i = 0; i < messages.length; i += EXPO_PUSH_BATCH_SIZE) {
     const chunk = messages.slice(i, i + EXPO_PUSH_BATCH_SIZE);
     try {
-      await fetch(EXPO_PUSH_URL, {
+      const response = await fetch(EXPO_PUSH_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(chunk),
       });
+      const payload = (await response.json().catch(() => null)) as { data?: ExpoPushTicket[] } | null;
+      payload?.data?.forEach((ticket, index) => {
+        if (ticket.status === 'error' && ticket.details?.error === 'DeviceNotRegistered' && chunk[index]) {
+          deadTokens.push(chunk[index].to);
+        }
+      });
     } catch {
-      // Never a crash — see this file's own header comment. Continues to
-      // the next chunk rather than aborting the whole run over one failed
-      // request.
+      // Best-effort — see this file's own header comment.
     }
+  }
+  if (deadTokens.length === 0) return;
+  try {
+    await adminClient.from('push_tokens').delete().in('expo_push_token', deadTokens);
+  } catch {
+    // Pruning is housekeeping; a failure here just means another retry later.
   }
 }
 
@@ -83,8 +104,8 @@ export async function sendExpoPushToUser(
       body,
       data,
     }));
-    await sendExpoPushBatch(messages);
+    await sendExpoPushBatch(adminClient, messages);
   } catch {
-    // Never a crash — see this file's own header comment.
+    // See this file's own header comment — never throws.
   }
 }

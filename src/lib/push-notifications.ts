@@ -55,7 +55,15 @@ export async function registerForRemotePushNotifications(): Promise<void> {
     if (!projectId) return;
     const { data: expoPushToken } = await Notifications.getExpoPushTokenAsync({ projectId });
 
-    await supabase.from('push_tokens').upsert({ user_id: session.user.id, expo_push_token: expoPushToken });
+    // updated_at is what the server's re-engagement scan reads as "last
+    // opened" — sent explicitly, and also maintained by a trigger (see
+    // 20260923000000_push_tokens_touch_updated_at.sql, which also adds the
+    // UPDATE grant this upsert's conflict path needs).
+    await supabase.from('push_tokens').upsert({
+      user_id: session.user.id,
+      expo_push_token: expoPushToken,
+      updated_at: new Date().toISOString(),
+    });
   } catch {
     // Never a crash — worst case this device just doesn't receive a remote
     // push later, same "under-triggering is the safe failure mode" rule
