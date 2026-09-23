@@ -13,6 +13,7 @@ import { getArchivedNotes, deleteNote, setNoteArchived, type NoteEntry } from '@
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { SkeletonCard } from '@/components/ui/skeleton';
+import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 
 // Same full-swipe-commits gesture as the main Notes list — see that file's
 // own comment. The outer, full-swipe action here is Unarchive (putting a
@@ -128,8 +129,8 @@ export default function ArchiveScreen() {
           ) : (
             <View style={styles.card}>
               {notes.map((note, index) => (
+                <ReanimatedAnimated.View key={note.id} layout={LIST_ROW_LAYOUT} exiting={LIST_ROW_EXITING}>
                 <Swipeable
-                  key={note.id}
                   ref={(ref) => {
                     if (ref) swipeableRefs.current.set(note.id, ref);
                     else swipeableRefs.current.delete(note.id);
@@ -207,6 +208,7 @@ export default function ArchiveScreen() {
                     </View>
                   </Pressable>
                 </Swipeable>
+                </ReanimatedAnimated.View>
               ))}
             </View>
           )}

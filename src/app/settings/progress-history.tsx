@@ -22,6 +22,7 @@ import { useAppColors } from '@/lib/theme-context';
 import { getProfile } from '@/lib/user-profile';
 import { deleteWorkoutLog, getAllWorkoutLogs, type WorkoutLogExercise } from '@/lib/workout-log';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
+import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 
 // Same full-swipe-commits gesture as Notes/Weight History's own lists — see
 // notes/index.tsx's comment for the full reasoning. Scoped per HistoryRow
@@ -328,6 +329,7 @@ function HistoryRow({
   };
 
   return (
+    <ReanimatedAnimated.View layout={LIST_ROW_LAYOUT} exiting={LIST_ROW_EXITING}>
     <Swipeable
       ref={swipeableRef}
       renderRightActions={(_progress, dragX) => {
@@ -426,6 +428,7 @@ function HistoryRow({
         ) : null}
       </Pressable>
     </Swipeable>
+    </ReanimatedAnimated.View>
   );
 }
 

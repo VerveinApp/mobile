@@ -1,4 +1,4 @@
-import { Easing } from 'react-native-reanimated';
+import { Easing, FadeOut, LinearTransition } from 'react-native-reanimated';
 
 /**
  * Shared animation vocabulary — durations and easing curves meant to be
@@ -43,3 +43,13 @@ export const MOTION_EASING = {
  */
 export const ONBOARDING_REVEAL_DELAY_MS = 1000;
 export const ONBOARDING_REVEAL_STAGGER_MS = 180;
+
+/**
+ * Deleted/archived list rows (swipe-to-delete on notes and every history
+ * screen) fade out while the rows below spring up into the gap — they used
+ * to vanish instantly and the list snapped shut. Same spring as check-in's
+ * exercise list. Reanimated's layout animations already honor the system
+ * Reduce Motion setting on their own.
+ */
+export const LIST_ROW_LAYOUT = LinearTransition.springify(280).dampingRatio(0.8);
+export const LIST_ROW_EXITING = FadeOut.duration(MOTION_DURATION.fast).easing(MOTION_EASING.standard);

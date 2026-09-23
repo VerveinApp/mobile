@@ -25,6 +25,7 @@ import { getProfile } from '@/lib/user-profile';
 import { HealthConsentGate } from '@/components/settings/health-consent-gate';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 import { Sparkline } from '@/components/ui/sparkline';
+import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 
 // Same full-swipe-commits gesture as Notes/Weight History's own lists — see
 // notes/index.tsx's comment for the full reasoning.
@@ -296,8 +297,8 @@ export default function BodyMeasurementsScreen() {
                     ({ key, label }) => `${label} ${cmToDisplay(entry[key] as number, unit)}${unitSuffix}`
                   );
                   return (
+                    <ReanimatedAnimated.View key={entry.date} layout={LIST_ROW_LAYOUT} exiting={LIST_ROW_EXITING}>
                     <Swipeable
-                      key={entry.date}
                       ref={(ref) => {
                         if (ref) swipeableRefs.current.set(entry.date, ref);
                         else swipeableRefs.current.delete(entry.date);
@@ -347,6 +348,7 @@ export default function BodyMeasurementsScreen() {
                         </Text>
                       </View>
                     </Swipeable>
+                    </ReanimatedAnimated.View>
                   );
                 })}
               </View>

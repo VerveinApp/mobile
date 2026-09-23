@@ -23,6 +23,7 @@ import {
 } from '@/components/onboarding/horizontal-ruler';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 import { Sparkline } from '@/components/ui/sparkline';
+import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 
 // Same full-swipe-commits gesture as Notes' own list — see that file's
 // comment for the full reasoning. Only one action here (Delete), so there's
@@ -363,8 +364,8 @@ export default function WeightHistoryScreen() {
             ) : (
               <View style={styles.card}>
                 {entries.map((entry, index) => (
+                  <ReanimatedAnimated.View key={entry.date} layout={LIST_ROW_LAYOUT} exiting={LIST_ROW_EXITING}>
                   <Swipeable
-                    key={entry.date}
                     ref={(ref) => {
                       if (ref) swipeableRefs.current.set(entry.date, ref);
                       else swipeableRefs.current.delete(entry.date);
@@ -414,6 +415,7 @@ export default function WeightHistoryScreen() {
                       </Text>
                     </View>
                   </Swipeable>
+                  </ReanimatedAnimated.View>
                 ))}
               </View>
             )}

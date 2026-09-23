@@ -18,6 +18,7 @@ import { PremiumGate } from '@/components/premium-gate';
 import { HorizontalRuler } from '@/components/onboarding/horizontal-ruler';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 import { Sparkline } from '@/components/ui/sparkline';
+import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 
 // Half-hour resolution, 0–14 hours — finer than that isn't meaningful for a
 // manually-recalled number the way it might be for a wearable's own reading.
@@ -120,8 +121,8 @@ export default function SleepHistoryScreen() {
   };
 
   const renderEntryRow = (entry: SleepLogEntry, index: number, total: number) => (
+    <ReanimatedAnimated.View key={entry.date} layout={LIST_ROW_LAYOUT} exiting={LIST_ROW_EXITING}>
     <Swipeable
-      key={entry.date}
       ref={(ref) => {
         if (ref) swipeableRefs.current.set(entry.date, ref);
         else swipeableRefs.current.delete(entry.date);
@@ -160,6 +161,7 @@ export default function SleepHistoryScreen() {
         <Text style={styles.entryValue} maxFontSizeMultiplier={1.2}>{formatHours(entry.hours)}</Text>
       </View>
     </Swipeable>
+    </ReanimatedAnimated.View>
   );
 
   return (

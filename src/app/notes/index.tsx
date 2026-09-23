@@ -14,6 +14,7 @@ import { getArchivedNotes, getNotes, deleteNote, setNoteArchived, type NoteEntry
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { SkeletonCard } from '@/components/ui/skeleton';
+import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 
 // How far (in points) a row has to be dragged left before it auto-archives
 // on release — same "drag all the way = committed" gesture as Mail's own
@@ -177,8 +178,8 @@ export default function NotesScreen() {
           ) : (
             <View style={styles.card}>
               {notes.map((note, index) => (
+                <ReanimatedAnimated.View key={note.id} layout={LIST_ROW_LAYOUT} exiting={LIST_ROW_EXITING}>
                 <Swipeable
-                  key={note.id}
                   ref={(ref) => {
                     if (ref) swipeableRefs.current.set(note.id, ref);
                     else swipeableRefs.current.delete(note.id);
@@ -253,6 +254,7 @@ export default function NotesScreen() {
                     </View>
                   </Pressable>
                 </Swipeable>
+                </ReanimatedAnimated.View>
               ))}
             </View>
           )}

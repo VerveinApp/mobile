@@ -24,6 +24,7 @@ import { useAppColors } from '@/lib/theme-context';
 import { getProfile } from '@/lib/user-profile';
 import { HealthConsentGate } from '@/components/settings/health-consent-gate';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
+import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 
 // Same full-swipe-commits gesture as Notes/Weight History's own lists — see
 // notes/index.tsx's comment for the full reasoning.
@@ -254,8 +255,8 @@ export default function ConditionLogScreen() {
             ) : (
               <View style={styles.card}>
                 {entries.map((entry, index) => (
+                  <ReanimatedAnimated.View key={entry.id} layout={LIST_ROW_LAYOUT} exiting={LIST_ROW_EXITING}>
                   <Swipeable
-                    key={entry.id}
                     ref={(ref) => {
                       if (ref) swipeableRefs.current.set(entry.id, ref);
                       else swipeableRefs.current.delete(entry.id);
@@ -309,6 +310,7 @@ export default function ConditionLogScreen() {
                       <Text style={styles.entryDate} maxFontSizeMultiplier={1.2}>{formatEntryDate(entry.date)}</Text>
                     </View>
                   </Swipeable>
+                  </ReanimatedAnimated.View>
                 ))}
               </View>
             )}
