@@ -77,14 +77,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     gap: 12,
   },
+  // Geist, like every other screen — this was the one screen still in the
+  // system font. Safe here: fonts are loaded before anything under this
+  // boundary renders (RootLayout returns null until they are).
   title: {
     fontSize: Type.stat,
-    fontWeight: '700',
+    fontFamily: 'Geist-Bold',
     textAlign: 'center',
   },
   body: {
     fontSize: Type.bodyLarge,
     lineHeight: 20,
+    fontFamily: 'Geist-Regular',
     textAlign: 'center',
   },
   button: {
@@ -96,6 +100,6 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#ffffff',
     fontSize: Type.bodyLarge,
-    fontWeight: '600',
+    fontFamily: 'Geist-SemiBold',
   },
 });

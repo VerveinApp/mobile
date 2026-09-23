@@ -258,6 +258,7 @@ export default function SettingsScreen() {
 
   const entering = useFadeInEntering();
   const backHover = useHoverFade();
+  const signInHover = useHoverFade();
   const deleteHover = useHoverFade();
   const deletePress = useLiquidPress();
   const exportHover = useHoverFade();
@@ -1139,7 +1140,19 @@ export default function SettingsScreen() {
                 </Pressable>
               </>
             ) : (
-              <ComingSoonRow styles={styles} colors={colors} icon="person.crop.circle.badge.xmark" label="Account" subtitle="Not signed in" last />
+              // A real action, not a "Soon" placeholder — being signed out is a
+              // state you can fix right here, and the badge made it read as an
+              // unfinished feature.
+              <NavRow
+                styles={styles}
+                colors={colors}
+                icon="person.crop.circle.badge.xmark"
+                label="Sign in"
+                subtitle="Not signed in"
+                onPress={() => router.push('/onboarding/create-account' as never)}
+                hover={signInHover}
+                last
+              />
             )}
           </View>
 
@@ -1514,37 +1527,6 @@ function AppLockRow({
   );
 }
 
-function ComingSoonRow({
-  styles,
-  colors,
-  icon,
-  label,
-  subtitle,
-  last = false,
-}: {
-  styles: ReturnType<typeof createStyles>;
-  colors: Record<string, string>;
-  icon: SFSymbol;
-  label: string;
-  subtitle: string;
-  last?: boolean;
-}) {
-  return (
-    <View style={[styles.comingSoonRow, !last && styles.rowDivider]}>
-      <View style={styles.switchRowLeft}>
-        <SymbolView name={icon} size={15} tintColor={colors.iconFaint} style={styles.rowIcon} />
-        <View>
-          <Text style={styles.comingSoonLabel} maxFontSizeMultiplier={1.3}>{label}</Text>
-          <Text style={styles.comingSoonSubtitle} maxFontSizeMultiplier={1.3}>{subtitle}</Text>
-        </View>
-      </View>
-      <View style={styles.comingSoonBadge}>
-        <Text style={styles.comingSoonBadgeText} maxFontSizeMultiplier={1.2}>Soon</Text>
-      </View>
-    </View>
-  );
-}
-
 function createStyles(colors: Record<string, string>) {
   return StyleSheet.create({
     root: {
@@ -1683,11 +1665,6 @@ function createStyles(colors: Record<string, string>) {
       justifyContent: 'space-between',
       paddingVertical: 14,
     },
-    comingSoonLabel: {
-      color: colors.textSecondary,
-      fontSize: Type.body,
-      fontFamily: 'Geist-Medium',
-    },
     comingSoonSubtitle: {
       marginTop: 2,
       color: colors.textTertiary,
@@ -1706,17 +1683,6 @@ function createStyles(colors: Record<string, string>) {
       color: '#E5484D',
       fontSize: Type.body,
       fontFamily: 'Geist-Medium',
-    },
-    comingSoonBadge: {
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: 8,
-      backgroundColor: colors.badgeBg,
-    },
-    comingSoonBadgeText: {
-      color: colors.textTertiary,
-      fontSize: Type.micro,
-      fontFamily: 'Geist-SemiBold',
     },
     actionVisual: {
       padding: 16,

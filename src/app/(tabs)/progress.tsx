@@ -663,8 +663,8 @@ export default function ProgressScreen() {
                 bankedAreas.length > 0 ? (
                   <>
                     <Text style={styles.debtHint} maxFontSizeMultiplier={1.3}>
-                      Banked volume — sets your plan called for that a lower-energy day trimmed, ready to make up on a
-                      stronger one.
+                      Banked volume — sets a lower-energy day trimmed from your plan, there for a stronger day if you
+                      want them.
                     </Text>
                     {bankedAreas.map((area, index) => {
                       const debtSets = trainingState?.stimulusDebt.value[area].debtSets ?? 0;

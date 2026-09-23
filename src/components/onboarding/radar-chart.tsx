@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { Type } from '@/constants/theme';
 import { MOTION_DURATION } from '@/lib/motion';
 import { useAppColors } from '@/lib/theme-context';
 import ReanimatedAnimated, {
@@ -165,8 +166,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     alignItems: 'center',
   },
+  // Was 9pt — below the smallest size used anywhere else in the app and hard
+  // to read at a glance on a phone. Type.micro is the app's own floor.
   axisLabel: {
-    fontSize: 9,
+    fontSize: Type.micro,
     fontFamily: 'Geist-Medium',
     textAlign: 'center',
   },

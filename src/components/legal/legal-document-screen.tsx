@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
-import { useMemo } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useMemo, type ReactNode } from 'react';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
@@ -56,7 +56,9 @@ export function LegalDocumentScreen({
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <Text style={styles.effectiveDate} maxFontSizeMultiplier={1.3}>Effective {effectiveDate}</Text>
-        <Text style={styles.intro} maxFontSizeMultiplier={1.4}>{intro}</Text>
+        <Text style={styles.intro} maxFontSizeMultiplier={1.4} selectable>
+          {withEmailLinks(intro, styles.link)}
+        </Text>
 
         {sections.map((section) => (
           <View key={section.heading} style={styles.section}>
@@ -65,16 +67,42 @@ export function LegalDocumentScreen({
               paragraph.startsWith('- ') ? (
                 <View key={index} style={styles.bulletRow}>
                   <Text style={styles.bulletDot}>{'•'}</Text>
-                  <Text style={styles.bulletText} maxFontSizeMultiplier={1.4}>{paragraph.slice(2)}</Text>
+                  <Text style={styles.bulletText} maxFontSizeMultiplier={1.4} selectable>
+                    {withEmailLinks(paragraph.slice(2), styles.link)}
+                  </Text>
                 </View>
               ) : (
-                <Text key={index} style={styles.paragraph} maxFontSizeMultiplier={1.4}>{paragraph}</Text>
+                <Text key={index} style={styles.paragraph} maxFontSizeMultiplier={1.4} selectable>
+                  {withEmailLinks(paragraph, styles.link)}
+                </Text>
               )
             )}
           </View>
         ))}
       </ScrollView>
     </View>
+  );
+}
+
+const EMAIL_PATTERN = /([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/gi;
+
+/**
+ * Makes every email address in a paragraph a real mailto: link — the
+ * documents say "reach us at …" throughout, and that address used to be
+ * plain, un-tappable text in a screen whose whole point is telling people
+ * how to reach you.
+ */
+function withEmailLinks(text: string, linkStyle: TextStyle): ReactNode {
+  const parts = text.split(EMAIL_PATTERN);
+  if (parts.length === 1) return text;
+  return parts.map((part, i) =>
+    i % 2 === 1 ? (
+      <Text key={i} style={linkStyle} onPress={() => Linking.openURL(`mailto:${part}`)} accessibilityRole="link">
+        {part}
+      </Text>
+    ) : (
+      part
+    )
   );
 }
 
@@ -115,8 +143,8 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     intro: {
       color: colors.textSecondary,
-      fontSize: Type.body,
-      lineHeight: 20,
+      fontSize: Type.subtitle - 1,
+      lineHeight: 22,
       fontFamily: 'Geist-Medium',
       marginBottom: 20,
     },
@@ -131,8 +159,8 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     paragraph: {
       color: colors.textSecondary,
-      fontSize: Type.body,
-      lineHeight: 20,
+      fontSize: Type.subtitle - 1,
+      lineHeight: 22,
       fontFamily: 'Geist-Regular',
       marginBottom: 8,
     },
@@ -143,15 +171,20 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     bulletDot: {
       color: colors.textSecondary,
-      fontSize: Type.body,
+      fontSize: Type.subtitle - 1,
+      fontFamily: 'Geist-Regular',
       marginRight: 8,
-      lineHeight: 20,
+      lineHeight: 22,
+    },
+    link: {
+      color: colors.accentText,
+      fontFamily: 'Geist-Medium',
     },
     bulletText: {
       flex: 1,
       color: colors.textSecondary,
-      fontSize: Type.body,
-      lineHeight: 20,
+      fontSize: Type.subtitle - 1,
+      lineHeight: 22,
       fontFamily: 'Geist-Regular',
     },
   });
