@@ -643,6 +643,10 @@ export default function PaywallScreen() {
           </ScrollView>
 
           <View style={styles.footer}>
+            {/* The benefits list scrolls behind this fixed footer — without a
+                fade, its rows were cut off in a hard line right above the
+                price terms, reading as clipped rather than "more below". */}
+            <View pointerEvents="none" style={styles.scrollFade} />
             {/* BUG FIX: this used to render inside the ScrollView, right
                 after the checklist — at the bottom of scrollable content the
                 fixed Continue button below is reachable without ever
@@ -1149,6 +1153,14 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       paddingBottom: 28,
       paddingTop: 8,
       alignItems: 'center',
+    },
+    scrollFade: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      top: -28,
+      height: 28,
+      experimental_backgroundImage: `linear-gradient(180deg, transparent 0%, ${colors.background} 100%)`,
     },
     primaryButtonHit: {
       width: '100%',

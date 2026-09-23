@@ -632,7 +632,11 @@ function WeeklyActivity({
             <View
               style={[
                 styles.weekDot,
-                !day.isScheduled && styles.weekDotUnscheduled,
+                // A rest day is a small quiet dot, not the same ring as a
+                // training day with a slightly fainter border — the two
+                // used to be all but indistinguishable. Today keeps its
+                // full ring either way so it's always findable.
+                !day.isScheduled && !day.isToday && styles.weekDotRest,
                 day.isScheduled && day.completed === true && styles.weekDotCompleted,
                 // Fixed bug: previously `day.completed === false` only — a
                 // past day with zero recorded entry (completed: null, not
@@ -749,6 +753,9 @@ function YourFitness({
   // existed) draws as an empty track rather than a fabricated bar, per this
   // app's own no-synthetic-data rule for trend visuals.
   const maxDailyKcal = Math.max(1, ...weekActivity.days.map((day) => day.caloriesBurned ?? 0));
+  // An all-empty chart was seven flat stubs under 40pt of blank space — a
+  // plain line saying what will appear there reads better until real data does.
+  const hasAnyLoadData = weekActivity.days.some((day) => (day.caloriesBurned ?? 0) > 0);
 
   return (
     <View style={styles.section}>
@@ -766,8 +773,16 @@ function YourFitness({
       <View style={styles.fitnessCard}>
         <View style={styles.fitnessCardHeader}>
           <Text style={styles.fitnessCardLabel} maxFontSizeMultiplier={1.3}>Training Load</Text>
-          <Text style={styles.fitnessCardValue} maxFontSizeMultiplier={1.2}>{loadLabel}</Text>
+          {/* The PLANNED load (from the commitment level chosen at setup),
+              not a measurement — labeled as such, since it sat above an
+              empty chart for anyone who hadn't logged a session yet and
+              read as a claim about training that hadn't happened. */}
+          <Text style={styles.fitnessCardValue} maxFontSizeMultiplier={1.2}>
+            {loadLabel}
+            <Text style={styles.fitnessCardTier}> plan</Text>
+          </Text>
         </View>
+        {hasAnyLoadData ? (
         <View style={styles.loadChart} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
           {weekActivity.days.map((day) => {
             const kcal = day.caloriesBurned ?? 0;
@@ -785,6 +800,11 @@ function YourFitness({
             );
           })}
         </View>
+        ) : (
+          <Text style={styles.loadChartEmptyText} maxFontSizeMultiplier={1.3}>
+            Bars fill in as you log sessions this week.
+          </Text>
+        )}
         <Text style={styles.fitnessCardNote} maxFontSizeMultiplier={1.4}>{readinessNote}</Text>
         {calibrationNote ? (
           <Text style={styles.fitnessCardCalibrationNote} maxFontSizeMultiplier={1.4}>
@@ -1018,11 +1038,17 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       height: 22,
       borderRadius: 11,
       borderWidth: 1.5,
-      borderColor: colors.surfaceBorder,
+      borderColor: colors.textQuaternary,
       backgroundColor: 'transparent',
     },
-    weekDotUnscheduled: {
-      borderColor: colors.badgeBg,
+    // Same 22pt footprint as a ring (margins), so the row never shifts.
+    weekDotRest: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      borderWidth: 0,
+      marginVertical: 8,
+      backgroundColor: colors.surfaceBorder,
     },
     weekDotCompleted: {
       borderColor: '#5FBE84',
@@ -1103,6 +1129,12 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     loadChartBarEmpty: {
       height: '12%',
       backgroundColor: colors.badgeBg,
+    },
+    loadChartEmptyText: {
+      marginTop: 10,
+      color: colors.textTertiary,
+      fontSize: Type.secondary,
+      fontFamily: 'Geist-Medium',
     },
     fitnessCardNote: {
       marginTop: 6,
