@@ -1,9 +1,8 @@
 import * as Crypto from 'expo-crypto';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import ReanimatedAnimated from 'react-native-reanimated';
-import { Swipeable } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
@@ -14,16 +13,12 @@ import { getArchivedNotes, getNotes, deleteNote, setNoteArchived, type NoteEntry
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { SkeletonCard } from '@/components/ui/skeleton';
+import { SwipeRow } from '@/components/ui/swipe-row';
 import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 
-// How far (in points) a row has to be dragged left before it auto-archives
-// on release — same "drag all the way = committed" gesture as Mail's own
-// list. Archive is the full-swipe action here (Mail's own default), not
-// Delete — short of this threshold, releasing just leaves both action
-// buttons revealed, same as before. Tuned against this card's own row
-// width, not the full screen width, since overshootRight lets the drag
-// continue well past the buttons.
-const FULL_SWIPE_ARCHIVE_THRESHOLD = -220;
+// Archive is the full-swipe action here (Mail's own default), not Delete —
+// a shorter swipe just leaves both action buttons revealed. See SwipeRow for
+// the gesture itself.
 
 function noteTitle(text: string): string {
   return text.split('\n')[0].trim();
@@ -78,17 +73,6 @@ export default function NotesScreen() {
   const [notes, setNotes] = useState<NoteEntry[]>([]);
   const [archivedCount, setArchivedCount] = useState(0);
   const [loaded, setLoaded] = useState(false);
-  // Per-row bookkeeping for the Mail-style full-swipe gesture: swipeableRefs
-  // lets a row close itself once committed, dragListeners tracks the one
-  // active Animated.Value listener per row (removed/replaced each time
-  // renderRightActions runs, so re-renders don't stack up duplicates), and
-  // pendingFullSwipeArchive marks a row as "committed" the moment the drag
-  // crosses the threshold — the actual archive only fires from
-  // onSwipeableClose below, once the row has finished animating away from
-  // under the still-active touch, not mid-gesture.
-  const swipeableRefs = useRef<Map<string, Swipeable>>(new Map());
-  const dragListeners = useRef<Map<string, string>>(new Map());
-  const pendingFullSwipeArchive = useRef<Set<string>>(new Set());
 
   const reload = useCallback(() => {
     (async () => {
@@ -179,52 +163,31 @@ export default function NotesScreen() {
             <View style={styles.card}>
               {notes.map((note, index) => (
                 <ReanimatedAnimated.View key={note.id} layout={LIST_ROW_LAYOUT} exiting={LIST_ROW_EXITING}>
-                <Swipeable
-                  ref={(ref) => {
-                    if (ref) swipeableRefs.current.set(note.id, ref);
-                    else swipeableRefs.current.delete(note.id);
-                  }}
-                  renderRightActions={(_progress, dragX) => {
-                    const previousListenerId = dragListeners.current.get(note.id);
-                    if (previousListenerId) dragX.removeListener(previousListenerId);
-                    const listenerId = dragX.addListener(({ value }) => {
-                      if (value < FULL_SWIPE_ARCHIVE_THRESHOLD && !pendingFullSwipeArchive.current.has(note.id)) {
-                        pendingFullSwipeArchive.current.add(note.id);
-                        swipeableRefs.current.get(note.id)?.close();
-                      }
-                    });
-                    dragListeners.current.set(note.id, listenerId);
-                    return (
-                      <View style={styles.actionsRow}>
-                        <Pressable
-                          style={({ pressed }) => [styles.action, styles.archiveAction, pressed && PRESSED_DIM]}
-                          onPress={() => {
-                            swipeableRefs.current.get(note.id)?.close();
-                            handleArchive(note);
-                          }}
-                          accessibilityRole="button"
-                          accessibilityLabel="Archive note"
-                        >
-                          <SymbolView name="archivebox.fill" size={15} tintColor="#ffffff" />
-                        </Pressable>
-                        <Pressable
-                          style={({ pressed }) => [styles.action, styles.deleteAction, pressed && PRESSED_DIM]}
-                          onPress={() => handleDelete(note.id)}
-                          accessibilityRole="button"
-                          accessibilityLabel="Delete note"
-                        >
-                          <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
-                        </Pressable>
-                      </View>
-                    );
-                  }}
-                  onSwipeableClose={() => {
-                    if (pendingFullSwipeArchive.current.has(note.id)) {
-                      pendingFullSwipeArchive.current.delete(note.id);
-                      handleArchive(note);
-                    }
-                  }}
-                  overshootRight
+                <SwipeRow
+                  renderActions={(close) => (
+                    <View style={styles.actionsRow}>
+                      <Pressable
+                        style={({ pressed }) => [styles.action, styles.archiveAction, pressed && PRESSED_DIM]}
+                        onPress={() => {
+                          close();
+                          handleArchive(note);
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Archive note"
+                      >
+                        <SymbolView name="archivebox.fill" size={15} tintColor="#ffffff" />
+                      </Pressable>
+                      <Pressable
+                        style={({ pressed }) => [styles.action, styles.deleteAction, pressed && PRESSED_DIM]}
+                        onPress={() => handleDelete(note.id)}
+                        accessibilityRole="button"
+                        accessibilityLabel="Delete note"
+                      >
+                        <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
+                      </Pressable>
+                    </View>
+                  )}
+                  onFullSwipe={() => handleArchive(note)}
                 >
                   <Pressable
                     style={[
@@ -253,7 +216,7 @@ export default function NotesScreen() {
                       </View>
                     </View>
                   </Pressable>
-                </Swipeable>
+                </SwipeRow>
                 </ReanimatedAnimated.View>
               ))}
             </View>

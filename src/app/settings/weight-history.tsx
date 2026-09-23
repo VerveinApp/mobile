@@ -1,8 +1,7 @@
 import { router } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import ReanimatedAnimated from 'react-native-reanimated';
-import { Swipeable } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
@@ -23,12 +22,8 @@ import {
 } from '@/components/onboarding/horizontal-ruler';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 import { Sparkline } from '@/components/ui/sparkline';
+import { SwipeRow } from '@/components/ui/swipe-row';
 import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
-
-// Same full-swipe-commits gesture as Notes' own list — see that file's
-// comment for the full reasoning. Only one action here (Delete), so there's
-// no archive-vs-delete ambiguity to resolve on commit.
-const FULL_SWIPE_DELETE_THRESHOLD = -220;
 
 // Same conversion math and item ranges as biometrics-sheet.tsx — duplicated
 // rather than shared so this screen stays independent of that sheet, same
@@ -121,9 +116,6 @@ export default function WeightHistoryScreen() {
   const addHover = useHoverFade();
   const savePress = useLiquidPress();
   const entering = useFadeInEntering();
-  const swipeableRefs = useRef<Map<string, Swipeable>>(new Map());
-  const dragListeners = useRef<Map<string, string>>(new Map());
-  const pendingFullSwipeDelete = useRef<Set<string>>(new Set());
 
   const [entries, setEntries] = useState<WeightLogEntry[]>([]);
   const [unit, setUnit] = useState<UnitSystem>('imperial');
@@ -369,42 +361,18 @@ export default function WeightHistoryScreen() {
               <View style={styles.card}>
                 {entries.map((entry, index) => (
                   <ReanimatedAnimated.View key={entry.date} layout={LIST_ROW_LAYOUT} exiting={LIST_ROW_EXITING}>
-                  <Swipeable
-                    ref={(ref) => {
-                      if (ref) swipeableRefs.current.set(entry.date, ref);
-                      else swipeableRefs.current.delete(entry.date);
-                    }}
-                    renderRightActions={(_progress, dragX) => {
-                      const previousListenerId = dragListeners.current.get(entry.date);
-                      if (previousListenerId) dragX.removeListener(previousListenerId);
-                      const listenerId = dragX.addListener(({ value }) => {
-                        if (
-                          value < FULL_SWIPE_DELETE_THRESHOLD &&
-                          !pendingFullSwipeDelete.current.has(entry.date)
-                        ) {
-                          pendingFullSwipeDelete.current.add(entry.date);
-                          swipeableRefs.current.get(entry.date)?.close();
-                        }
-                      });
-                      dragListeners.current.set(entry.date, listenerId);
-                      return (
-                        <Pressable
-                          style={({ pressed }) => [styles.deleteAction, pressed && PRESSED_DIM]}
-                          onPress={() => handleDelete(entry.date)}
-                          accessibilityRole="button"
-                          accessibilityLabel="Delete entry"
-                        >
-                          <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
-                        </Pressable>
-                      );
-                    }}
-                    onSwipeableClose={() => {
-                      if (pendingFullSwipeDelete.current.has(entry.date)) {
-                        pendingFullSwipeDelete.current.delete(entry.date);
-                        handleDelete(entry.date);
-                      }
-                    }}
-                    overshootRight
+                  <SwipeRow
+                    renderActions={() => (
+                      <Pressable
+                        style={({ pressed }) => [styles.deleteAction, pressed && PRESSED_DIM]}
+                        onPress={() => handleDelete(entry.date)}
+                        accessibilityRole="button"
+                        accessibilityLabel="Delete entry"
+                      >
+                        <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
+                      </Pressable>
+                    )}
+                    onFullSwipe={() => handleDelete(entry.date)}
                   >
                     <View
                       style={[
@@ -418,7 +386,7 @@ export default function WeightHistoryScreen() {
                         {formatWeight(entry.weightKg, unit)}
                       </Text>
                     </View>
-                  </Swipeable>
+                  </SwipeRow>
                   </ReanimatedAnimated.View>
                 ))}
               </View>

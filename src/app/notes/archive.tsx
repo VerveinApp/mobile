@@ -1,8 +1,7 @@
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import ReanimatedAnimated from 'react-native-reanimated';
-import { Swipeable } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
@@ -13,14 +12,12 @@ import { getArchivedNotes, deleteNote, setNoteArchived, type NoteEntry } from '@
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { SkeletonCard } from '@/components/ui/skeleton';
+import { SwipeRow } from '@/components/ui/swipe-row';
 import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 
-// Same full-swipe-commits gesture as the main Notes list — see that file's
-// own comment. The outer, full-swipe action here is Unarchive (putting a
-// note back), not Delete — this is the one place a full swipe shouldn't
-// mean "gone," since everything in this list already survived one swipe
-// gesture to get here.
-const FULL_SWIPE_UNARCHIVE_THRESHOLD = -220;
+// The full-swipe action here is Unarchive (putting a note back), not Delete
+// — this is the one place a full swipe shouldn't mean "gone," since
+// everything in this list already survived one swipe gesture to get here.
 
 function noteTitle(text: string): string {
   return text.split('\n')[0].trim();
@@ -57,9 +54,6 @@ export default function ArchiveScreen() {
 
   const [notes, setNotes] = useState<NoteEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const swipeableRefs = useRef<Map<string, Swipeable>>(new Map());
-  const dragListeners = useRef<Map<string, string>>(new Map());
-  const pendingFullSwipeUnarchive = useRef<Set<string>>(new Set());
 
   const reload = useCallback(() => {
     (async () => {
@@ -130,55 +124,31 @@ export default function ArchiveScreen() {
             <View style={styles.card}>
               {notes.map((note, index) => (
                 <ReanimatedAnimated.View key={note.id} layout={LIST_ROW_LAYOUT} exiting={LIST_ROW_EXITING}>
-                <Swipeable
-                  ref={(ref) => {
-                    if (ref) swipeableRefs.current.set(note.id, ref);
-                    else swipeableRefs.current.delete(note.id);
-                  }}
-                  renderRightActions={(_progress, dragX) => {
-                    const previousListenerId = dragListeners.current.get(note.id);
-                    if (previousListenerId) dragX.removeListener(previousListenerId);
-                    const listenerId = dragX.addListener(({ value }) => {
-                      if (
-                        value < FULL_SWIPE_UNARCHIVE_THRESHOLD &&
-                        !pendingFullSwipeUnarchive.current.has(note.id)
-                      ) {
-                        pendingFullSwipeUnarchive.current.add(note.id);
-                        swipeableRefs.current.get(note.id)?.close();
-                      }
-                    });
-                    dragListeners.current.set(note.id, listenerId);
-                    return (
-                      <View style={styles.actionsRow}>
-                        <Pressable
-                          style={({ pressed }) => [styles.action, styles.unarchiveAction, pressed && PRESSED_DIM]}
-                          onPress={() => {
-                            swipeableRefs.current.get(note.id)?.close();
-                            handleUnarchive(note);
-                          }}
-                          accessibilityRole="button"
-                          accessibilityLabel="Move note out of Archive"
-                        >
-                          <SymbolView name="arrow.uturn.left" size={15} tintColor="#ffffff" />
-                        </Pressable>
-                        <Pressable
-                          style={({ pressed }) => [styles.action, styles.deleteAction, pressed && PRESSED_DIM]}
-                          onPress={() => handleDelete(note.id)}
-                          accessibilityRole="button"
-                          accessibilityLabel="Delete note"
-                        >
-                          <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
-                        </Pressable>
-                      </View>
-                    );
-                  }}
-                  onSwipeableClose={() => {
-                    if (pendingFullSwipeUnarchive.current.has(note.id)) {
-                      pendingFullSwipeUnarchive.current.delete(note.id);
-                      handleUnarchive(note);
-                    }
-                  }}
-                  overshootRight
+                <SwipeRow
+                  renderActions={(close) => (
+                    <View style={styles.actionsRow}>
+                      <Pressable
+                        style={({ pressed }) => [styles.action, styles.unarchiveAction, pressed && PRESSED_DIM]}
+                        onPress={() => {
+                          close();
+                          handleUnarchive(note);
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Move note out of Archive"
+                      >
+                        <SymbolView name="arrow.uturn.left" size={15} tintColor="#ffffff" />
+                      </Pressable>
+                      <Pressable
+                        style={({ pressed }) => [styles.action, styles.deleteAction, pressed && PRESSED_DIM]}
+                        onPress={() => handleDelete(note.id)}
+                        accessibilityRole="button"
+                        accessibilityLabel="Delete note"
+                      >
+                        <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
+                      </Pressable>
+                    </View>
+                  )}
+                  onFullSwipe={() => handleUnarchive(note)}
                 >
                   <Pressable
                     style={[
@@ -207,7 +177,7 @@ export default function ArchiveScreen() {
                       </View>
                     </View>
                   </Pressable>
-                </Swipeable>
+                </SwipeRow>
                 </ReanimatedAnimated.View>
               ))}
             </View>

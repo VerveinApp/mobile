@@ -1,8 +1,7 @@
 import { router } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import ReanimatedAnimated from 'react-native-reanimated';
-import { Swipeable } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
@@ -18,6 +17,7 @@ import { PremiumGate } from '@/components/premium-gate';
 import { HorizontalRuler } from '@/components/onboarding/horizontal-ruler';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 import { Sparkline } from '@/components/ui/sparkline';
+import { SwipeRow } from '@/components/ui/swipe-row';
 import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 
 // 50-calorie resolution, 0–5000 — a manually-recalled daily total doesn't
@@ -28,7 +28,6 @@ const DEFAULT_CALORIES = 2000;
 // is never gated, only looking back further than that is, same "raw log
 // free, deeper view Plus" split as Progress's own gated sections.
 const RECENT_FREE_COUNT = 7;
-const FULL_SWIPE_DELETE_THRESHOLD = -220;
 
 function caloriesIndexToCalories(index: number): number {
   return index * 50;
@@ -64,9 +63,6 @@ export default function NutritionHistoryScreen() {
   const savePress = useLiquidPress();
   const entering = useFadeInEntering();
   const isPremium = usePremiumEntitlement();
-  const swipeableRefs = useRef<Map<string, Swipeable>>(new Map());
-  const dragListeners = useRef<Map<string, string>>(new Map());
-  const pendingFullSwipeDelete = useRef<Set<string>>(new Set());
 
   const [entries, setEntries] = useState<NutritionLogEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -121,45 +117,24 @@ export default function NutritionHistoryScreen() {
 
   const renderEntryRow = (entry: NutritionLogEntry, index: number, total: number) => (
     <ReanimatedAnimated.View key={entry.date} layout={LIST_ROW_LAYOUT} exiting={LIST_ROW_EXITING}>
-    <Swipeable
-      ref={(ref) => {
-        if (ref) swipeableRefs.current.set(entry.date, ref);
-        else swipeableRefs.current.delete(entry.date);
-      }}
-      renderRightActions={(_progress, dragX) => {
-        const previousListenerId = dragListeners.current.get(entry.date);
-        if (previousListenerId) dragX.removeListener(previousListenerId);
-        const listenerId = dragX.addListener(({ value }) => {
-          if (value < FULL_SWIPE_DELETE_THRESHOLD && !pendingFullSwipeDelete.current.has(entry.date)) {
-            pendingFullSwipeDelete.current.add(entry.date);
-            swipeableRefs.current.get(entry.date)?.close();
-          }
-        });
-        dragListeners.current.set(entry.date, listenerId);
-        return (
-          <Pressable
-            style={({ pressed }) => [styles.deleteAction, pressed && PRESSED_DIM]}
-            onPress={() => handleDelete(entry.date)}
-            accessibilityRole="button"
-            accessibilityLabel="Delete entry"
-          >
-            <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
-          </Pressable>
-        );
-      }}
-      onSwipeableClose={() => {
-        if (pendingFullSwipeDelete.current.has(entry.date)) {
-          pendingFullSwipeDelete.current.delete(entry.date);
-          handleDelete(entry.date);
-        }
-      }}
-      overshootRight
+    <SwipeRow
+      renderActions={() => (
+        <Pressable
+          style={({ pressed }) => [styles.deleteAction, pressed && PRESSED_DIM]}
+          onPress={() => handleDelete(entry.date)}
+          accessibilityRole="button"
+          accessibilityLabel="Delete entry"
+        >
+          <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
+        </Pressable>
+      )}
+      onFullSwipe={() => handleDelete(entry.date)}
     >
       <View style={[styles.entryRow, index < total - 1 && styles.entryRowDivider, { backgroundColor: colors.surface }]}>
         <Text style={styles.entryDate} maxFontSizeMultiplier={1.2}>{formatEntryDate(entry.date)}</Text>
         <Text style={styles.entryValue} maxFontSizeMultiplier={1.2}>{formatCalories(entry.calories)}</Text>
       </View>
-    </Swipeable>
+    </SwipeRow>
     </ReanimatedAnimated.View>
   );
 

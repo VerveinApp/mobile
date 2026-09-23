@@ -3,7 +3,6 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import ReanimatedAnimated from 'react-native-reanimated';
-import { Swipeable } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
@@ -22,13 +21,8 @@ import { useAppColors } from '@/lib/theme-context';
 import { getProfile } from '@/lib/user-profile';
 import { deleteWorkoutLog, getAllWorkoutLogs, type WorkoutLogExercise } from '@/lib/workout-log';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
+import { SwipeRow } from '@/components/ui/swipe-row';
 import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
-
-// Same full-swipe-commits gesture as Notes/Weight History's own lists — see
-// notes/index.tsx's comment for the full reasoning. Scoped per HistoryRow
-// instance below (a plain ref, not a Map) since each row is already its own
-// component instance, not an inline .map() render.
-const FULL_SWIPE_DELETE_THRESHOLD = -220;
 
 function formatEntryDate(dateStr: string): string {
   const [year, month, day] = dateStr.split('-').map(Number);
@@ -318,9 +312,6 @@ function HistoryRow({
   const [expanded, setExpanded] = useState(isTarget);
   const hasLog = !!exercises && exercises.length > 0;
   const doneCount = exercises?.filter((e) => e.completed).length ?? 0;
-  const swipeableRef = useRef<Swipeable>(null);
-  const dragListenerId = useRef<string | null>(null);
-  const pendingFullSwipeDelete = useRef(false);
 
   const toggleExpanded = () => {
     if (!hasLog) return;
@@ -330,34 +321,18 @@ function HistoryRow({
 
   return (
     <ReanimatedAnimated.View layout={LIST_ROW_LAYOUT} exiting={LIST_ROW_EXITING}>
-    <Swipeable
-      ref={swipeableRef}
-      renderRightActions={(_progress, dragX) => {
-        if (dragListenerId.current) dragX.removeListener(dragListenerId.current);
-        dragListenerId.current = dragX.addListener(({ value }) => {
-          if (value < FULL_SWIPE_DELETE_THRESHOLD && !pendingFullSwipeDelete.current) {
-            pendingFullSwipeDelete.current = true;
-            swipeableRef.current?.close();
-          }
-        });
-        return (
-          <Pressable
-            style={({ pressed }) => [styles.deleteAction, pressed && PRESSED_DIM]}
-            onPress={onDelete}
-            accessibilityRole="button"
-            accessibilityLabel="Delete session"
-          >
-            <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
-          </Pressable>
-        );
-      }}
-      onSwipeableClose={() => {
-        if (pendingFullSwipeDelete.current) {
-          pendingFullSwipeDelete.current = false;
-          onDelete();
-        }
-      }}
-      overshootRight
+    <SwipeRow
+      renderActions={() => (
+        <Pressable
+          style={({ pressed }) => [styles.deleteAction, pressed && PRESSED_DIM]}
+          onPress={onDelete}
+          accessibilityRole="button"
+          accessibilityLabel="Delete session"
+        >
+          <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
+        </Pressable>
+      )}
+      onFullSwipe={onDelete}
     >
       <Pressable
         onPress={toggleExpanded}
@@ -427,7 +402,7 @@ function HistoryRow({
           </View>
         ) : null}
       </Pressable>
-    </Swipeable>
+    </SwipeRow>
     </ReanimatedAnimated.View>
   );
 }

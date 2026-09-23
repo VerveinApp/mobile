@@ -1,9 +1,8 @@
 import * as Crypto from 'expo-crypto';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import ReanimatedAnimated from 'react-native-reanimated';
-import { Swipeable } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
@@ -24,11 +23,8 @@ import { useAppColors } from '@/lib/theme-context';
 import { getProfile } from '@/lib/user-profile';
 import { HealthConsentGate } from '@/components/settings/health-consent-gate';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
+import { SwipeRow } from '@/components/ui/swipe-row';
 import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
-
-// Same full-swipe-commits gesture as Notes/Weight History's own lists — see
-// notes/index.tsx's comment for the full reasoning.
-const FULL_SWIPE_DELETE_THRESHOLD = -220;
 
 // 0 = today, since a flare-up (unlike a training session) can honestly be
 // logged the same day it's happening — unlike log-past-session-sheet.tsx's
@@ -59,9 +55,6 @@ export default function ConditionLogScreen() {
   const addHover = useHoverFade();
   const savePress = useLiquidPress();
   const entering = useFadeInEntering();
-  const swipeableRefs = useRef<Map<string, Swipeable>>(new Map());
-  const dragListeners = useRef<Map<string, string>>(new Map());
-  const pendingFullSwipeDelete = useRef<Set<string>>(new Set());
 
   const [entries, setEntries] = useState<ConditionLogEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -256,39 +249,18 @@ export default function ConditionLogScreen() {
               <View style={styles.card}>
                 {entries.map((entry, index) => (
                   <ReanimatedAnimated.View key={entry.id} layout={LIST_ROW_LAYOUT} exiting={LIST_ROW_EXITING}>
-                  <Swipeable
-                    ref={(ref) => {
-                      if (ref) swipeableRefs.current.set(entry.id, ref);
-                      else swipeableRefs.current.delete(entry.id);
-                    }}
-                    renderRightActions={(_progress, dragX) => {
-                      const previousListenerId = dragListeners.current.get(entry.id);
-                      if (previousListenerId) dragX.removeListener(previousListenerId);
-                      const listenerId = dragX.addListener(({ value }) => {
-                        if (value < FULL_SWIPE_DELETE_THRESHOLD && !pendingFullSwipeDelete.current.has(entry.id)) {
-                          pendingFullSwipeDelete.current.add(entry.id);
-                          swipeableRefs.current.get(entry.id)?.close();
-                        }
-                      });
-                      dragListeners.current.set(entry.id, listenerId);
-                      return (
-                        <Pressable
-                          style={({ pressed }) => [styles.deleteAction, pressed && PRESSED_DIM]}
-                          onPress={() => handleDelete(entry.id)}
-                          accessibilityRole="button"
-                          accessibilityLabel="Delete entry"
-                        >
-                          <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
-                        </Pressable>
-                      );
-                    }}
-                    onSwipeableClose={() => {
-                      if (pendingFullSwipeDelete.current.has(entry.id)) {
-                        pendingFullSwipeDelete.current.delete(entry.id);
-                        handleDelete(entry.id);
-                      }
-                    }}
-                    overshootRight
+                  <SwipeRow
+                    renderActions={() => (
+                      <Pressable
+                        style={({ pressed }) => [styles.deleteAction, pressed && PRESSED_DIM]}
+                        onPress={() => handleDelete(entry.id)}
+                        accessibilityRole="button"
+                        accessibilityLabel="Delete entry"
+                      >
+                        <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
+                      </Pressable>
+                    )}
+                    onFullSwipe={() => handleDelete(entry.id)}
                   >
                     <View
                       style={[
@@ -309,7 +281,7 @@ export default function ConditionLogScreen() {
                       </View>
                       <Text style={styles.entryDate} maxFontSizeMultiplier={1.2}>{formatEntryDate(entry.date)}</Text>
                     </View>
-                  </Swipeable>
+                  </SwipeRow>
                   </ReanimatedAnimated.View>
                 ))}
               </View>
