@@ -33,7 +33,7 @@ import { postAccessibilityScreenChanged } from 'expo-accessibility-rescan';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { getCalibration, submitSessionFeedback } from '@/lib/calibration';
-import { Type } from '@/constants/theme';
+import { Type, sheenGradient } from '@/constants/theme';
 import { getLastCheckIn, recordCheckIn, type CheckInRecord } from '@/lib/check-in-history';
 import { getDecisionTraceLog, recordDecisionTrace } from '@/lib/decision-trace-log';
 import { TAG_LINES } from '@/lib/engine/explanation-string';
@@ -3464,7 +3464,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       right: 0,
       top: 0,
       height: '30%',
-      backgroundColor: colors.surfaceSheen,
+      ...sheenGradient(colors.surfaceSheen),
     },
     exerciseLogHint: {
       paddingTop: 12,

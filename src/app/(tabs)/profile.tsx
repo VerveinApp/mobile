@@ -8,7 +8,7 @@ import { SymbolView } from '@/components/ui/app-symbol';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
 import { useHoverFade } from '@/lib/button-interactions';
-import { AndroidCardElevation, AndroidRipple, TabularNums, Type } from '@/constants/theme';
+import { AndroidCardElevation, AndroidRipple, TabularNums, Type, sheenGradient } from '@/constants/theme';
 import { hapticImpactLight, hapticSuccess } from '@/lib/haptics';
 import {
   DURATION_LABELS,
@@ -553,7 +553,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors']) {
       right: 0,
       top: 0,
       height: '40%',
-      backgroundColor: colors.surfaceSheen,
+      ...sheenGradient(colors.surfaceSheen),
     },
     planRow: {
       flexDirection: 'row',

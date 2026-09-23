@@ -3,7 +3,7 @@ import { useMemo } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { SymbolView } from '@/components/ui/app-symbol';
-import { AndroidRaisedElevation, AndroidRipple, Type } from '@/constants/theme';
+import { AndroidRaisedElevation, AndroidRipple, Type, sheenGradient } from '@/constants/theme';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticImpactLight } from '@/lib/haptics';
 import { useAppTheme } from '@/lib/theme-context';
@@ -168,7 +168,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], isDark: 
       right: 0,
       top: 0,
       height: '55%',
-      backgroundColor: colors.surfaceSheen,
+      ...sheenGradient(colors.surfaceSheen),
     },
     cardKicker: {
       // Brand green, but see Colors.light.accentText's own comment — this

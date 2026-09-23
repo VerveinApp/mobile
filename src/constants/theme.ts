@@ -5,7 +5,7 @@
 
 import '@/global.css';
 
-import { Platform, type TextStyle } from 'react-native';
+import { Platform, type TextStyle, type ViewStyle } from 'react-native';
 
 /**
  * Light mode follows the same grouped-list convention as iOS Settings: a
@@ -196,3 +196,15 @@ export const AndroidRaisedElevation = { elevation: 6 };
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;
+
+/**
+ * The top-down card sheen as a real gradient, not a flat block. BUG FIX:
+ * every *Sheen overlay used to be a solid surfaceSheen rectangle covering
+ * the card's top 30–55%, and its bottom edge drew a visible hard line
+ * straight across the card (through the Today card's title, between Your
+ * Plan's rows) — read as a rendering seam, not a sheen. Fading to
+ * transparent keeps the same light-from-above feel with no edge.
+ */
+export function sheenGradient(sheenColor: string): Pick<ViewStyle, 'experimental_backgroundImage'> {
+  return { experimental_backgroundImage: `linear-gradient(180deg, ${sheenColor} 0%, transparent 100%)` };
+}

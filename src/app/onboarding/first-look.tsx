@@ -13,7 +13,7 @@ import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
 import { goBack } from '@/lib/onboarding-nav';
 import { useFadeInEntering } from '@/lib/screen-transitions';
-import { AndroidRippleOnAccent, Type } from '@/constants/theme';
+import { AndroidRippleOnAccent, Type, sheenGradient } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 import {
   ArrowUpIconGraphic,
@@ -264,7 +264,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       right: 0,
       top: 0,
       height: '48%',
-      backgroundColor: colors.surfaceSheen,
+      ...sheenGradient(colors.surfaceSheen),
     },
     cardSecond: {
       top: 412,

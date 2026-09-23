@@ -14,7 +14,7 @@ import { MOTION_DURATION, ONBOARDING_REVEAL_DELAY_MS, ONBOARDING_REVEAL_STAGGER_
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
 import { useFadeInEntering } from '@/lib/screen-transitions';
-import { AndroidRippleOnAccent, Type } from '@/constants/theme';
+import { AndroidRippleOnAccent, Type, sheenGradient } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
 import {
@@ -260,7 +260,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       right: 0,
       top: 0,
       height: '48%',
-      backgroundColor: colors.surfaceSheen,
+      ...sheenGradient(colors.surfaceSheen),
     },
     highlightRow: {
       flexDirection: 'row',

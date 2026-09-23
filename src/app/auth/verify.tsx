@@ -23,7 +23,7 @@ import { goBack } from '@/lib/onboarding-nav';
 import { pullProfileFromRemote } from '@/lib/profile-sync';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { supabase } from '@/lib/supabase';
-import { Type } from '@/constants/theme';
+import { Type, sheenGradient } from '@/constants/theme';
 import { useAppColors, useAppTheme } from '@/lib/theme-context';
 import { finishOnboarding, saveProfile } from '@/lib/user-profile';
 import {
@@ -536,7 +536,7 @@ function createStyles(
       right: 0,
       top: 0,
       height: '48%',
-      backgroundColor: colors.surfaceSheen,
+      ...sheenGradient(colors.surfaceSheen),
     },
     // Was three separately absolute-positioned siblings with a fixed 39px
     // gap reserved for codeError between otpRow and primaryButton below.
@@ -581,7 +581,7 @@ function createStyles(
       right: 0,
       top: 0,
       height: '40%',
-      backgroundColor: colors.surfaceSheen,
+      ...sheenGradient(colors.surfaceSheen),
     },
     otpBoxFocused: {
       borderColor: '#438C63',
@@ -686,7 +686,7 @@ function createStyles(
       right: 0,
       top: 0,
       height: '48%',
-      backgroundColor: colors.surfaceSheen,
+      ...sheenGradient(colors.surfaceSheen),
     },
     rowWash: {
       backgroundColor: screenColors.hoverWashColor,

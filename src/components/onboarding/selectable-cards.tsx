@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 
-import { AndroidCardElevation, AndroidRipple } from '@/constants/theme';
+import { AndroidCardElevation, AndroidRipple, sheenGradient } from '@/constants/theme';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticSelect } from '@/lib/haptics';
 import { useAppTheme } from '@/lib/theme-context';
@@ -222,7 +222,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       height: '48%',
       borderTopLeftRadius: CARD_RADIUS - 1,
       borderTopRightRadius: CARD_RADIUS - 1,
-      backgroundColor: colors.surfaceSheen,
+      ...sheenGradient(colors.surfaceSheen),
       zIndex: -1,
     },
     cardWash: {
