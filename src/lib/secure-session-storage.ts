@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as aesjs from 'aes-js';
-import { requireOptionalNativeModule } from 'expo-modules-core';
+import { requireOptionalNativeModule } from 'expo';
 
 // BUG FIX: expo-secure-store's own package calls requireNativeModule (the
 // throwing variant, not the optional one) unconditionally at its module's
@@ -11,8 +11,8 @@ import { requireOptionalNativeModule } from 'expo-modules-core';
 // via npm/expo install alone doesn't make it available in an
 // already-built dev client — a real rebuild does). A brand-new dependency
 // should degrade this store to its previous plain-AsyncStorage behavior,
-// never take the whole app down with it. requireOptionalNativeModule (from
-// expo-modules-core, always safe to call) checks for the native module
+// never take the whole app down with it. requireOptionalNativeModule (re-exported
+// by `expo` from expo-modules-core, always safe to call) checks for the native module
 // WITHOUT throwing; only if it's actually there do we `require()`
 // expo-secure-store itself, so that package's own throwing check never
 // executes on a build where the native side isn't linked yet.
