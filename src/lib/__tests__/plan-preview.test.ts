@@ -471,6 +471,9 @@ describe('computePlanPreview — optional finisher set', () => {
       }
     });
     expect(withFinisher.explanation).toContain('Added a finisher set to each exercise.');
+    // The offer is answered once accepted, not asked and confirmed together.
+    expect(withFinisher.explanation).not.toContain('Want an optional finisher set');
+    expect(withoutFinisher.explanation).toContain('Want an optional finisher set');
   });
 
   it('is never applied below Energy 5, even when accepted', () => {

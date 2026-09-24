@@ -48,7 +48,7 @@
 
 import { generateBaselinePlan, type OnboardingContext } from '@/lib/engine/baseline-plan';
 import { computeEffectiveConstraints } from '@/lib/engine/constraint-resolution';
-import { buildExplanation } from '@/lib/engine/explanation-string';
+import { buildExplanation, FINISHER_QUESTION } from '@/lib/engine/explanation-string';
 import { filterAndSubstitute } from '@/lib/engine/exercise-filtering';
 import { checkFallbackTrigger } from '@/lib/engine/fallback-logic';
 import { ENERGY_MODIFIER_TABLE } from '@/lib/engine/reference/energy-modifier-table';
@@ -806,8 +806,10 @@ export function computePlanPreview(
   // toggle itself) only once capacityTrend has genuinely established an
   // improving direction — never claims a trend off thin data, same
   // established-tier-only rule as every other capacityTrend read.
+  // Once accepted, the template's own question has been answered: drop it
+  // rather than asking and confirming in the same breath.
   const withFinisherNote = finisherApplied
-    ? `${withObservations} ${
+    ? `${withObservations.replace(` ${FINISHER_QUESTION}`, '')} ${
         trainingState && trainingState.capacityTrend.tier === 'established' && trainingState.capacityTrend.value === 'improving'
           ? "Added a finisher set to each exercise — you've been trending up, so there's real room for it."
           : 'Added a finisher set to each exercise.'

@@ -36,6 +36,11 @@
 import type { UserCalibration } from '@/lib/engine/types';
 import type { SymptomTag } from '@/lib/symptom-tags';
 
+/** The energy-5 template's closing question, exported so a session where
+ * the finisher was accepted can drop it instead of asking and confirming in
+ * the same breath (see plan-preview.ts's withFinisherNote). */
+export const FINISHER_QUESTION = 'Want an optional finisher set added to each exercise?';
+
 const BASE_TEMPLATES: Record<1 | 2 | 3 | 4 | 5, (ctx: { totalDuration: number; pct: number }) => string> = {
   // The real total of the recovery session, not a fixed "10 minutes": the
   // two fallback exercises add up to 9, and the line sat right above a
@@ -47,7 +52,7 @@ const BASE_TEMPLATES: Record<1 | 2 | 3 | 4 | 5, (ctx: { totalDuration: number; p
   2: (ctx) => `Energy's low → session cut to ${ctx.totalDuration} min, sets reduced to ${ctx.pct}% of baseline. Moving gently beats not moving.`,
   3: () => "Energy's steady today. Sticking with your baseline plan.",
   4: () => 'Feeling good — full plan, no changes needed.',
-  5: () => 'Today\'s plan is ready, full baseline — no automatic increase. Want an optional finisher set added to each exercise?',
+  5: () => `Today's plan is ready, full baseline — no automatic increase. ${FINISHER_QUESTION}`,
 };
 
 /** Exported so callers can show which real symptom-tag override fired
