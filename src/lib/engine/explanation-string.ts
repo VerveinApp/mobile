@@ -37,7 +37,13 @@ import type { UserCalibration } from '@/lib/engine/types';
 import type { SymptomTag } from '@/lib/symptom-tags';
 
 const BASE_TEMPLATES: Record<1 | 2 | 3 | 4 | 5, (ctx: { totalDuration: number; pct: number }) => string> = {
-  1: () => "You're running on empty today — that's real data, not failure. Here's 10 minutes of gentle movement that won't deplete you further.",
+  // The real total of the recovery session, not a fixed "10 minutes": the
+  // two fallback exercises add up to 9, and the line sat right above a
+  // "9 min" summary.
+  1: (ctx) =>
+    `You're running on empty today — that's real data, not failure. Here's ${
+      ctx.totalDuration > 0 ? `${ctx.totalDuration} minutes` : 'a few minutes'
+    } of gentle movement that won't deplete you further.`,
   2: (ctx) => `Energy's low → session cut to ${ctx.totalDuration} min, sets reduced to ${ctx.pct}% of baseline. Moving gently beats not moving.`,
   3: () => "Energy's steady today. Sticking with your baseline plan.",
   4: () => 'Feeling good — full plan, no changes needed.',
