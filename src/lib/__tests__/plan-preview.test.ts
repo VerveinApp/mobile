@@ -481,6 +481,51 @@ describe('computePlanPreview — optional finisher set', () => {
     const baseline = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 4, CALIBRATION);
     expect(result.exercises.map((e) => e.sets)).toEqual(baseline.exercises.map((e) => e.sets));
     expect(result.explanation).not.toContain('finisher');
+    expect(result.finisherMinutes).toBeNull();
+  });
+
+  it('counts the extra sets in the session length, and names that cost before it is accepted', () => {
+    const offered = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 5, CALIBRATION, [], undefined, 1, undefined, undefined, undefined, false);
+    const accepted = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 5, CALIBRATION, [], undefined, 1, undefined, undefined, undefined, true);
+
+    expect(offered.finisherMinutes).toBeGreaterThan(0);
+    expect(accepted.finisherMinutes).toBe(offered.finisherMinutes);
+    expect(accepted.durationMin).toBe(offered.durationMin + (offered.finisherMinutes ?? 0));
+  });
+
+  it('keeps each set as long as it was — the extra set adds time, not a shorter split', () => {
+    const offered = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 5, CALIBRATION, [], undefined, 1, undefined, undefined, undefined, false);
+    const accepted = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 5, CALIBRATION, [], undefined, 1, undefined, undefined, undefined, true);
+
+    accepted.exercises.forEach((ex, i) => {
+      const before = offered.exercises[i];
+      if (before.sets === null || before.durationMin === null || ex.sets === null || ex.durationMin === null) return;
+      // The guided timer paces a hold/carry as durationMin / sets per set.
+      expect(ex.durationMin / ex.sets).toBeGreaterThanOrEqual(before.durationMin / before.sets);
+    });
+  });
+
+  it('says so when the finisher takes a session past the time that was picked, instead of cutting exercises for it', () => {
+    const untimed = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 5, CALIBRATION);
+    const budget = untimed.durationMin;
+    const offered = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 5, CALIBRATION, [], undefined, 1, undefined, budget, undefined, false);
+    const accepted = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 5, CALIBRATION, [], undefined, 1, undefined, budget, undefined, true);
+
+    expect(accepted.exercises.map((e) => e.id)).toEqual(offered.exercises.map((e) => e.id));
+    expect(accepted.durationMin).toBeGreaterThan(budget);
+    expect(accepted.explanation).toContain(
+      `The finisher takes it to ${accepted.durationMin} minutes, past the ${budget} you have today.`
+    );
+    expect(offered.explanation).not.toContain('The finisher takes it');
+  });
+
+  it('keeps the plain shortened note when the finisher still fits', () => {
+    const untimed = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 5, CALIBRATION, [], undefined, 1, undefined, undefined, undefined, true);
+    const roomy = untimed.durationMin + 30;
+    const accepted = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 5, CALIBRATION, [], undefined, 1, undefined, roomy, undefined, true);
+    expect(accepted.durationMin).toBe(untimed.durationMin);
+    expect(accepted.explanation).not.toContain('The finisher takes it');
+    expect(accepted.explanation).not.toContain('Shortened');
   });
 });
 

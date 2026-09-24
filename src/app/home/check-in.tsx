@@ -890,6 +890,9 @@ export default function EnergyCheckInScreen() {
     [profile, calibration, symptomTags, planHealthReadinessModifier, planHealthReadinessReasons]
   );
   const exerciseDelta = preview ? baseline.exerciseCount - preview.exerciseCount : 0;
+  // Named on the offer itself, so the extra minutes are known before it's
+  // accepted rather than discovered in the session length afterwards.
+  const finisherCostMin = preview?.finisherMinutes ?? 0;
   // BUG FIX: exerciseDelta alone can't tell "genuinely standard" apart from
   // "same exercise count, but every set just got scaled down" — Energy 2's
   // real setsMultiplier is 0.6 (see ENERGY_MODIFIER_TABLE), which reduces
@@ -1533,7 +1536,9 @@ export default function EnergyCheckInScreen() {
                 onPress={handleFinisherToggle}
                 hitSlop={4}
                 accessibilityRole="button"
-                accessibilityLabel={finisherAccepted ? 'Finisher added' : 'Add a finisher set'}
+                accessibilityLabel={`${finisherAccepted ? 'Finisher added' : 'Add a finisher set'}${
+                  finisherCostMin ? `, ${finisherCostMin} more minutes` : ''
+                }`}
                 accessibilityState={{ selected: finisherAccepted }}
               >
                 <Text
@@ -1541,6 +1546,7 @@ export default function EnergyCheckInScreen() {
                   maxFontSizeMultiplier={1.2}
                 >
                   {finisherAccepted ? 'Finisher added' : 'Add a finisher set'}
+                  {finisherCostMin ? ` · +${finisherCostMin} min` : ''}
                 </Text>
               </Pressable>
               </ReanimatedAnimated.View>

@@ -64,6 +64,7 @@ import type {
   FallbackTrigger,
   PolicyApplicationRecord,
   RepStructure,
+  ScaledExercise,
   ScaledExerciseList,
   UserCalibration,
 } from '@/lib/engine/types';
@@ -150,6 +151,12 @@ export type PlanPreviewResult = {
    */
   overallSetsPct: number;
   /**
+   * What the optional finisher costs today, in minutes — known before it's
+   * accepted, so the offer can name it up front. null whenever there's no
+   * finisher to offer (any energy but 5, or a rest-day fallback).
+   */
+  finisherMinutes: number | null;
+  /**
    * Vervein addition, not in the vault — M8/M10's own flagged rounding-gap
    * diagnostics (see this function's own knownGaps-threading comment), real
    * and honest but written for engineers, not end users. Not rendered
@@ -180,6 +187,27 @@ export type PlanPreviewResult = {
     policyApplications: PolicyApplicationRecord[];
   };
 };
+
+/**
+ * One more set of the same exercise, with that set's share of the block's
+ * time added along with it. BUG FIX: the finisher used to add the set and
+ * leave durationMin alone, so the session's total never moved — and for a
+ * hold or carry, which the guided timer paces by splitting durationMin
+ * across its sets (exercise-timer.ts), the extra set made every hold
+ * shorter instead of adding any work (a 3-minute carry went from 60s a set
+ * to 45s). Rounded up to a whole minute so the extra set is never counted
+ * as free.
+ */
+function addFinisherSet(ex: ScaledExercise): ScaledExercise {
+  if (ex.adapted_sets === null) return ex;
+  const sets = ex.adapted_sets;
+  return {
+    ...ex,
+    adapted_sets: sets + 1,
+    adapted_duration_min:
+      ex.adapted_duration_min === null ? null : Math.ceil((ex.adapted_duration_min * (sets + 1)) / sets),
+  };
+}
 
 /**
  * Vervein addition, not in the vault — reads TrainingState's stimulusDebt
@@ -388,7 +416,9 @@ export function computePlanPreview(
    * one set per exercise — literally "a finisher set," not a second workout —
    * applied after the time-available trim so the stated time ceiling still
    * governs which exercises survive; the finisher is an explicit opt-in on
-   * top of that, not itself bounded by it.
+   * top of that, not itself bounded by it. Its time is counted, though (see
+   * addFinisherSet), and a finisher that takes the session past the chosen
+   * time says so rather than quietly overrunning it.
    */
   finisherAccepted?: boolean,
   /**
@@ -498,6 +528,12 @@ export function computePlanPreview(
   // session is the engine's safety pair, never a candidate for an optional
   // add-on).
   let finisherApplied = false;
+  // Set alongside finisherApplied (Step 4.6) — see PlanPreviewResult's own
+  // field comment.
+  let finisherMinutes: number | null = null;
+  // The total before the finisher's sets were added, for the explanation's
+  // time sentence — only differs from workout.totalDuration once it's applied.
+  let durationBeforeFinisher = 0;
   // M8's own flagged rounding-gap messages (see volume-scaling.ts's header
   // comment) — collected here rather than discarded the moment scaleVolume
   // returns, which is what happened before this field existed. Empty for
@@ -584,10 +620,15 @@ export function computePlanPreview(
       // duration-only exercises (base_sets null — a stretch, a hold with no
       // countable set) have no "set" to add one to, so those pass through
       // unchanged rather than fabricating a sets value that never existed.
-      finisherApplied = energy === 5 && finisherAccepted === true;
-      assembledExercises = finisherApplied
-        ? trimmedExercises.map((ex) => (ex.adapted_sets !== null ? { ...ex, adapted_sets: ex.adapted_sets + 1 } : ex))
-        : trimmedExercises;
+      // Its cost is computed whether or not it's accepted, so the offer can
+      // name it before anyone says yes.
+      durationBeforeFinisher = assembleWorkout(trimmedExercises, false).workout.totalDuration;
+      const withFinisherSets = energy === 5 ? trimmedExercises.map(addFinisherSet) : null;
+      if (withFinisherSets) {
+        finisherMinutes = assembleWorkout(withFinisherSets, false).workout.totalDuration - durationBeforeFinisher;
+      }
+      finisherApplied = withFinisherSets !== null && finisherAccepted === true;
+      assembledExercises = finisherApplied && withFinisherSets ? withFinisherSets : trimmedExercises;
 
       // Recomputed over the surviving subset only, not volumeResult's own
       // pre-trim figure — same ratio-average formula volume-scaling.ts
@@ -828,9 +869,26 @@ export function computePlanPreview(
   // stubborn 2-exercise pair longer than the ceiling itself (e.g. two real
   // 5-minute holds against a shorter budget) can leave the result still
   // over. "For" stays true either way; "fit" wouldn't.
-  const explanation = timeTrimmed
-    ? `${withFinisherNote} Shortened for the ${timeAvailableMin} minutes you have today.`
-    : withFinisherNote;
+  //
+  // A finisher can take a session that fit back over the chosen time — it's
+  // added after the trim, on purpose (more work was asked for, so nothing
+  // is cut to make room). Said plainly rather than left for the person to
+  // discover mid-workout. Only when the finisher is what pushed it over:
+  // a 2-exercise floor that was already over (see "for" above) isn't the
+  // finisher's doing.
+  const finisherRunsOver =
+    finisherApplied &&
+    timeAvailableMin !== undefined &&
+    durationBeforeFinisher <= timeAvailableMin &&
+    workout.totalDuration > timeAvailableMin;
+  const timeNote = finisherRunsOver
+    ? timeTrimmed
+      ? ` Shortened for the ${timeAvailableMin} minutes you have today — the finisher takes it to ${workout.totalDuration}.`
+      : ` The finisher takes it to ${workout.totalDuration} minutes, past the ${timeAvailableMin} you have today.`
+    : timeTrimmed
+      ? ` Shortened for the ${timeAvailableMin} minutes you have today.`
+      : '';
+  const explanation = `${withFinisherNote}${timeNote}`;
 
   // knownGaps THREADING (Vervein addition, not in the vault) — M8
   // (volume-scaling.ts) and M10 (workout-assembly.ts) have always computed
@@ -941,6 +999,7 @@ export function computePlanPreview(
     exercises,
     constraints: dailyConstraints,
     overallSetsPct,
+    finisherMinutes,
     knownGaps,
     trace: {
       fallbackFired: isRestDay,
