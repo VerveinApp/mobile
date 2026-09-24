@@ -85,6 +85,22 @@ export async function prepareLocalDataForAccount(userId: string): Promise<Accoun
   }
 }
 
+/**
+ * For installs from before this module existed. Their data has no recorded
+ * owner until the next sign-in, and someone who stays signed in never signs
+ * in again, so if they later signed out and a different account signed in,
+ * that account would still be handed their data. Called at launch with the
+ * restored session's account: it becomes the owner only if nobody is
+ * recorded yet, and an owner that's already recorded is never overwritten.
+ */
+export async function claimLocalDataIfUnowned(userId: string): Promise<void> {
+  try {
+    if ((await AsyncStorage.getItem(OWNER_KEY)) === null) await AsyncStorage.setItem(OWNER_KEY, userId);
+  } catch {
+    // Unrecorded is the state it was already in; the next sign-in records it.
+  }
+}
+
 /** After Delete Account: the data is gone and so is the account, so this
  * device's data no longer belongs to anyone. */
 export async function forgetLocalDataOwner(): Promise<void> {

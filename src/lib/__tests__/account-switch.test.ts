@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { forgetLocalDataOwner, prepareLocalDataForAccount } from '@/lib/account-switch';
+import { claimLocalDataIfUnowned, forgetLocalDataOwner, prepareLocalDataForAccount } from '@/lib/account-switch';
 import { getAccountStartDate, hasCompletedOnboarding, markOnboardingComplete } from '@/lib/onboarding-draft';
 import { getProgressPhotos } from '@/lib/progress-photos';
 import { getSessionHistory, recordPastSessionCompletion } from '@/lib/session-history';
@@ -78,5 +78,34 @@ describe('prepareLocalDataForAccount', () => {
     await prepareLocalDataForAccount('user-a');
     await forgetLocalDataOwner();
     expect(await prepareLocalDataForAccount('user-c')).toBe('same-account');
+  });
+});
+
+describe('claimLocalDataIfUnowned', () => {
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+  });
+
+  it("protects an upgrader's data once the signed-in account claims it at launch", async () => {
+    // Signed in since before account switching existed: data, but no owner.
+    await seedAccountData('Sam');
+    await claimLocalDataIfUnowned('user-a');
+
+    // Later: Sam signs out and someone else signs in on this phone.
+    expect(await prepareLocalDataForAccount('user-b')).toBe('fresh');
+    expect(await getProfile()).toBeNull();
+
+    // Sam's data comes back when Sam signs in again.
+    expect(await prepareLocalDataForAccount('user-a')).toBe('restored');
+    expect((await getProfile())?.name).toBe('Sam');
+  });
+
+  it('never overwrites an owner that is already recorded', async () => {
+    await seedAccountData('Sam');
+    await prepareLocalDataForAccount('user-a');
+    await claimLocalDataIfUnowned('user-b');
+
+    expect(await prepareLocalDataForAccount('user-a')).toBe('same-account');
+    expect((await getProfile())?.name).toBe('Sam');
   });
 });

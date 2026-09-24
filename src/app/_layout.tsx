@@ -13,10 +13,12 @@ import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { OfflineBanner } from '@/components/offline-banner';
 import { AppLockGate } from '@/components/security/app-lock-gate';
+import { claimLocalDataIfUnowned } from '@/lib/account-switch';
 import { initErrorMonitoring } from '@/lib/error-monitoring';
 import { initPurchases } from '@/lib/purchases';
 import { registerForRemotePushNotifications } from '@/lib/push-notifications';
 import { refreshSessionReminders } from '@/lib/session-reminders';
+import { supabase } from '@/lib/supabase';
 import { AppThemeProvider, useAppTheme } from '@/lib/theme-context';
 
 SplashScreen.preventAutoHideAsync();
@@ -57,6 +59,24 @@ function RootLayout() {
   // no-op cases.
   useEffect(() => {
     registerForRemotePushNotifications();
+  }, []);
+
+  // Someone who was already signed in when they updated from a version
+  // without account switching has no recorded data owner until their next
+  // sign-in, which may never come. Recording the restored session's account
+  // here keeps their data from being handed to a different account that
+  // signs in on this phone later (see claimLocalDataIfUnowned).
+  useEffect(() => {
+    (async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session) await claimLocalDataIfUnowned(session.user.id);
+      } catch {
+        // Retried on the next launch.
+      }
+    })();
   }, []);
 
   // Smart-reminder foreground refresh (Vervein addition — see session-
