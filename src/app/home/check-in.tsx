@@ -33,7 +33,7 @@ import { postAccessibilityScreenChanged } from 'expo-accessibility-rescan';
 
 import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
 import { getCalibration, submitSessionFeedback } from '@/lib/calibration';
-import { Type, sheenGradient } from '@/constants/theme';
+import { TabularNums, Type, sheenGradient } from '@/constants/theme';
 import { getLastCheckIn, recordCheckIn, type CheckInRecord } from '@/lib/check-in-history';
 import { getDecisionTraceLog, recordDecisionTrace } from '@/lib/decision-trace-log';
 import { TAG_LINES } from '@/lib/engine/explanation-string';
@@ -1516,6 +1516,12 @@ export default function EnergyCheckInScreen() {
                 Read-more state for each new level without any flicker. */}
             {preview ? (
               <ReanimatedAnimated.View entering={sectionEntering} layout={sectionLayout} style={styles.checkinExplanationBlock}>
+                <SessionSizeLine
+                  minutes={preview.durationMin}
+                  exercises={preview.exerciseCount}
+                  instant={reducedMotion}
+                  styles={styles}
+                />
                 <ExplanationBlock key={energy} explanation={preview.explanation} comparisonText={comparisonText} styles={styles} />
               </ReanimatedAnimated.View>
             ) : null}
@@ -2434,6 +2440,65 @@ function textDimStyle(hover: ReturnType<typeof useHoverFade>, press: ReturnType<
 }
 
 /**
+ * Today's session size, right under the gauge: the plan visibly answering
+ * the check-in before Start. The minutes count to each new value as energy
+ * or time changes (the same move as the vervein.app demo); Reduce Motion
+ * shows the new number straight away. VoiceOver reads the settled values.
+ */
+function SessionSizeLine({
+  minutes,
+  exercises,
+  instant,
+  styles,
+}: {
+  minutes: number;
+  exercises: number;
+  instant: boolean;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  const shownMinutes = useCountTo(minutes, instant);
+  const exerciseText = `${exercises} exercise${exercises === 1 ? '' : 's'}`;
+  return (
+    <View style={styles.sessionSizeRow} accessible accessibilityLabel={`Today: ${minutes} minutes, ${exerciseText}`}>
+      <Text style={styles.sessionSizeNumber} maxFontSizeMultiplier={1.2}>
+        {shownMinutes}
+      </Text>
+      <Text style={styles.sessionSizeUnit} maxFontSizeMultiplier={1.2}>
+        min · {exerciseText}
+      </Text>
+    </View>
+  );
+}
+
+/** Eases a displayed integer from its last value to `target` (~0.4s,
+ * ease-out). Restarts from wherever it is if the target moves mid-count. */
+function useCountTo(target: number, instant: boolean): number {
+  const [shown, setShown] = useState(target);
+  const current = useRef(target);
+  useEffect(() => {
+    if (instant) {
+      current.current = target;
+      return;
+    }
+    const from = current.current;
+    if (from === target) return;
+    let frame = 0;
+    let start: number | null = null;
+    const step = (now: number) => {
+      if (start === null) start = now;
+      const progress = Math.min((now - start) / 420, 1);
+      const next = Math.round(from + (target - from) * (1 - Math.pow(1 - progress, 3)));
+      current.current = next;
+      setShown(next);
+      if (progress < 1) frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [target, instant]);
+  return instant ? target : shown;
+}
+
+/**
  * BUG FIX: preview.explanation is real engine reasoning (see plan-preview.ts
  * — it lists out every real factor: energy, sleep, a logged symptom tag,
  * each as its own sentence), so it grows every time someone adds another
@@ -3037,6 +3102,24 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       marginTop: 16,
       paddingHorizontal: 40,
       alignItems: 'center',
+    },
+    sessionSizeRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      marginBottom: 8,
+    },
+    sessionSizeNumber: {
+      color: colors.text,
+      fontSize: 30,
+      letterSpacing: -0.6,
+      fontFamily: 'Geist-Bold',
+      ...TabularNums,
+    },
+    sessionSizeUnit: {
+      marginLeft: 6,
+      color: colors.textSecondary,
+      fontSize: Type.body,
+      fontFamily: 'Geist-Medium',
     },
     symptomSection: {
       marginTop: 24,
