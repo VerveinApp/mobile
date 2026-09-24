@@ -304,15 +304,24 @@ export default function PaywallScreen() {
   const loadOffering = useCallback(async () => {
     setOfferingLoadFailed(false);
     const current = await getCurrentOffering();
+    const plans = [current?.annual, current?.monthly, current?.lifetime].filter(
+      (p): p is PurchasesPackage => p != null
+    );
+    // Trial eligibility is read BEFORE anything is shown and applied in the
+    // same batch as the offering: it used to arrive a beat later, so the
+    // button flipped from "Unlock VerveIn Plus" to "Start Free Trial" just
+    // after the prices appeared.
+    const eligibility = await getIntroOfferEligibility(plans.map((p) => p.product.identifier));
     setOffering(current);
     setOfferingLoadFailed(current === null);
-    // Annual first if available — the honest default for whichever plan
-    // is actually the best value, not just "whatever loaded first."
-    setSelectedPackage(current?.annual ?? current?.monthly ?? current?.lifetime ?? null);
-    const productIds = [current?.monthly, current?.annual, current?.lifetime]
-      .filter((p): p is PurchasesPackage => p != null)
-      .map((p) => p.product.identifier);
-    setIntroEligibility(await getIntroOfferEligibility(productIds));
+    setIntroEligibility(eligibility);
+    // Starts on the plan whose free trial this Apple ID can actually get,
+    // wherever the trial is configured in App Store Connect — otherwise it'd
+    // sit one tap away, on a plan nobody had selected. With no trial (or one
+    // on every plan), annual first: the best value, not whatever loaded first.
+    setSelectedPackage(
+      plans.find((p) => eligibility[p.product.identifier] && trialLabel(p) !== null) ?? plans[0] ?? null
+    );
   }, []);
 
   useEffect(() => {
