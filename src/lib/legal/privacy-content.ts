@@ -33,7 +33,7 @@ import { CONTACT_EMAIL, MAILING_ADDRESS, OPERATOR_NAME } from '@/lib/legal/terms
  * Also adds the consumer-health-data, Illinois biometric, Do Not Track and
  * GDPR controller/retention/transfer disclosures.
  */
-export const PRIVACY_EFFECTIVE_DATE = 'September 23, 2026';
+export const PRIVACY_EFFECTIVE_DATE = 'September 24, 2026';
 
 export const PRIVACY_INTRO =
   'This Privacy Policy explains what information VerveIn collects, how it’s used, and the choices you have. ' +
@@ -67,6 +67,9 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
         'you a re-engagement notification.',
       'We do not store your workout history, exercise performance, sleep or nutrition logs, body measurement ' +
         'history, progress photos, check-ins and symptom tags, or notes on our servers (see the next section).',
+      'Separately, if you join the launch list on our website (vervein.app), the email address you enter and the ' +
+        'date you added it are stored by our website host, Cloudflare. We use it only to email you when VerveIn is ' +
+        'available on the App Store, and we delete it if you ask.',
     ],
   },
   {
@@ -137,6 +140,7 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
       '- RevenueCat — subscription status and entitlements.',
       '- Expo — push notification delivery and over-the-air app updates.',
       '- Sentry — crash and error reports.',
+      '- Cloudflare — hosting for our website, vervein.app, including the launch-list email addresses.',
       '- Apple and Google — Sign in with Apple/Google, App Store purchases, Apple Health (on your device), and ' +
         'push notification delivery.',
       'We may also disclose information if required to by law, or to protect the rights, safety, or security of ' +
@@ -249,6 +253,8 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
       '- Push notification tokens: until you sign out on that device, delete your account, or the device stops ' +
         'accepting notifications.',
       '- Referral records: for as long as your account exists.',
+      '- Launch-list email addresses: until we’ve emailed you that VerveIn is available, or sooner if you ask us ' +
+        'to delete yours.',
       '- Sign-in records: kept by our authentication provider under its own retention schedule.',
       '- Our database provider keeps routine backups for a limited period, so deleted information can remain in ' +
         'those backups until they expire.',
