@@ -1025,8 +1025,11 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       borderColor: '#5FBE84',
       backgroundColor: '#5FBE84',
     },
+    // A scheduled day that's gone by without a session is just quieter than
+    // one still ahead — never red. A skipped day isn't a debt this app
+    // holds against anyone; the body was resting either way.
     weekDotMissed: {
-      borderColor: 'rgba(229,72,77,0.5)',
+      opacity: 0.45,
     },
     weekDotToday: {
       borderColor: colors.text,
