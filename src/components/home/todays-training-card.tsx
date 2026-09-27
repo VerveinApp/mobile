@@ -48,6 +48,12 @@ export function TodaysTrainingCard({
     hapticImpactLight();
     router.push('/home/check-in' as never);
   };
+  // The rest-day link has already asked "check in anyway?" — check-in skips
+  // its own rest-day screen instead of asking again.
+  const handleCheckInAnyway = () => {
+    hapticImpactLight();
+    router.push('/home/check-in?anyway=1' as never);
+  };
 
   if (isRestDay) {
     return (
@@ -57,7 +63,7 @@ export function TodaysTrainingCard({
         <Text style={styles.cardTitle} maxFontSizeMultiplier={1.2}>Rest Day</Text>
         <Text style={styles.cardMeta} maxFontSizeMultiplier={1.3}>Recovery is part of the plan.</Text>
         <Pressable
-          onPress={handlePress}
+          onPress={handleCheckInAnyway}
           onHoverIn={hover.onHoverIn}
           onHoverOut={hover.onHoverOut}
           android_ripple={AndroidRipple}

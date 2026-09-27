@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
@@ -82,6 +82,7 @@ import { SYMPTOM_TAG_LABELS, SYMPTOM_TAGS, type SymptomTag } from '@/lib/symptom
 import { TIME_AVAILABLE_LABELS, TIME_AVAILABLE_OPTIONS } from '@/lib/time-available';
 import { getTodaySession, saveTodaySession, type TodaySession, type TodaySessionInput } from '@/lib/today-session';
 import { getUnitSystem, type UnitSystem } from '@/lib/unit-preference';
+import { useCountTo } from '@/lib/use-count-to';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
 import {
   displayWeightToKg,
@@ -275,8 +276,11 @@ export default function EnergyCheckInScreen() {
   const [sessionState, setSessionState] = useState<'checkin' | 'resolved' | 'done'>('checkin');
   // A rest day is real (driven by the days the user actually picked during
   // onboarding, not a fake toggle) — but always overridable, since recovery
-  // is a default, not a lockout.
-  const [showAnyway, setShowAnyway] = useState(false);
+  // is a default, not a lockout. Arriving from the Today card's own "Check
+  // in anyway" (?anyway=1) means that choice was already made — asking it a
+  // second time here, behind a second identical link, was a dead step.
+  const { anyway } = useLocalSearchParams<{ anyway?: string }>();
+  const [showAnyway, setShowAnyway] = useState(anyway === '1');
   // Which exercises the user actually checked off — real, honest per-exercise
   // completion, not the all-or-nothing boolean session-history.ts records.
   // Local-only until Finish Session persists it via workout-log.ts; not
@@ -2480,34 +2484,6 @@ function SessionSizeLine({
       </Text>
     </View>
   );
-}
-
-/** Eases a displayed integer from its last value to `target` (~0.4s,
- * ease-out). Restarts from wherever it is if the target moves mid-count. */
-function useCountTo(target: number, instant: boolean): number {
-  const [shown, setShown] = useState(target);
-  const current = useRef(target);
-  useEffect(() => {
-    if (instant) {
-      current.current = target;
-      return;
-    }
-    const from = current.current;
-    if (from === target) return;
-    let frame = 0;
-    let start: number | null = null;
-    const step = (now: number) => {
-      if (start === null) start = now;
-      const progress = Math.min((now - start) / 420, 1);
-      const next = Math.round(from + (target - from) * (1 - Math.pow(1 - progress, 3)));
-      current.current = next;
-      setShown(next);
-      if (progress < 1) frame = requestAnimationFrame(step);
-    };
-    frame = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(frame);
-  }, [target, instant]);
-  return instant ? target : shown;
 }
 
 /**

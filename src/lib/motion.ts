@@ -45,6 +45,14 @@ export const ONBOARDING_REVEAL_DELAY_MS = 1000;
 export const ONBOARDING_REVEAL_STAGGER_MS = 180;
 
 /**
+ * State that changes while a native pop is still sliding back (finishing a
+ * session and landing on Home or Progress, whose focus reload fires the
+ * moment router.back() dispatches) waits this long before animating, so the
+ * change is seen landing rather than finished mid-slide.
+ */
+export const RETURN_REVEAL_DELAY_MS = 250;
+
+/**
  * Deleted/archived list rows (swipe-to-delete on notes and every history
  * screen) fade out while the rows below spring up into the gap — they used
  * to vanish instantly and the list snapped shut. Same spring as check-in's
