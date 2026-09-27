@@ -50,6 +50,7 @@ import { ConditionsSheet } from '@/components/settings/conditions-sheet';
 import { GoalsSheet } from '@/components/settings/goals-sheet';
 import { PremiumGate } from '@/components/premium-gate';
 import { MovementRestrictionsSheet } from '@/components/settings/movement-restrictions-sheet';
+import { StandingSymptomsSheet } from '@/components/settings/standing-symptoms-sheet';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 
 const UNIT_OPTIONS: { id: UnitSystem; label: string }[] = [
@@ -171,6 +172,7 @@ export default function SettingsScreen() {
   const conditionsSheetRef = useRef<BottomSheetModal>(null);
   const goalsSheetRef = useRef<BottomSheetModal>(null);
   const movementRestrictionsSheetRef = useRef<BottomSheetModal>(null);
+  const standingSymptomsSheetRef = useRef<BottomSheetModal>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -244,6 +246,7 @@ export default function SettingsScreen() {
   const adjustPlanHover = useHoverFade();
   const conditionsHover = useHoverFade();
   const movementRestrictionsHover = useHoverFade();
+  const standingSymptomsHover = useHoverFade();
   const progressHover = useHoverFade();
   const bodyMeasurementsHover = useHoverFade();
   const conditionLogHover = useHoverFade();
@@ -651,6 +654,14 @@ export default function SettingsScreen() {
               label="Movement"
               onPress={() => movementRestrictionsSheetRef.current?.present()}
               hover={movementRestrictionsHover}
+            />
+            <NavRow
+              styles={styles}
+              colors={colors}
+              icon="bandage"
+              label="Ongoing Symptoms"
+              onPress={() => standingSymptomsSheetRef.current?.present()}
+              hover={standingSymptomsHover}
               last
             />
           </View>
@@ -1222,6 +1233,7 @@ export default function SettingsScreen() {
       <ConditionsSheet ref={conditionsSheetRef} />
       <GoalsSheet ref={goalsSheetRef} />
       <MovementRestrictionsSheet ref={movementRestrictionsSheetRef} />
+      <StandingSymptomsSheet ref={standingSymptomsSheetRef} />
     </KeyboardAvoidingView>
   );
 }

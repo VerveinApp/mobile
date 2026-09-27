@@ -890,6 +890,12 @@ export default function EnergyCheckInScreen() {
     [profile, calibration, symptomTags, planHealthReadinessModifier, planHealthReadinessReasons]
   );
   const exerciseDelta = preview ? baseline.exerciseCount - preview.exerciseCount : 0;
+  // A symptom already set in Settings' Ongoing Symptoms applies every day
+  // on its own — offering it again here would be a chip that does nothing.
+  const dailySymptomTags = useMemo(
+    () => SYMPTOM_TAGS.filter((tag) => !(profile?.standingSymptoms ?? []).includes(tag)),
+    [profile]
+  );
   // Named on the offer itself, so the extra minutes are known before it's
   // accepted rather than discovered in the session length afterwards.
   const finisherCostMin = preview?.finisherMinutes ?? 0;
@@ -1564,7 +1570,7 @@ export default function EnergyCheckInScreen() {
                     ANYTHING GOING ON TODAY? (OPTIONAL)
                   </Text>
                   <View style={styles.symptomChipRow}>
-                    {SYMPTOM_TAGS.map((tag) => {
+                    {dailySymptomTags.map((tag) => {
                       const active = symptomTags.has(tag);
                       return (
                         <Pressable

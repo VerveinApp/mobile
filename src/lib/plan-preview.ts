@@ -34,16 +34,16 @@
  * driven by equipment ceiling, intensity ceiling, focus areas, and today's
  * energy, not by which of the four marketing-facing goals the user picked.
  *
- * SCOPE NOTE — acute symptom tags (picked fresh at each check-in, see
- * home/check-in.tsx and lib/symptom-tags.ts) ARE collected and DO flow
- * through here now — into the daily constraint re-filter (M5), the volume
- * multiplier chain (M8), and the explanation's TAG_LINES (M11). What's
- * still unported: STANDING symptom tags (asked once, persisting daily —
- * deliberately not built, see symptom-tags.ts's own scope note) and the
- * full condition-profile / contraindication system (M2's medical-condition
- * half), which stays collect-only-never-gating per the Chief Architect
- * Audit's own C3 finding until a real validation process exists. Those two
- * remain empty arrays / neutral defaults below.
+ * SCOPE NOTE — symptom tags flow through here from two places: acute ones
+ * picked fresh at each check-in (home/check-in.tsx) and standing ones set
+ * once in Settings (ctx.standingSymptomTags — see symptom-tags.ts's
+ * STANDING_SYMPTOM_TAGS). Both reach the daily constraint re-filter (M5) and
+ * the volume multiplier chain (M8); standing ones also shape the baseline
+ * itself (M3). Only acute ones get an explanation line — see Step 6. Still
+ * unported: the full condition-profile / contraindication system (M2's
+ * medical-condition half), which stays collect-only-never-gating per the
+ * Chief Architect Audit's own C3 finding until a real validation process
+ * exists — an empty array / neutral defaults below.
  */
 
 import { generateBaselinePlan, type OnboardingContext } from '@/lib/engine/baseline-plan';
@@ -675,10 +675,15 @@ export function computePlanPreview(
   // Step 5 — assembly (honest totalDuration).
   const { workout, knownGaps: assemblyKnownGaps } = assembleWorkout(assembledExercises, isRestDay);
 
-  // Step 6 — explanation.
+  // Step 6 — explanation. Acute tags only: a standing one is a setting,
+  // like a movement restriction, and gets no line of its own — the vault
+  // restates it every day, and a TAG_LINES sentence ("…today") repeated
+  // daily for something set once reads as nagging and buries what actually
+  // changed today. Settings' Ongoing Symptoms sheet says what each does.
+  const todaysTags = [...new Set(acuteSymptomTags)].filter((t) => !ctx.standingSymptomTags.includes(t));
   const { explanation: rawBaseExplanation } = buildExplanation(
     energy,
-    activeTags,
+    todaysTags,
     calibration,
     workout.totalDuration,
     overallSetsPct

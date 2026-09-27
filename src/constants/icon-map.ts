@@ -27,6 +27,7 @@ export const ANDROID_ICON_MAP: Partial<Record<SFSymbol, AndroidSymbol>> = {
   'arrow.down.right': 'trending_down',
   'arrow.right': 'trending_flat',
   'arrow.uturn.left': 'undo',
+  bandage: 'healing',
   'bed.double': 'bedtime',
   'bed.double.fill': 'bedtime',
   'bell.fill': 'notifications',

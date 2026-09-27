@@ -49,6 +49,13 @@ export type UserProfile = {
   conditions?: string[];
   /** Self-reported, from lib/movement-restrictions.ts's fixed list — unlike `conditions`, this one IS read (onboarding-to-engine.ts passes it straight through to the engine's real, already-wired movementRestrictions exclusion). `undefined` = never answered; `[]` = explicitly answered "none of these." */
   movementRestrictions?: string[];
+  /** Self-reported from Settings' Ongoing Symptoms sheet, from
+   * symptom-tags.ts's STANDING_SYMPTOM_TAGS — IS read: onboarding-to-engine.ts
+   * passes it to the engine as standingSymptomTags, applied every day at
+   * every energy level. Device-only on purpose, never synced (profile-sync.ts
+   * leaves it out): the Privacy Policy promises symptom tags stay on the
+   * device. `undefined` and `[]` both mean none. */
+  standingSymptoms?: string[];
   /** Self-reported from Settings' Goals sheet — never derived. This app
    * deliberately doesn't model BMR/TDEE or calorie intake (see
    * calorie-estimate.ts's own doc comment), so there's no honest way to
@@ -117,6 +124,7 @@ export async function withdrawHealthConsent(): Promise<UserProfile> {
     age: undefined,
     conditions: undefined,
     movementRestrictions: undefined,
+    standingSymptoms: undefined,
   });
 }
 

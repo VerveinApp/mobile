@@ -15,12 +15,19 @@
  *   body area to prioritize (unlike the vault's own Screen 3), so the only
  *   honest choice is "train everything," not fabricating a per-goal split
  *   the user was never actually asked about.
- * - conditions / standingSymptomTags are always []. The condition-gating
- *   modules (M2, M5's symptom half) haven't been ported — two Chief
- *   Architect Audit findings (unvalidated hard-safety filters, missing
- *   consent-schema representation) are still open against that part of the
- *   vault's design, so this app doesn't collect or apply that data yet.
- *   See baseline-plan.ts's own doc comment for the same scope boundary.
+ * - conditions is always []. The condition-gating half of M2 hasn't been
+ *   ported — two Chief Architect Audit findings (unvalidated hard-safety
+ *   filters, missing consent-schema representation) are still open against
+ *   that part of the vault's design, so this app collects conditions but
+ *   doesn't apply them. See baseline-plan.ts's own doc comment for the same
+ *   scope boundary.
+ * - standingSymptomTags IS real (Settings > Ongoing Symptoms). Unlike a
+ *   diagnosis-derived contraindication, a symptom override only ever
+ *   tightens a plan (see symptom-tags.ts's STANDING_SYMPTOM_TAGS) — the
+ *   same self-reported, low-risk footing as movementRestrictions below.
+ *   Anything outside the standing set (stale or hand-edited data) is
+ *   dropped here rather than reaching the engine, which throws on an
+ *   unrecognized tag.
  * - movementRestrictions IS real and DOES apply — unlike conditions, this
  *   is self-reported capability ("my body doesn't do this"), not a
  *   diagnosis-derived exclusion, so it doesn't carry the same
@@ -32,6 +39,7 @@
 
 import type { ConstraintProfile, Equipment, FocusArea, Intensity, SessionDay } from '@/lib/engine/types';
 import type { OnboardingContext } from '@/lib/engine/baseline-plan';
+import { isStandingSymptomTag } from '@/lib/symptom-tags';
 import type { UserProfile } from '@/lib/user-profile';
 
 // There's no account system in this app (local-only, no backend) — every
@@ -140,7 +148,7 @@ export function profileToOnboardingContext(profile: UserProfile): OnboardingCont
     sessionDays,
     conditionProfile: constraintProfileFor(profile),
     conditions: [],
-    standingSymptomTags: [],
+    standingSymptomTags: [...new Set(profile.standingSymptoms ?? [])].filter(isStandingSymptomTag),
     movementRestrictions: profile.movementRestrictions ?? [],
     biasSimpleExercises: BIAS_SIMPLE_BY_EXPERIENCE[profile.experience ?? ''] ?? false,
   };

@@ -8,11 +8,11 @@
 // against them: unvalidated hard-safety filters (arthritis / chronic
 // back-knee-pain exclusions shipping ahead of their own validation process)
 // and a missing consent-schema for the health data conditions depend on.
-// generateBaselinePlan is always called from this app with `conditions`,
-// `standingSymptomTags`, and `movementRestrictions` as empty arrays — the
-// onboardingConstraints() logic below still runs (so this stays a faithful,
-// unmodified port) but produces no exclusions from those dimensions, since
-// there's nothing in the sets to iterate. See onboarding-to-engine.ts.
+// generateBaselinePlan is always called from this app with `conditions` as
+// an empty array — the onboardingConstraints() logic below still runs (so
+// this stays a faithful, unmodified port) but produces no exclusions from
+// it. `standingSymptomTags` (Settings > Ongoing Symptoms) and
+// `movementRestrictions` are real and do apply. See onboarding-to-engine.ts.
 //
 // Builds the user's standing session once, at onboarding, by reusing M6's
 // filtering logic with an onboarding-time constraint set — no daily

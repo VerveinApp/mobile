@@ -529,6 +529,54 @@ describe('computePlanPreview — optional finisher set', () => {
   });
 });
 
+// Standing symptoms (Settings > Ongoing Symptoms) — applied every day at
+// every energy level, unlike the daily picker, which only appears at 1-2.
+describe('computePlanPreview — standing symptoms', () => {
+  const HIGH_INTENSITY_PROFILE: Partial<UserProfile> = { ...FULL_GYM_PROFILE, experience: 'years-experience' };
+
+  it('keeps every exercise low-impact on a Great day when joint pain is set', () => {
+    for (const energy of [3, 4, 5] as EnergyLevel[]) {
+      const result = computePlanPreview(
+        { ...FULL_GYM_PROFILE, standingSymptoms: ['joint_pain'] } as UserProfile,
+        energy,
+        CALIBRATION
+      );
+      expect(result.constraints.impactCeiling).toBe('low');
+      result.exercises.forEach((ex) => expect(exerciseLibrary.getById(ex.id)?.impact).toBe('low'));
+    }
+  });
+
+  it('caps intensity at moderate for heat sensitivity, even on a Great day', () => {
+    const without = computePlanPreview(HIGH_INTENSITY_PROFILE as UserProfile, 5, CALIBRATION);
+    const withHeat = computePlanPreview(
+      { ...HIGH_INTENSITY_PROFILE, standingSymptoms: ['heat_intolerance'] } as UserProfile,
+      5,
+      CALIBRATION
+    );
+    expect(without.constraints.intensityCeiling).toBe('high');
+    expect(withHeat.constraints.intensityCeiling).toBe('medium');
+    withHeat.exercises.forEach((ex) => expect(exerciseLibrary.getById(ex.id)?.intensity).not.toBe('high'));
+  });
+
+  it('shortens sessions for brain fog', () => {
+    const without = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 4, CALIBRATION);
+    const withFog = computePlanPreview({ ...FULL_GYM_PROFILE, standingSymptoms: ['brain_fog'] } as UserProfile, 4, CALIBRATION);
+    expect(withFog.durationMin).toBeLessThan(without.durationMin);
+  });
+
+  it("doesn't restate a standing symptom in every day's explanation, but still explains the same tag picked today", () => {
+    const standing = computePlanPreview(
+      { ...FULL_GYM_PROFILE, standingSymptoms: ['joint_pain'] } as UserProfile,
+      2,
+      CALIBRATION,
+      ['joint_pain']
+    );
+    const acuteOnly = computePlanPreview(FULL_GYM_PROFILE as UserProfile, 2, CALIBRATION, ['joint_pain']);
+    expect(standing.explanation).not.toContain('Joint pain flagged');
+    expect(acuteOnly.explanation).toContain('Joint pain flagged');
+  });
+});
+
 // healthReadinessModifier (see plan-preview.ts's own comment on
 // healthModifierChangedOutput) — never claims a trim the rounding didn't
 // actually preserve, and names whichever real reason(s) fired (RHR, sleep,

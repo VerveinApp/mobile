@@ -19,6 +19,7 @@ describe('withdrawHealthConsent', () => {
       age: '29',
       conditions: ['asthma'],
       movementRestrictions: ['overhead'],
+      standingSymptoms: ['joint_pain'],
     });
 
     await withdrawHealthConsent();
@@ -32,6 +33,7 @@ describe('withdrawHealthConsent', () => {
     expect(profile?.age).toBeUndefined();
     expect(profile?.conditions).toBeUndefined();
     expect(profile?.movementRestrictions).toBeUndefined();
+    expect(profile?.standingSymptoms).toBeUndefined();
     expect(profile?.name).toBe('Sam');
     expect(profile?.goal).toBe('get-stronger');
     expect(profile?.days).toBe('monday,thursday');

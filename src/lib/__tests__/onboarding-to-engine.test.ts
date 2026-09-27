@@ -45,10 +45,23 @@ describe('profileToOnboardingContext', () => {
     expect(profileToOnboardingContext(makeProfile()).focusAreas).toEqual(['full']);
   });
 
-  it('always sets conditions and standingSymptomTags to [] — those intake modules are not ported', () => {
-    const result = profileToOnboardingContext(makeProfile());
-    expect(result.conditions).toEqual([]);
-    expect(result.standingSymptomTags).toEqual([]);
+  it('always sets conditions to [] — collected, never applied', () => {
+    expect(profileToOnboardingContext(makeProfile({ conditions: ['asthma'] })).conditions).toEqual([]);
+  });
+
+  it('passes standing symptoms through, defaulting to [] when none are set', () => {
+    expect(profileToOnboardingContext(makeProfile()).standingSymptomTags).toEqual([]);
+    expect(
+      profileToOnboardingContext(makeProfile({ standingSymptoms: ['joint_pain', 'heat_intolerance'] })).standingSymptomTags
+    ).toEqual(['joint_pain', 'heat_intolerance']);
+  });
+
+  it('drops anything outside the standing set, and duplicates, before the engine sees it', () => {
+    // poor_sleep is a real tag but daily-only; the engine throws on an unknown one.
+    expect(
+      profileToOnboardingContext(makeProfile({ standingSymptoms: ['poor_sleep', 'not-a-tag', 'dizziness', 'dizziness'] }))
+        .standingSymptomTags
+    ).toEqual(['dizziness']);
   });
 
   it('passes movementRestrictions straight through, defaulting to [] when never answered', () => {
