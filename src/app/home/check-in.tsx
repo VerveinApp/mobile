@@ -19,6 +19,7 @@ import ReanimatedAnimated, {
   Easing,
   FadeIn,
   FadeOut,
+  LayoutAnimationConfig,
   LinearTransition,
   useAnimatedStyle,
   useReducedMotion,
@@ -26,6 +27,7 @@ import ReanimatedAnimated, {
   withDelay,
   withSequence,
   withTiming,
+  ZoomIn,
 } from 'react-native-reanimated';
 import { SymbolView } from '@/components/ui/app-symbol';
 import { openBrowserAsync } from 'expo-web-browser';
@@ -274,6 +276,13 @@ export default function EnergyCheckInScreen() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [lastCheckIn, setLastCheckIn] = useState<CheckInRecord | null>(null);
   const [sessionState, setSessionState] = useState<'checkin' | 'resolved' | 'done'>('checkin');
+  // BUG FIX: sessionState starts as 'checkin' and profile as null, so until
+  // the load below resolved, every open painted the energy check-in form —
+  // visible sliding in with the push — and then cross-faded it away into
+  // the rest day, the session in progress or the done screen. Nothing
+  // renders until the state that decides the screen is known; the right one
+  // then fades in once, with its checks and answers already in place.
+  const [hydrated, setHydrated] = useState(false);
   // A rest day is real (driven by the days the user actually picked during
   // onboarding, not a fake toggle) — but always overridable, since recovery
   // is a default, not a lockout. Arriving from the Today card's own "Check
@@ -498,96 +507,100 @@ export default function EnergyCheckInScreen() {
 
   useEffect(() => {
     (async () => {
-      const [
-        loadedProfile,
-        loadedLastCheckIn,
-        loadedTodaySession,
-        loadedCalibration,
-        loadedTrainingState,
-        loadedReadinessModifier,
-        loadedReadinessReasons,
-        loadedUnit,
-      ] = await Promise.all([
-        getProfile(),
-        getLastCheckIn(),
-        getTodaySession(),
-        getCalibration(),
-        getTrainingState(),
-        getHealthReadinessModifier(),
-        getHealthReadinessReasons(),
-        getUnitSystem(),
-      ]);
-      setProfile(loadedProfile);
-      setWeightUnit(loadedTodaySession?.loggedWeightsUnit ?? loadedUnit);
-      setLastCheckIn(loadedLastCheckIn);
-      setCalibration(loadedCalibration);
-      setTrainingState(loadedTrainingState);
-      setHealthReadinessModifier(loadedReadinessModifier);
-      setHealthReadinessReasons(loadedReadinessReasons);
-      if (loadedTodaySession) {
-        setEnergy(loadedTodaySession.energy);
-        setTimeAvailableMin(loadedTodaySession.timeAvailableMin ?? null);
-        // Same guard as handleEnergyChange's own reset — a stored `true`
-        // alongside a non-5 energy (e.g. from before this reset existed)
-        // should never load straight into computePlanPreview as accepted.
-        setFinisherAccepted(loadedTodaySession.energy === 5 && (loadedTodaySession.finisherAccepted ?? false));
-        setPreferredBodyArea(loadedTodaySession.preferredBodyArea ?? null);
-        setEquipmentOverride(loadedTodaySession.equipmentOverride ?? null);
-        setSessionState(loadedTodaySession.completed ? 'done' : 'resolved');
-        // Restored regardless of completed/resolved — this feeds preview's
-        // computation either way, not just the done-screen display fields.
-        // Re-applies the same M4 two-step-disclosure rule handleEnergyChange
-        // enforces live: a stored row from before that logic existed (or any
-        // other path producing energy > 2 with real tags) should never load
-        // straight into computePlanPreview as the "malformed payload" the
-        // engine contract says can't exist — enforced here too, not just on
-        // the live gauge-drag path.
-        setSymptomTags(loadedTodaySession.energy <= 2 ? new Set(loadedTodaySession.symptomTags) : new Set());
-        // BUG FIX: restores whatever weights were typed before an app kill
-        // interrupted the session — see loggedWeightsKg's own doc comment
-        // on TodaySession. Naturally empty for a completed session (Finish
-        // clears this field once weights are durably recorded elsewhere).
-        setLoggedWeightsKg(loadedTodaySession.loggedWeightsKg ?? {});
-        // The rest of a started session's exact state — see the fields' own
-        // doc comments on TodaySession for the resume bugs each one closes.
-        setSwappedExercises(loadedTodaySession.swappedExercises ?? {});
-        setFrozenReadiness(loadedTodaySession.planHealthReadiness ?? null);
-        if (loadedTodaySession.startedAt) sessionStartedAtRef.current = new Date(loadedTodaySession.startedAt);
-        if (!loadedTodaySession.completed) {
-          setCurrentExerciseIndex(loadedTodaySession.currentExerciseIndex ?? 0);
-          // Completion is already autosaved per exercise, in plan order —
-          // which, with the plan now frozen, is the same order on resume.
-          const partialLog = await getWorkoutLog(localDateStr());
-          if (partialLog) {
-            setCompletedExercises(new Set(partialLog.exercises.flatMap((exercise, i) => (exercise.completed ? [i] : []))));
+      try {
+        const [
+          loadedProfile,
+          loadedLastCheckIn,
+          loadedTodaySession,
+          loadedCalibration,
+          loadedTrainingState,
+          loadedReadinessModifier,
+          loadedReadinessReasons,
+          loadedUnit,
+        ] = await Promise.all([
+          getProfile(),
+          getLastCheckIn(),
+          getTodaySession(),
+          getCalibration(),
+          getTrainingState(),
+          getHealthReadinessModifier(),
+          getHealthReadinessReasons(),
+          getUnitSystem(),
+        ]);
+        setProfile(loadedProfile);
+        setWeightUnit(loadedTodaySession?.loggedWeightsUnit ?? loadedUnit);
+        setLastCheckIn(loadedLastCheckIn);
+        setCalibration(loadedCalibration);
+        setTrainingState(loadedTrainingState);
+        setHealthReadinessModifier(loadedReadinessModifier);
+        setHealthReadinessReasons(loadedReadinessReasons);
+        if (loadedTodaySession) {
+          setEnergy(loadedTodaySession.energy);
+          setTimeAvailableMin(loadedTodaySession.timeAvailableMin ?? null);
+          // Same guard as handleEnergyChange's own reset — a stored `true`
+          // alongside a non-5 energy (e.g. from before this reset existed)
+          // should never load straight into computePlanPreview as accepted.
+          setFinisherAccepted(loadedTodaySession.energy === 5 && (loadedTodaySession.finisherAccepted ?? false));
+          setPreferredBodyArea(loadedTodaySession.preferredBodyArea ?? null);
+          setEquipmentOverride(loadedTodaySession.equipmentOverride ?? null);
+          setSessionState(loadedTodaySession.completed ? 'done' : 'resolved');
+          // Restored regardless of completed/resolved — this feeds preview's
+          // computation either way, not just the done-screen display fields.
+          // Re-applies the same M4 two-step-disclosure rule handleEnergyChange
+          // enforces live: a stored row from before that logic existed (or any
+          // other path producing energy > 2 with real tags) should never load
+          // straight into computePlanPreview as the "malformed payload" the
+          // engine contract says can't exist — enforced here too, not just on
+          // the live gauge-drag path.
+          setSymptomTags(loadedTodaySession.energy <= 2 ? new Set(loadedTodaySession.symptomTags) : new Set());
+          // BUG FIX: restores whatever weights were typed before an app kill
+          // interrupted the session — see loggedWeightsKg's own doc comment
+          // on TodaySession. Naturally empty for a completed session (Finish
+          // clears this field once weights are durably recorded elsewhere).
+          setLoggedWeightsKg(loadedTodaySession.loggedWeightsKg ?? {});
+          // The rest of a started session's exact state — see the fields' own
+          // doc comments on TodaySession for the resume bugs each one closes.
+          setSwappedExercises(loadedTodaySession.swappedExercises ?? {});
+          setFrozenReadiness(loadedTodaySession.planHealthReadiness ?? null);
+          if (loadedTodaySession.startedAt) sessionStartedAtRef.current = new Date(loadedTodaySession.startedAt);
+          if (!loadedTodaySession.completed) {
+            setCurrentExerciseIndex(loadedTodaySession.currentExerciseIndex ?? 0);
+            // Completion is already autosaved per exercise, in plan order —
+            // which, with the plan now frozen, is the same order on resume.
+            const partialLog = await getWorkoutLog(localDateStr());
+            if (partialLog) {
+              setCompletedExercises(new Set(partialLog.exercises.flatMap((exercise, i) => (exercise.completed ? [i] : []))));
+            }
+          }
+          if (loadedTodaySession.completed) {
+            const [existingNote, existingFeedback, insight] = await Promise.all([
+              getSessionNote(localDateStr()),
+              getSessionFeedback(localDateStr()),
+              getBodyAreaInsight(),
+            ]);
+            if (existingNote) setNoteText(existingNote);
+            if (existingFeedback) setFeedbackGiven(existingFeedback);
+            setPostSessionNote(getPostSessionNote(loadedTodaySession.energy));
+            // Two independent AsyncStorage reads (session-history.ts and
+            // decision-trace-log.ts are separate keys, neither depends on the
+            // other), then two independent note computations over them — was
+            // four sequential round-trips stacked one after another, now two
+            // parallel batches.
+            const [history, traceLog] = await Promise.all([getSessionHistory(), getDecisionTraceLog()]);
+            setPacingTrendNote(getPacingTrendNote(history));
+            const [insightNote, fitNote] = await Promise.all([
+              // Count-based — reads the same recent window it always did,
+              // not the longer-retained history (see getRecentSessionHistory).
+              getCoachingInsightNote(history.slice(0, ROLLING_WINDOW_DAYS)),
+              getPlanFitNote(traceLog),
+            ]);
+            setCoachingInsightNote(insightNote);
+            setPlanFitNote(fitNote);
+            setDoneInsight(insight);
           }
         }
-        if (loadedTodaySession.completed) {
-          const [existingNote, existingFeedback, insight] = await Promise.all([
-            getSessionNote(localDateStr()),
-            getSessionFeedback(localDateStr()),
-            getBodyAreaInsight(),
-          ]);
-          if (existingNote) setNoteText(existingNote);
-          if (existingFeedback) setFeedbackGiven(existingFeedback);
-          setPostSessionNote(getPostSessionNote(loadedTodaySession.energy));
-          // Two independent AsyncStorage reads (session-history.ts and
-          // decision-trace-log.ts are separate keys, neither depends on the
-          // other), then two independent note computations over them — was
-          // four sequential round-trips stacked one after another, now two
-          // parallel batches.
-          const [history, traceLog] = await Promise.all([getSessionHistory(), getDecisionTraceLog()]);
-          setPacingTrendNote(getPacingTrendNote(history));
-          const [insightNote, fitNote] = await Promise.all([
-            // Count-based — reads the same recent window it always did,
-            // not the longer-retained history (see getRecentSessionHistory).
-            getCoachingInsightNote(history.slice(0, ROLLING_WINDOW_DAYS)),
-            getPlanFitNote(traceLog),
-          ]);
-          setCoachingInsightNote(insightNote);
-          setPlanFitNote(fitNote);
-          setDoneInsight(insight);
-        }
+      } finally {
+        setHydrated(true);
       }
     })();
   }, []);
@@ -597,7 +610,14 @@ export default function EnergyCheckInScreen() {
     saveSessionNote(localDateStr(), text);
   };
 
+  // BUG FIX: the pills stayed live while the history read below ran, so a
+  // second tap in that window submitted twice — and submitSessionFeedback
+  // is a read-nudge-write, so two answers nudged calibration twice for one
+  // session. One answer per session, decided on the first tap.
+  const feedbackSubmittingRef = useRef(false);
   const handleSubmitFeedback = async (response: FeedbackResponse) => {
+    if (feedbackSubmittingRef.current) return;
+    feedbackSubmittingRef.current = true;
     hapticSelect();
     const priorHistory = await getSessionHistory();
     setIsFirstFeedback(!priorHistory.some((e) => e.feedback !== undefined));
@@ -627,7 +647,7 @@ export default function EnergyCheckInScreen() {
   const isRestDay = trainingDays !== null && !trainingDays.includes(today);
   // Rest-day framing only applies before a session's been resolved — it's
   // not retroactively overridden by a session already checked into today.
-  const showRestDay = sessionState === 'checkin' && isRestDay && !showAnyway;
+  const showRestDay = hydrated && sessionState === 'checkin' && isRestDay && !showAnyway;
 
   const entering = useFadeInEntering();
   const reducedMotion = useReducedMotion();
@@ -1205,7 +1225,10 @@ export default function EnergyCheckInScreen() {
     if (isFinishingSessionRef.current) return;
     isFinishingSessionRef.current = true;
     setIsFinishingSession(true);
-    hapticSuccess();
+    // A light tap to acknowledge the press; the success haptic belongs to
+    // the checkmark landing on the done screen (SuccessCheckmark fires it) —
+    // firing both made one finish buzz twice.
+    hapticImpactLight();
     // Re-passes the same tags/time/finisher choice picked at Start —
     // saveTodaySession replaces the whole record each call, so omitting any
     // of them would silently wipe them.
@@ -1389,7 +1412,7 @@ export default function EnergyCheckInScreen() {
               </ReanimatedAnimated.Text>
             </Pressable>
           </ReanimatedAnimated.View>
-        ) : sessionState === 'checkin' ? (
+        ) : !hydrated ? null : sessionState === 'checkin' ? (
           <ReanimatedAnimated.ScrollView
             key="check-in"
             entering={FadeIn.duration(MOTION_DURATION.base).easing(MOTION_EASING.standard)}
@@ -1844,11 +1867,18 @@ export default function EnergyCheckInScreen() {
               </ReanimatedAnimated.View>
             ) : null}
 
-            <View style={styles.resolvedExerciseCard}>
+            {/* This card, Next and Skip ride the same spring as the timer
+                card above them: when that card grows or shrinks (an exercise
+                finishing, "How to" opening, the next exercise arriving) the
+                column below it glides instead of jumping to its new place. */}
+            <ReanimatedAnimated.View layout={sectionLayout} style={styles.resolvedExerciseCard}>
               <View pointerEvents="none" style={styles.exerciseCardSheen} />
               <Text style={styles.exerciseLogHint} maxFontSizeMultiplier={1.3}>
                 One at a time — finish the timer above or skip it, whichever works today
               </Text>
+              {/* Checks already there when the card mounts (a resumed
+                  session) just appear; one earned now springs in. */}
+              <LayoutAnimationConfig skipEntering>
               {sessionExercises.map((exercise, index) => {
                 const isDone = completedExercises.has(index);
                 const isCurrent = index === currentExerciseIndex && !isDone;
@@ -1865,7 +1895,12 @@ export default function EnergyCheckInScreen() {
                   >
                     <View style={styles.exerciseNameRow}>
                       <View style={[styles.exerciseCheckbox, isDone && styles.exerciseCheckboxDone]}>
-                        {isDone ? <SymbolView name="checkmark" size={10} tintColor="#ffffff" weight="bold" /> : null}
+                        {isDone ? (
+                          // Scales a symbol image, never text — safe to zoom.
+                          <ReanimatedAnimated.View entering={ZoomIn.springify().duration(300).dampingRatio(0.7)}>
+                            <SymbolView name="checkmark" size={10} tintColor="#ffffff" weight="bold" />
+                          </ReanimatedAnimated.View>
+                        ) : null}
                       </View>
                       <Text
                         style={[styles.exerciseName, isDone && styles.exerciseNameDone]}
@@ -1937,11 +1972,13 @@ export default function EnergyCheckInScreen() {
                   </ReanimatedAnimated.View>
                 );
               })}
+              </LayoutAnimationConfig>
               <Text style={styles.equipmentNote} maxFontSizeMultiplier={1.3}>
                 {preview.equipmentNote}
               </Text>
-            </View>
+            </ReanimatedAnimated.View>
 
+            <ReanimatedAnimated.View layout={sectionLayout}>
             <Pressable
               style={styles.checkinPrimaryButtonHit}
               // 38pt tall by design; the slop brings the tap target past 44pt.
@@ -1986,7 +2023,9 @@ export default function EnergyCheckInScreen() {
                 </View>
               </Animated.View>
             </Pressable>
+            </ReanimatedAnimated.View>
 
+            <ReanimatedAnimated.View layout={sectionLayout}>
             <Pressable
               style={styles.skipExerciseHit}
               onPress={handleSkipPress}
@@ -2005,6 +2044,7 @@ export default function EnergyCheckInScreen() {
                 Skip this exercise
               </Animated.Text>
             </Pressable>
+            </ReanimatedAnimated.View>
 
             <Modal
               visible={showSkipConfirm}
@@ -2284,13 +2324,17 @@ export default function EnergyCheckInScreen() {
                 HOW DID THAT FEEL?
               </Text>
               {feedbackGiven ? (
-                <Text style={styles.feedbackConfirmText} maxFontSizeMultiplier={1.3}>
+                <ReanimatedAnimated.Text
+                  entering={FadeIn.duration(MOTION_DURATION.base).delay(MOTION_DURATION.fast)}
+                  style={styles.feedbackConfirmText}
+                  maxFontSizeMultiplier={1.3}
+                >
                   {isFirstFeedback
                     ? "That's your first pacing call — we'll get sharper together."
                     : FEEDBACK_CONFIRM_TEXT[feedbackGiven]}
-                </Text>
+                </ReanimatedAnimated.Text>
               ) : (
-                <View style={styles.feedbackButtonRow}>
+                <ReanimatedAnimated.View exiting={FadeOut.duration(MOTION_DURATION.fast)} style={styles.feedbackButtonRow}>
                   <Pressable
                     style={styles.feedbackButton}
                     onPress={() => handleSubmitFeedback('much_too_easy')}
@@ -2356,7 +2400,7 @@ export default function EnergyCheckInScreen() {
                     <PillWash hover={feedbackMuchTooHardHover} press={feedbackMuchTooHardPress} radius={8} styles={styles} />
                     <Text style={styles.feedbackButtonText} maxFontSizeMultiplier={1.2}>Way too hard</Text>
                   </Pressable>
-                </View>
+                </ReanimatedAnimated.View>
               )}
             </View>
 
@@ -2670,7 +2714,10 @@ function ExerciseTimer({
 
   // A visible beat under the existing haptic the instant a phase's
   // countdown reaches 0 — natural tick-out or the early-finish bypass both
-  // land here. The final interval already gets hapticSuccess via onComplete
+  // land here. A quick dip in opacity, not a scale: BUG FIX — it used to
+  // scale the clock to 1.14, and scaling a text layer makes iOS stretch its
+  // rasterized bitmap, so the 34pt digits blurred on every set end (the
+  // same reason button-interactions.ts dropped press-scale). The final interval already gets hapticSuccess via onComplete
   // above (fired in the parent), so this only adds a NEW haptic for the
   // non-final "awaiting next phase" case; the pulse itself fires either way,
   // since both are "something just finished" moments. Mutating clockPulse
@@ -2682,10 +2729,10 @@ function ExerciseTimer({
   const clockPulse = useSharedValue(1);
   useEffect(() => {
     if (secondsLeft !== 0) return;
-    clockPulse.value = withSequence(withTiming(1.14, { duration: 110 }), withTiming(1, { duration: 180 }));
+    clockPulse.set(withSequence(withTiming(0.35, { duration: 110 }), withTiming(1, { duration: 220 })));
     if (!isLastInterval) hapticImpactLight();
   }, [secondsLeft, isLastInterval, clockPulse]);
-  const clockPulseStyle = useAnimatedStyle(() => ({ transform: [{ scale: clockPulse.value }] }));
+  const clockPulseStyle = useAnimatedStyle(() => ({ opacity: clockPulse.get() }));
 
   // Fluidity pass: this cluster is tapped constantly during a real session
   // (every set, every rest, every "how to" check) and previously had zero
