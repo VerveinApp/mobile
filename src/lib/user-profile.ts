@@ -24,9 +24,8 @@ export type UserProfile = {
   /** What's on hand for a home gym or minimal setup — owned-equipment.ts's
    * ids, comma-separated like `days`. undefined = never answered (the
    * setup's default list applies); 'none' = answered "none of these". Read by
-   * the engine via onboarding-to-engine.ts. Device-only for now: the synced
-   * profiles table has no column for it, so a new device falls back to the
-   * setup's default list until it's answered again. */
+   * the engine via onboarding-to-engine.ts. Synced with the rest of the
+   * profile (profiles.equipment — see profile-sync.ts). */
   equipment?: string;
   duration?: string;
   commitmentLevel?: string;

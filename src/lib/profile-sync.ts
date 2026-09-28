@@ -25,12 +25,13 @@ export async function pushProfileToRemote(profile: UserProfile): Promise<void> {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return;
-    await supabase.from('profiles').upsert({
+    const row = {
       user_id: user.id,
       name: profile.name ?? null,
       goal: profile.goal ?? null,
       experience: profile.experience ?? null,
       environment: profile.environment ?? null,
+      equipment: profile.equipment ?? null,
       duration: profile.duration ?? null,
       commitment_level: profile.commitmentLevel ?? null,
       days: profile.days ?? null,
@@ -53,7 +54,15 @@ export async function pushProfileToRemote(profile: UserProfile): Promise<void> {
       target_lift_exercise: profile.targetLiftExercise ?? null,
       target_lift_weight_kg: profile.targetLiftWeightKg ?? null,
       updated_at: new Date().toISOString(),
-    });
+    };
+    const { error } = await supabase.from('profiles').upsert(row);
+    // Until 20260928000000_profiles_equipment.sql is deployed, the server
+    // rejects the whole row over the one column it doesn't have — sync
+    // everything else rather than nothing.
+    if (error && /equipment/i.test(error.message ?? '')) {
+      const { equipment: _notYetSynced, ...withoutEquipment } = row;
+      await supabase.from('profiles').upsert(withoutEquipment);
+    }
   } catch {
     // Best-effort — see this function's own doc comment.
   }
@@ -93,6 +102,7 @@ export async function pullProfileFromRemote(): Promise<RemoteProfileResult> {
       goal: data.goal ?? undefined,
       experience: data.experience ?? undefined,
       environment: data.environment ?? undefined,
+      equipment: data.equipment ?? undefined,
       duration: data.duration ?? undefined,
       commitmentLevel: data.commitment_level ?? undefined,
       days: data.days ?? undefined,
