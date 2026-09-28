@@ -379,7 +379,11 @@ export default function ProgressScreen() {
                 {completionRate !== null ? `${completionRate}%` : '—'}
               </Text>
               <Text style={styles.summaryLabel} maxFontSizeMultiplier={1.2}>
-                {weekCount === 1 ? 'This Week' : `${weekCount}-Week Completion`}
+                {/* BUG FIX: named from the weeks actually loaded, not the
+                    toggle — the toggle flips at the tap while the rate
+                    above waits for the reload, so for a moment this said
+                    "This Week" over the 4-week figure. */}
+                {weeks.length === 1 ? 'This Week' : `${weeks.length}-Week Completion`}
               </Text>
             </View>
           </View>
