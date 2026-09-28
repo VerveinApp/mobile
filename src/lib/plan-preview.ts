@@ -73,7 +73,7 @@ import { bodyAreaPriorityScore, type TrainingState } from '@/lib/engine/training
 import { scaleVolume } from '@/lib/engine/volume-scaling';
 import { assembleWorkout } from '@/lib/engine/workout-assembly';
 import { localDateStr } from '@/lib/local-date';
-import { ownedEquipmentFor } from '@/lib/owned-equipment';
+import { describeOwnedEquipment, ownedEquipmentFor } from '@/lib/owned-equipment';
 import {
   EQUIPMENT_BY_ENVIRONMENT,
   LOCAL_USER_ID,
@@ -1005,9 +1005,14 @@ export function computePlanPreview(
   // standing setup was what actually governed selection. Gated on the same
   // resolved lookup effectiveEquipment uses, so the two can never disagree.
   const resolvedOverrideLabel = equipmentOverride ? ENVIRONMENT_LABELS[equipmentOverride] : undefined;
-  const equipmentNote = resolvedOverrideLabel
-    ? `Selected from today's ${resolvedOverrideLabel} setup.`
-    : `Selected from your ${ENVIRONMENT_LABELS[input.environment ?? ''] ?? 'equipment'} setup.`;
+  // A home list names the kit itself — "your Home Gym setup" says nothing
+  // about what the plan was actually built from.
+  const equipmentNote =
+    effectiveOwnedEquipment && effectiveOwnedEquipment.length > 0
+      ? `Built around your ${describeOwnedEquipment(effectiveOwnedEquipment)}.`
+      : resolvedOverrideLabel
+        ? `Selected from today's ${resolvedOverrideLabel} setup.`
+        : `Selected from your ${ENVIRONMENT_LABELS[input.environment ?? ''] ?? 'equipment'} setup.`;
 
   // Fallback-branch exercises are full Exercise objects with an `id`, not a
   // ScaledExercise's `exerciseId`/`adapted_sets` — but ledger/debt folds

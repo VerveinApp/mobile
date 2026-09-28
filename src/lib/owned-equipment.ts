@@ -45,6 +45,34 @@ export const OWNED_EQUIPMENT_LABELS: Record<OwnedEquipment, string> = {
   foam_roller: 'Foam roller',
 };
 
+/** The same items as they read mid-sentence ("Built around your …"). */
+const OWNED_EQUIPMENT_NOUNS: Record<OwnedEquipment, string> = {
+  dumbbell: 'dumbbells',
+  kettlebell: 'kettlebells',
+  barbell: 'barbell',
+  bench: 'bench',
+  pullup_bar: 'pull-up bar',
+  band: 'bands',
+  suspension: 'suspension trainer',
+  medball: 'medicine ball',
+  stability_ball: 'stability ball',
+  box: 'plyo box',
+  cable: 'cable machine',
+  dip_bars: 'dip bars',
+  weight_vest: 'weight vest',
+  ankle_weights: 'ankle weights',
+  cardio: 'cardio machine',
+  foam_roller: 'foam roller',
+};
+
+/** "dumbbells, bench and bands"; past three, "dumbbells, bench, bands and 2 more". */
+export function describeOwnedEquipment(items: readonly string[]): string {
+  const nouns = OWNED_EQUIPMENT.filter((item) => items.includes(item)).map((item) => OWNED_EQUIPMENT_NOUNS[item]);
+  if (nouns.length <= 1) return nouns[0] ?? '';
+  if (nouns.length <= 3) return `${nouns.slice(0, -1).join(', ')} and ${nouns[nouns.length - 1]}`;
+  return `${nouns.slice(0, 3).join(', ')} and ${nouns.length - 3} more`;
+}
+
 /** Pre-ticked when the list is first shown, and what the engine assumes for
  * anyone who picked one of these setups but never answered the list (every
  * profile from before it existed). Deliberately modest: an item assumed but

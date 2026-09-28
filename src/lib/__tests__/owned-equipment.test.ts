@@ -4,6 +4,7 @@ import { exerciseLibrary } from '@/lib/engine/exercise-library';
 import { DEFAULT_CALIBRATION } from '@/lib/engine/personal-calibration';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import {
+  describeOwnedEquipment,
   OWNED_EQUIPMENT,
   ownedEquipmentFor,
   parseOwnedEquipment,
@@ -96,6 +97,14 @@ describe('owned equipment answers', () => {
     expect(parseOwnedEquipment('none')).toEqual([]);
     expect(parseOwnedEquipment(undefined)).toBeUndefined();
     expect(parseOwnedEquipment('')).toBeUndefined();
+  });
+
+  it('names the kit the way a sentence reads it', () => {
+    expect(describeOwnedEquipment(['band'])).toBe('bands');
+    expect(describeOwnedEquipment(['band', 'dumbbell', 'bench'])).toBe('dumbbells, bench and bands');
+    expect(describeOwnedEquipment(['dumbbell', 'bench', 'band', 'pullup_bar', 'box'])).toBe('dumbbells, bench, pull-up bar and 2 more');
+    const note = computePlanPreview({ ...BASE, environment: 'home-gym', equipment: 'dumbbell,band' } as UserProfile, 4, CALIBRATION).equipmentNote;
+    expect(note).toBe('Built around your dumbbells and bands.');
   });
 
   it('maps each setup to what the engine may assume', () => {
