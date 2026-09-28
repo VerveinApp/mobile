@@ -332,14 +332,18 @@ export default function TrainScreen() {
                 // an estimate for a session that can no longer occur.
                 const weekDay = weekDays?.find((d) => d.weekday === day);
                 const isPast = !!weekDay && !weekDay.isFuture && !weekDay.isToday;
-                const pastDone = isPast && weekDay?.completed === true;
+                // BUG FIX: this used to be past days only, so after today's
+                // session was finished the Today card above said "Done for
+                // today" while today's row here still offered an estimate
+                // for the session just completed.
+                const isDone = !!weekDay && !weekDay.isFuture && weekDay.completed === true;
                 return (
                   <View
                     key={day}
                     style={[
                       styles.planRow,
                       index < orderedScheduledDays.length - 1 && styles.rowDivider,
-                      isPast && !pastDone && styles.planRowPast,
+                      isPast && !isDone && styles.planRowPast,
                     ]}
                   >
                     <View>
@@ -349,7 +353,7 @@ export default function TrainScreen() {
                       </Text>
                       <Text style={styles.planRowLabel} maxFontSizeMultiplier={1.3}>{sessionLabel}</Text>
                     </View>
-                    {pastDone ? (
+                    {isDone ? (
                       <View style={styles.planRowDone}>
                         <SymbolView name="checkmark.circle.fill" size={13} tintColor="#5FBE84" />
                         <Text style={styles.planRowMeta} maxFontSizeMultiplier={1.3}>Done</Text>
