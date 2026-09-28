@@ -1,5 +1,5 @@
 import { BottomSheetBackdrop, type BottomSheetBackdropProps, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useMemo, useRef, useState } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
@@ -12,6 +12,7 @@ import { COMMITMENT_LEVELS } from '@/lib/commitment-levels';
 import { DURATION_LABELS, ENVIRONMENT_LABELS, EXPERIENCE_LABELS, GOAL_LABELS } from '@/lib/profile-labels';
 import { enableSessionReminders, isReminderEnabled } from '@/lib/session-reminders';
 import { useAppColors } from '@/lib/theme-context';
+import { usePreloadedSheet } from '@/components/settings/use-preloaded-sheet';
 import { getProfile, updateProfile } from '@/lib/user-profile';
 
 // Same option ids as onboarding/step-2 (goal), step-3 (experience),
@@ -41,12 +42,11 @@ const DAY_OPTIONS: { id: string; label: string }[] = [
  * derive everything live from the saved profile.
  *
  * Presented as a bottom sheet (not a pushed route) from Settings — a real
- * `BottomSheetModal` stays mounted across opens, so data is (re)loaded on
- * `onChange` rather than a route-focus effect.
+ * `BottomSheetModal` stays mounted across opens, so data is (re)loaded each
+ * time it's presented (usePreloadedSheet) rather than a route-focus effect.
  */
 export const AdjustPlanSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void }>(({ onDismiss }, forwardedRef) => {
   const sheetRef = useRef<BottomSheetModal>(null);
-  useImperativeHandle(forwardedRef, () => sheetRef.current as BottomSheetModal, []);
   const insets = useSafeAreaInsets();
 
   const colors = useAppColors();
@@ -70,12 +70,7 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal, { onDismiss?: () => 
     setCommitmentIndex(idx !== null && idx >= 0 && idx < COMMITMENT_LEVELS.length ? idx : null);
   }, []);
 
-  const handleSheetChange = useCallback(
-    (index: number) => {
-      if (index >= 0) loadFromProfile();
-    },
-    [loadFromProfile]
-  );
+  usePreloadedSheet(forwardedRef, sheetRef, loadFromProfile);
 
   const closeHover = useHoverFade();
   const saveHover = useHoverFade();
@@ -126,7 +121,6 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal, { onDismiss?: () => 
     <BottomSheetModal
       ref={sheetRef}
       snapPoints={['90%']}
-      onChange={handleSheetChange}
       onDismiss={onDismiss}
       backdropComponent={renderBackdrop}
       backgroundStyle={Platform.OS === 'android' ? { backgroundColor: colors.background, borderTopLeftRadius: 28, borderTopRightRadius: 28 } : { backgroundColor: colors.background }}

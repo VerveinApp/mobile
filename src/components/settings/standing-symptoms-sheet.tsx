@@ -1,5 +1,5 @@
 import { BottomSheetBackdrop, type BottomSheetBackdropProps, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useMemo, useRef, useState } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
@@ -15,6 +15,7 @@ import {
   type StandingSymptomTag,
 } from '@/lib/symptom-tags';
 import { useAppColors } from '@/lib/theme-context';
+import { usePreloadedSheet } from '@/components/settings/use-preloaded-sheet';
 import { getProfile, updateProfile } from '@/lib/user-profile';
 
 /**
@@ -32,7 +33,6 @@ import { getProfile, updateProfile } from '@/lib/user-profile';
  */
 export const StandingSymptomsSheet = forwardRef<BottomSheetModal>((_props, forwardedRef) => {
   const sheetRef = useRef<BottomSheetModal>(null);
-  useImperativeHandle(forwardedRef, () => sheetRef.current as BottomSheetModal, []);
   const insets = useSafeAreaInsets();
 
   const colors = useAppColors();
@@ -45,12 +45,7 @@ export const StandingSymptomsSheet = forwardRef<BottomSheetModal>((_props, forwa
     setSelected(new Set((profile?.standingSymptoms ?? []).filter(isStandingSymptomTag)));
   }, []);
 
-  const handleSheetChange = useCallback(
-    (index: number) => {
-      if (index >= 0) loadFromProfile();
-    },
-    [loadFromProfile]
-  );
+  usePreloadedSheet(forwardedRef, sheetRef, loadFromProfile);
 
   const closeHover = useHoverFade();
   const saveHover = useHoverFade();
@@ -88,7 +83,6 @@ export const StandingSymptomsSheet = forwardRef<BottomSheetModal>((_props, forwa
     <BottomSheetModal
       ref={sheetRef}
       snapPoints={['70%']}
-      onChange={handleSheetChange}
       backdropComponent={renderBackdrop}
       backgroundStyle={Platform.OS === 'android' ? { backgroundColor: colors.background, borderTopLeftRadius: 28, borderTopRightRadius: 28 } : { backgroundColor: colors.background }}
       handleIndicatorStyle={{ backgroundColor: Platform.OS === 'android' ? 'rgba(95,190,132,0.5)' : colors.surfaceBorder, width: Platform.OS === 'android' ? 36 : undefined }}

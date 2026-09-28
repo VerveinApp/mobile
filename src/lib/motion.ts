@@ -1,4 +1,4 @@
-import { Easing, FadeOut, LinearTransition } from 'react-native-reanimated';
+import { Easing, FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
 /**
  * Shared animation vocabulary — durations and easing curves meant to be
@@ -61,3 +61,6 @@ export const RETURN_REVEAL_DELAY_MS = 250;
  */
 export const LIST_ROW_LAYOUT = LinearTransition.springify(280).dampingRatio(0.8);
 export const LIST_ROW_EXITING = FadeOut.duration(MOTION_DURATION.fast).easing(MOTION_EASING.standard);
+/** The entering half of the pair — a newly revealed option or row fades in
+ * while LIST_ROW_LAYOUT springs everything below it out of the way. */
+export const LIST_ROW_ENTERING = FadeIn.duration(MOTION_DURATION.base).easing(MOTION_EASING.standard);

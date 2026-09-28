@@ -1,6 +1,7 @@
 import { BottomSheetBackdrop, type BottomSheetBackdropProps, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useMemo, useRef, useState } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import ReanimatedAnimated, { LayoutAnimationConfig } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
@@ -9,7 +10,9 @@ import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interact
 import { getAllExercisePerformances, type ExercisePerformance } from '@/lib/exercise-performance';
 import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { HorizontalRuler } from '@/components/onboarding/horizontal-ruler';
+import { LIST_ROW_ENTERING, LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 import { useAppColors } from '@/lib/theme-context';
+import { usePreloadedSheet } from '@/components/settings/use-preloaded-sheet';
 import { getUnitSystem, type UnitSystem } from '@/lib/unit-preference';
 import { getProfile, updateProfile } from '@/lib/user-profile';
 import { getWeightLog, resolveCurrentWeightKg } from '@/lib/weight-log';
@@ -81,7 +84,6 @@ function formatLiftWeight(weightKg: number, unit: UnitSystem): string {
  */
 export const GoalsSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void }>(({ onDismiss }, forwardedRef) => {
   const sheetRef = useRef<BottomSheetModal>(null);
-  useImperativeHandle(forwardedRef, () => sheetRef.current as BottomSheetModal, []);
 
   const insets = useSafeAreaInsets();
   const colors = useAppColors();
@@ -134,12 +136,7 @@ export const GoalsSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void 
     }
   }, []);
 
-  const handleSheetChange = useCallback(
-    (index: number) => {
-      if (index >= 0) loadFromProfile();
-    },
-    [loadFromProfile]
-  );
+  usePreloadedSheet(forwardedRef, sheetRef, loadFromProfile);
 
   const closeHover = useHoverFade();
   const saveHover = useHoverFade();
@@ -199,7 +196,6 @@ export const GoalsSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void 
     <BottomSheetModal
       ref={sheetRef}
       snapPoints={['75%']}
-      onChange={handleSheetChange}
       onDismiss={onDismiss}
       backdropComponent={renderBackdrop}
       backgroundStyle={Platform.OS === 'android' ? { backgroundColor: colors.background, borderTopLeftRadius: 28, borderTopRightRadius: 28 } : { backgroundColor: colors.background }}
@@ -224,6 +220,10 @@ export const GoalsSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void 
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
       >
+        {/* Content mounts fresh on every present — a goal that's already on
+            arrives with the sheet's slide, not faded in on top of it. Only
+            what a switch or a pick reveals after that glides in. */}
+        <LayoutAnimationConfig skipEntering>
         <Text style={styles.hint} maxFontSizeMultiplier={1.4}>
           Entirely optional, and entirely yours to set — nothing here changes how your plan is built.
         </Text>
@@ -238,7 +238,7 @@ export const GoalsSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void 
             />
           </View>
           {targetWeightEnabled ? (
-            <View style={styles.wheelCard}>
+            <ReanimatedAnimated.View style={styles.wheelCard} entering={LIST_ROW_ENTERING} exiting={LIST_ROW_EXITING}>
               <View style={styles.wheelRow}>
                 {unit === 'imperial' ? (
                   <HorizontalRuler
@@ -256,11 +256,11 @@ export const GoalsSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void 
                   />
                 )}
               </View>
-            </View>
+            </ReanimatedAnimated.View>
           ) : null}
         </View>
 
-        <View style={styles.section}>
+        <ReanimatedAnimated.View style={styles.section} layout={LIST_ROW_LAYOUT}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>Target lift</Text>
             <Switch
@@ -271,12 +271,17 @@ export const GoalsSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void 
           </View>
           {targetLiftEnabled ? (
             loggedExerciseNames.length === 0 ? (
-              <Text style={styles.hint} maxFontSizeMultiplier={1.4}>
+              <ReanimatedAnimated.Text
+                style={styles.hint}
+                entering={LIST_ROW_ENTERING}
+                exiting={LIST_ROW_EXITING}
+                maxFontSizeMultiplier={1.4}
+              >
                 Log a weight for an exercise first — a target compares against your real numbers, not a guess.
-              </Text>
+              </ReanimatedAnimated.Text>
             ) : (
               <>
-                <View style={styles.exerciseList}>
+                <ReanimatedAnimated.View style={styles.exerciseList} entering={LIST_ROW_ENTERING} exiting={LIST_ROW_EXITING}>
                   {loggedExerciseNames.map((name, index) => {
                     const isSelected = targetLiftExercise === name;
                     const isLast = index === loggedExerciseNames.length - 1;
@@ -293,10 +298,10 @@ export const GoalsSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void 
                       </Pressable>
                     );
                   })}
-                </View>
+                </ReanimatedAnimated.View>
                 {targetLiftExercise ? (
                   <>
-                    <View style={styles.wheelCard}>
+                    <ReanimatedAnimated.View style={styles.wheelCard} entering={LIST_ROW_ENTERING} exiting={LIST_ROW_EXITING}>
                       <View style={styles.wheelRow}>
                         {unit === 'imperial' ? (
                           <HorizontalRuler
@@ -314,20 +319,26 @@ export const GoalsSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void 
                           />
                         )}
                       </View>
-                    </View>
+                    </ReanimatedAnimated.View>
                     {currentBestKg !== null ? (
-                      <Text style={styles.hint} maxFontSizeMultiplier={1.4}>
+                      <ReanimatedAnimated.Text
+                        style={styles.hint}
+                        entering={LIST_ROW_ENTERING}
+                        exiting={LIST_ROW_EXITING}
+                        maxFontSizeMultiplier={1.4}
+                      >
                         Current best: {formatLiftWeight(currentBestKg, unit)} est. 1RM — real logged sets, not a
                         projection.
-                      </Text>
+                      </ReanimatedAnimated.Text>
                     ) : null}
                   </>
                 ) : null}
               </>
             )
           ) : null}
-        </View>
+        </ReanimatedAnimated.View>
 
+        <ReanimatedAnimated.View layout={LIST_ROW_LAYOUT}>
         <Pressable
           onPress={handleSave}
           onHoverIn={saveHover.onHoverIn}
@@ -349,6 +360,8 @@ export const GoalsSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void 
             </Text>
           </View>
         </Pressable>
+        </ReanimatedAnimated.View>
+        </LayoutAnimationConfig>
       </BottomSheetScrollView>
     </BottomSheetModal>
   );

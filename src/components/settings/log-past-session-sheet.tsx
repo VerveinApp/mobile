@@ -5,8 +5,9 @@ import {
   BottomSheetScrollView,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useMemo, useRef, useState } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import ReanimatedAnimated, { FadeIn, LayoutAnimationConfig, useReducedMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
@@ -17,9 +18,11 @@ import { BODY_AREA_LABELS, BODY_AREA_ORDER } from '@/lib/body-area-labels';
 import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticImpactLight, hapticSelect, hapticSuccess } from '@/lib/haptics';
 import { localDateStr } from '@/lib/local-date';
+import { LIST_ROW_ENTERING, LIST_ROW_EXITING, LIST_ROW_LAYOUT, MOTION_DURATION } from '@/lib/motion';
 import type { BodyArea } from '@/lib/plan-preview';
 import { getSessionHistory, recordPastSessionCompletion, saveSessionNote } from '@/lib/session-history';
 import { useAppColors } from '@/lib/theme-context';
+import { usePreloadedSheet } from '@/components/settings/use-preloaded-sheet';
 import { getCompletionStatus, saveRetroactiveWorkoutLog, type WorkoutLogExercise } from '@/lib/workout-log';
 
 // 30 days back, matching MAX_ENTRIES's own rolling-window convention in
@@ -63,11 +66,11 @@ function wheelLabel(offsetDays: number, date: Date): string {
  */
 export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () => void }>(({ onSaved }, forwardedRef) => {
   const sheetRef = useRef<BottomSheetModal>(null);
-  useImperativeHandle(forwardedRef, () => sheetRef.current as BottomSheetModal, []);
   const insets = useSafeAreaInsets();
 
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const reducedMotion = useReducedMotion();
 
   const [dayIndex, setDayIndex] = useState(0); // index into WHEEL_DAY_OFFSETS — 0 = yesterday
   const [selectedAreas, setSelectedAreas] = useState<Set<BodyArea>>(new Set());
@@ -99,19 +102,18 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
   // restore the way AdjustPlanSheet/BiometricsSheet load a real saved
   // profile. Also loads which recent dates already have an entry, purely so
   // the inline warning below the wheel can be honest about an overwrite
-  // before it happens, not to block picking that date outright.
-  const handleSheetChange = useCallback((index: number) => {
-    if (index < 0) return;
+  // before it happens, not to block picking that date outright. Runs before
+  // the sheet presents (usePreloadedSheet), not after its slide lands.
+  const resetForm = useCallback(async () => {
     setDayIndex(0);
     setSelectedAreas(new Set());
     setEnergy(null);
     setSoreness(null);
     setNote('');
-    (async () => {
-      const history = await getSessionHistory();
-      setExistingDates(new Set(history.map((e) => e.date)));
-    })();
+    const history = await getSessionHistory();
+    setExistingDates(new Set(history.map((e) => e.date)));
   }, []);
+  usePreloadedSheet(forwardedRef, sheetRef, resetForm);
 
   const closeHover = useHoverFade();
   const saveHover = useHoverFade();
@@ -184,7 +186,6 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
       keyboardBehavior="interactive"
       keyboardBlurBehavior="restore"
       android_keyboardInputMode="adjustResize"
-      onChange={handleSheetChange}
       backdropComponent={renderBackdrop}
       backgroundStyle={Platform.OS === 'android' ? { backgroundColor: colors.background, borderTopLeftRadius: 28, borderTopRightRadius: 28 } : { backgroundColor: colors.background }}
       handleIndicatorStyle={{ backgroundColor: Platform.OS === 'android' ? 'rgba(95,190,132,0.5)' : colors.surfaceBorder, width: Platform.OS === 'android' ? 36 : undefined }}
@@ -208,16 +209,33 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
       >
+        {/* Content mounts fresh on every present — its first paint arrives
+            with the sheet's slide, not faded in on top of it. */}
+        <LayoutAnimationConfig skipEntering>
         <View style={styles.section}>
           <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>When</Text>
           <View style={styles.wheelCard}>
             <HorizontalRuler items={wheelItems} selectedIndex={dayIndex} onChange={setDayIndex} accessibilityLabel="Day" />
           </View>
-          {alreadyLogged ? (
-            <Text style={styles.warningText} maxFontSizeMultiplier={1.3}>
-              This day already has a logged session — saving will replace it.
-            </Text>
-          ) : null}
+          {/* Always laid out, only shown on a logged day: it used to mount
+              and unmount as the ruler passed each logged day, shoving the
+              whole form down and back up mid-scrub. Holding its line keeps
+              the form still at any text size. */}
+          <ReanimatedAnimated.Text
+            style={[
+              styles.warningText,
+              {
+                opacity: alreadyLogged ? 1 : 0,
+                transitionProperty: 'opacity',
+                transitionDuration: reducedMotion ? 0 : MOTION_DURATION.fast,
+              },
+            ]}
+            accessibilityElementsHidden={!alreadyLogged}
+            importantForAccessibility={alreadyLogged ? 'auto' : 'no-hide-descendants'}
+            maxFontSizeMultiplier={1.3}
+          >
+            This day already has a logged session — saving will replace it.
+          </ReanimatedAnimated.Text>
         </View>
 
         <View style={styles.section}>
@@ -278,11 +296,20 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
             })}
           </View>
           {energy !== null ? (
-            <Text style={styles.energyReadout} maxFontSizeMultiplier={1.3}>{ENERGY_LABELS[energy]}</Text>
+            <ReanimatedAnimated.Text
+              entering={LIST_ROW_ENTERING}
+              exiting={LIST_ROW_EXITING}
+              style={styles.energyReadout}
+              maxFontSizeMultiplier={1.3}
+            >
+              {ENERGY_LABELS[energy]}
+            </ReanimatedAnimated.Text>
           ) : null}
         </View>
 
-        <View style={styles.section}>
+        {/* The readouts above each section's pills come and go with the
+            first pick, so everything below them glides rather than jumps. */}
+        <ReanimatedAnimated.View style={styles.section} layout={LIST_ROW_LAYOUT}>
           <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>Soreness that day (optional)</Text>
           <View style={styles.energyRow}>
             {ENERGY_SCORES.map((score) => {
@@ -310,11 +337,18 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
             })}
           </View>
           {soreness !== null ? (
-            <Text style={styles.energyReadout} maxFontSizeMultiplier={1.3}>{SORENESS_LABELS[soreness]}</Text>
+            <ReanimatedAnimated.Text
+              entering={LIST_ROW_ENTERING}
+              exiting={LIST_ROW_EXITING}
+              style={styles.energyReadout}
+              maxFontSizeMultiplier={1.3}
+            >
+              {SORENESS_LABELS[soreness]}
+            </ReanimatedAnimated.Text>
           ) : null}
-        </View>
+        </ReanimatedAnimated.View>
 
-        <View style={styles.section}>
+        <ReanimatedAnimated.View style={styles.section} layout={LIST_ROW_LAYOUT}>
           <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>Note (optional)</Text>
           {/* BottomSheetTextInput, not TextInput — only the sheet's own input
               registers focus with the sheet's keyboard handling. A plain
@@ -329,8 +363,9 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
             multiline
             maxFontSizeMultiplier={1.3}
           />
-        </View>
+        </ReanimatedAnimated.View>
 
+        <ReanimatedAnimated.View layout={LIST_ROW_LAYOUT}>
         <Pressable
           onPress={handleSave}
           onHoverIn={saveHover.onHoverIn}
@@ -347,11 +382,20 @@ export const LogPastSessionSheet = forwardRef<BottomSheetModal, { onSaved?: () =
               pointerEvents="none"
               style={[StyleSheet.absoluteFill, styles.saveButtonGlow, { opacity: savePress.glow }]}
             />
-            <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>
+            {/* Keyed so the new label fades in alongside the warning above
+                when the ruler lands on (or leaves) a logged day. */}
+            <ReanimatedAnimated.Text
+              key={alreadyLogged ? 'replace' : 'save'}
+              entering={FadeIn.duration(MOTION_DURATION.fast)}
+              style={styles.saveButtonText}
+              maxFontSizeMultiplier={1.15}
+            >
               {alreadyLogged ? 'Replace Logged Session' : 'Save Session'}
-            </Text>
+            </ReanimatedAnimated.Text>
           </View>
         </Pressable>
+        </ReanimatedAnimated.View>
+        </LayoutAnimationConfig>
       </BottomSheetScrollView>
     </BottomSheetModal>
   );

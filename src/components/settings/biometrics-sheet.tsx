@@ -1,5 +1,5 @@
 import { BottomSheetBackdrop, type BottomSheetBackdropProps, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useMemo, useRef, useState } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
@@ -14,6 +14,7 @@ import {
   RULER_TICK_SPACING,
 } from '@/components/onboarding/horizontal-ruler';
 import { useAppColors } from '@/lib/theme-context';
+import { usePreloadedSheet } from '@/components/settings/use-preloaded-sheet';
 import { getUnitSystem, setUnitSystem, type UnitSystem } from '@/lib/unit-preference';
 import { getProfile, updateProfile, withHealthConsent, withdrawHealthConsent } from '@/lib/user-profile';
 
@@ -118,12 +119,11 @@ function ageToIndex(age: number): number {
  * same as checking that box would have.
  *
  * Presented as a bottom sheet (not a pushed route) from Settings — see
- * AdjustPlanSheet's doc comment for why data loads on `onChange` here
- * instead of a route-focus effect.
+ * AdjustPlanSheet's doc comment for why data loads on present here instead
+ * of a route-focus effect.
  */
 export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRef) => {
   const sheetRef = useRef<BottomSheetModal>(null);
-  useImperativeHandle(forwardedRef, () => sheetRef.current as BottomSheetModal, []);
 
   const insets = useSafeAreaInsets();
   const colors = useAppColors();
@@ -179,15 +179,11 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
     setUnit(globalUnit);
   }, []);
 
-  const handleSheetChange = useCallback(
-    (index: number) => {
-      if (index >= 0) {
-        setConfirmingWithdraw(false);
-        loadFromProfile();
-      }
-    },
-    [loadFromProfile]
-  );
+  const openSheet = useCallback(async () => {
+    setConfirmingWithdraw(false);
+    await loadFromProfile();
+  }, [loadFromProfile]);
+  usePreloadedSheet(forwardedRef, sheetRef, openSheet);
 
   const closeHover = useHoverFade();
   const saveHover = useHoverFade();
@@ -261,7 +257,6 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
     <BottomSheetModal
       ref={sheetRef}
       snapPoints={['90%']}
-      onChange={handleSheetChange}
       backdropComponent={renderBackdrop}
       backgroundStyle={Platform.OS === 'android' ? { backgroundColor: colors.background, borderTopLeftRadius: 28, borderTopRightRadius: 28 } : { backgroundColor: colors.background }}
       handleIndicatorStyle={{ backgroundColor: Platform.OS === 'android' ? 'rgba(95,190,132,0.5)' : colors.surfaceBorder, width: Platform.OS === 'android' ? 36 : undefined }}
