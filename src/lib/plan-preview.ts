@@ -195,8 +195,9 @@ export type PlanPreviewResult = {
  * hold or carry, which the guided timer paces by splitting durationMin
  * across its sets (exercise-timer.ts), the extra set made every hold
  * shorter instead of adding any work (a 3-minute carry went from 60s a set
- * to 45s). Rounded up to a whole minute so the extra set is never counted
- * as free.
+ * to 45s). Rounded to the nearest minute, but never less than one more —
+ * rounding every exercise up instead overstated a 6-exercise finisher by
+ * ~4 minutes, while plain rounding would call a short hold's extra set free.
  */
 function addFinisherSet(ex: ScaledExercise): ScaledExercise {
   if (ex.adapted_sets === null) return ex;
@@ -205,7 +206,9 @@ function addFinisherSet(ex: ScaledExercise): ScaledExercise {
     ...ex,
     adapted_sets: sets + 1,
     adapted_duration_min:
-      ex.adapted_duration_min === null ? null : Math.ceil((ex.adapted_duration_min * (sets + 1)) / sets),
+      ex.adapted_duration_min === null || ex.adapted_duration_min === 0
+        ? ex.adapted_duration_min
+        : Math.max(ex.adapted_duration_min + 1, Math.round((ex.adapted_duration_min * (sets + 1)) / sets)),
   };
 }
 

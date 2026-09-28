@@ -500,8 +500,10 @@ describe('computePlanPreview — optional finisher set', () => {
     accepted.exercises.forEach((ex, i) => {
       const before = offered.exercises[i];
       if (before.sets === null || before.durationMin === null || ex.sets === null || ex.durationMin === null) return;
-      // The guided timer paces a hold/carry as durationMin / sets per set.
-      expect(ex.durationMin / ex.sets).toBeGreaterThanOrEqual(before.durationMin / before.sets);
+      // The guided timer paces a hold/carry as durationMin / sets per set —
+      // the same per set, give or take the block's rounding to a minute
+      // (the old bug cut every set by a whole set's share).
+      expect(ex.durationMin / ex.sets).toBeGreaterThanOrEqual(before.durationMin / before.sets - 0.5 / ex.sets);
     });
   });
 
