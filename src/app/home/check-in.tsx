@@ -44,6 +44,14 @@ import type { Exercise, FeedbackResponse, UserCalibration } from '@/lib/engine/t
 import { getCueFor, type ExerciseCue } from '@/lib/exercise-form-cues';
 import { formatTimerClock, getExerciseIntervals } from '@/lib/exercise-timer';
 import { buildSwapReplacement, getSwapCandidates } from '@/lib/exercise-swap';
+import { equipmentRequirementsFor, hasEquipmentFor } from '@/lib/engine/equipment-requirements';
+import {
+  isOwnedEquipment,
+  OWNED_EQUIPMENT_LABELS,
+  ownedEquipmentFor,
+  serializeOwnedEquipment,
+  type OwnedEquipment,
+} from '@/lib/owned-equipment';
 import { hapticImpactLight, hapticSelect, hapticSuccess, hapticWarning } from '@/lib/haptics';
 import { getCoachingInsightNote, markCoachingInsightShown } from '@/lib/coaching-insights';
 import { getPlanFitNote } from '@/lib/plan-fit';
@@ -85,7 +93,7 @@ import { TIME_AVAILABLE_LABELS, TIME_AVAILABLE_OPTIONS } from '@/lib/time-availa
 import { getTodaySession, saveTodaySession, type TodaySession, type TodaySessionInput } from '@/lib/today-session';
 import { getUnitSystem, type UnitSystem } from '@/lib/unit-preference';
 import { useCountTo } from '@/lib/use-count-to';
-import { getProfile, type UserProfile } from '@/lib/user-profile';
+import { getProfile, updateProfile, type UserProfile } from '@/lib/user-profile';
 import {
   displayWeightToKg,
   formatWeight,
@@ -328,6 +336,9 @@ export default function EnergyCheckInScreen() {
   // so the plan is rebuilt identically for the rest of the day — new Health
   // data or the Plus check resolving late can't re-plan a session mid-way.
   const [frozenReadiness, setFrozenReadiness] = useState<TodaySession['planHealthReadiness'] | null>(null);
+  // See TodaySession.planEquipment. undefined = no session started yet, so
+  // the live profile's list applies.
+  const [frozenEquipment, setFrozenEquipment] = useState<string | undefined>(undefined);
   const planHealthReadinessModifier = frozenReadiness?.modifier ?? effectiveHealthReadinessModifier;
   const planHealthReadinessReasons = frozenReadiness ? frozenReadiness.reasons : effectiveHealthReadinessReasons;
   // The one post-session question (M14-lite) — null until the user taps one
@@ -562,6 +573,7 @@ export default function EnergyCheckInScreen() {
           // doc comments on TodaySession for the resume bugs each one closes.
           setSwappedExercises(loadedTodaySession.swappedExercises ?? {});
           setFrozenReadiness(loadedTodaySession.planHealthReadiness ?? null);
+        setFrozenEquipment(loadedTodaySession.planEquipment);
           if (loadedTodaySession.startedAt) sessionStartedAtRef.current = new Date(loadedTodaySession.startedAt);
           if (!loadedTodaySession.completed) {
             setCurrentExerciseIndex(loadedTodaySession.currentExerciseIndex ?? 0);
@@ -852,6 +864,16 @@ export default function EnergyCheckInScreen() {
           : null
       : null;
 
+  // The profile the plan is built from: the live one, except that a
+  // started session keeps the equipment list it started with (see
+  // TodaySession.planEquipment). Same object whenever nothing differs, so
+  // plan-preview's baseline cache (keyed on the input's identity) holds.
+  const planProfile = useMemo(() => {
+    if (!profile || frozenEquipment === undefined) return profile;
+    const equipment = frozenEquipment === '' ? undefined : frozenEquipment;
+    return profile.equipment === equipment ? profile : { ...profile, equipment };
+  }, [profile, frozenEquipment]);
+
   // Memoized — this now runs the real engine's filtering over the full
   // exercise library (see plan-preview.ts), not a cheap lookup. energy
   // changes on every drag step of the gauge below, so this matters more
@@ -860,7 +882,7 @@ export default function EnergyCheckInScreen() {
     () =>
       energy !== null
         ? computePlanPreview(
-            profile ?? {},
+            planProfile ?? {},
             energy,
             calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
             Array.from(symptomTags),
@@ -876,7 +898,7 @@ export default function EnergyCheckInScreen() {
           )
         : null,
     [
-      profile,
+      planProfile,
       energy,
       calibration,
       symptomTags,
@@ -899,7 +921,7 @@ export default function EnergyCheckInScreen() {
   const baseline = useMemo(
     () =>
       computePlanPreview(
-        profile ?? {},
+        planProfile ?? {},
         4,
         calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
         Array.from(symptomTags),
@@ -911,7 +933,7 @@ export default function EnergyCheckInScreen() {
         undefined,
         planHealthReadinessReasons
       ),
-    [profile, calibration, symptomTags, planHealthReadinessModifier, planHealthReadinessReasons]
+    [planProfile, calibration, symptomTags, planHealthReadinessModifier, planHealthReadinessReasons]
   );
   const exerciseDelta = preview ? baseline.exerciseCount - preview.exerciseCount : 0;
   // A symptom already set in Settings' Ongoing Symptoms applies every day
@@ -1081,6 +1103,18 @@ export default function EnergyCheckInScreen() {
   // the affordance itself is always shown while an exercise is unresolved,
   // and an empty result here just means the sheet's own empty state renders
   // instead of a picker list.
+  // Equipment ticked off mid-workout on the swap sheet ("Missing
+  // something?") — saved to the profile for future plans straight away, and
+  // held here so the rest of this session's swap options respect it too,
+  // without re-planning the session itself (its list is frozen — see
+  // planProfile).
+  const [missingEquipment, setMissingEquipment] = useState<Set<string>>(new Set());
+  const [equipmentRemovedNote, setEquipmentRemovedNote] = useState(false);
+  const ownedNow = useMemo(() => {
+    const owned = ownedEquipmentFor(equipmentOverride ?? planProfile?.environment, planProfile?.equipment);
+    return owned === null ? null : owned.filter((item) => !missingEquipment.has(item));
+  }, [equipmentOverride, planProfile, missingEquipment]);
+
   const swapModalCandidates = useMemo(() => {
     if (swapModalIndex === null || !preview) return [];
     const target = sessionExercises[swapModalIndex];
@@ -1089,8 +1123,33 @@ export default function EnergyCheckInScreen() {
       target,
       preview.constraints,
       sessionExercises.map((e) => e.id)
-    );
-  }, [swapModalIndex, preview, sessionExercises]);
+    ).filter((candidate) => ownedNow === null || hasEquipmentFor(candidate, ownedNow));
+  }, [swapModalIndex, preview, sessionExercises, ownedNow]);
+
+  // What the exercise being swapped uses from their own list — only for a
+  // home list; a full gym has nothing to take off.
+  const swapMissingOptions = useMemo((): OwnedEquipment[] => {
+    if (swapModalIndex === null || ownedNow === null) return [];
+    const target = sessionExercises[swapModalIndex];
+    if (!target) return [];
+    const needs = new Set((equipmentRequirementsFor(target.id) ?? []).flat());
+    return ownedNow.filter((item): item is OwnedEquipment => needs.has(item) && isOwnedEquipment(item));
+  }, [swapModalIndex, ownedNow, sessionExercises]);
+
+  const handleMissingEquipment = async (item: OwnedEquipment) => {
+    hapticSelect();
+    setMissingEquipment((prev) => new Set(prev).add(item));
+    setEquipmentRemovedNote(true);
+    // Read fresh rather than from state — the list may have changed in
+    // Settings since this screen loaded.
+    const latest = await getProfile();
+    const owned = ownedEquipmentFor(latest?.environment, latest?.equipment);
+    if (owned) {
+      await updateProfile({
+        equipment: serializeOwnedEquipment(owned.filter((i): i is OwnedEquipment => i !== item && isOwnedEquipment(i))),
+      });
+    }
+  };
 
   const handleOpenSwap = (index: number) => {
     hapticSelect();
@@ -1124,6 +1183,7 @@ export default function EnergyCheckInScreen() {
   const handleCloseSwap = () => {
     hapticImpactLight();
     setSwapModalIndex(null);
+    setEquipmentRemovedNote(false);
   };
 
   // Ratio-scales the chosen candidate against the ORIGINAL engine-delivered
@@ -1155,6 +1215,7 @@ export default function EnergyCheckInScreen() {
     equipmentOverride: equipmentOverride ?? undefined,
     swappedExercises,
     planHealthReadiness: frozenReadiness ?? undefined,
+    planEquipment: frozenEquipment,
     startedAt: sessionStartedAtRef.current?.toISOString(),
   });
 
@@ -1195,7 +1256,13 @@ export default function EnergyCheckInScreen() {
     recordCheckIn(energy);
     const readinessAtStart = { modifier: effectiveHealthReadinessModifier, reasons: effectiveHealthReadinessReasons };
     setFrozenReadiness(readinessAtStart);
-    saveTodaySession({ ...todaySessionBase(energy, false), planHealthReadiness: readinessAtStart });
+    const equipmentAtStart = profile?.equipment ?? '';
+    setFrozenEquipment(equipmentAtStart);
+    saveTodaySession({
+      ...todaySessionBase(energy, false),
+      planHealthReadiness: readinessAtStart,
+      planEquipment: equipmentAtStart,
+    });
     // Already showed up today — a "Training day" nudge later would be noise.
     cancelTodaysReminder();
     // The honest starting point for today's completion signal — a real
@@ -2147,6 +2214,37 @@ export default function EnergyCheckInScreen() {
                       })}
                     </ScrollView>
                   )}
+                  {swapMissingOptions.length > 0 ? (
+                    <View style={styles.swapMissing}>
+                      <Text style={styles.swapMissingLabel} maxFontSizeMultiplier={1.3}>
+                        Missing something? Tap what you don&apos;t have.
+                      </Text>
+                      <View style={styles.swapMissingRow}>
+                        {swapMissingOptions.map((item) => (
+                          <Pressable
+                            key={item}
+                            style={({ pressed }) => [styles.swapMissingChip, pressed && PRESSED_DIM]}
+                            onPress={() => handleMissingEquipment(item)}
+                            accessibilityRole="button"
+                            accessibilityLabel={`I don't have: ${OWNED_EQUIPMENT_LABELS[item]}`}
+                          >
+                            <Text style={styles.swapMissingChipText} maxFontSizeMultiplier={1.2}>
+                              {OWNED_EQUIPMENT_LABELS[item]}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </View>
+                  ) : null}
+                  {equipmentRemovedNote ? (
+                    <ReanimatedAnimated.Text
+                      entering={FadeIn.duration(MOTION_DURATION.base)}
+                      style={styles.swapMissingNote}
+                      maxFontSizeMultiplier={1.3}
+                    >
+                      Taken off your equipment — future plans won&apos;t use it.
+                    </ReanimatedAnimated.Text>
+                  ) : null}
                   <Pressable
                     style={({ pressed }) => [styles.swapModalCancelHit, pressed && PRESSED_DIM]}
                     onPress={handleCloseSwap}
@@ -3339,6 +3437,39 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       marginTop: 2,
       color: colors.textSecondary,
       fontSize: Type.secondary,
+      fontFamily: 'Geist-Medium',
+    },
+    swapMissing: {
+      marginTop: 14,
+      gap: 8,
+    },
+    swapMissingLabel: {
+      color: colors.textSecondary,
+      fontSize: Type.caption,
+      fontFamily: 'Geist-Medium',
+    },
+    swapMissingRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    swapMissingChip: {
+      paddingVertical: 7,
+      paddingHorizontal: 11,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.surfaceBorder,
+      backgroundColor: colors.pillBg,
+    },
+    swapMissingChipText: {
+      color: colors.text,
+      fontSize: Type.caption,
+      fontFamily: 'Geist-SemiBold',
+    },
+    swapMissingNote: {
+      marginTop: 10,
+      color: colors.accentText,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
     },
     swapModalCancelHit: {

@@ -83,6 +83,11 @@ export type TodaySession = {
     modifier: number;
     reasons?: { rhrElevated: boolean; sleepDeficit: boolean };
   };
+  /** The equipment list (profile.equipment) the session was STARTED with —
+   * '' when there was none — frozen like planHealthReadiness, so taking an
+   * item off the list mid-workout ("Missing something?" on the swap sheet)
+   * changes future plans, never the session already underway. */
+  planEquipment?: string;
   /** Which exercise the session was on, so a resumed session picks up
    * there instead of back at the first exercise. */
   currentExerciseIndex?: number;
