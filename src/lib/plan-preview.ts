@@ -74,7 +74,12 @@ import { scaleVolume } from '@/lib/engine/volume-scaling';
 import { assembleWorkout } from '@/lib/engine/workout-assembly';
 import { localDateStr } from '@/lib/local-date';
 import { ownedEquipmentFor } from '@/lib/owned-equipment';
-import { EQUIPMENT_BY_ENVIRONMENT, LOCAL_USER_ID, profileToOnboardingContext } from '@/lib/onboarding-to-engine';
+import {
+  EQUIPMENT_BY_ENVIRONMENT,
+  LOCAL_USER_ID,
+  profileToOnboardingContext,
+  SESSION_CEILING_BY_DURATION,
+} from '@/lib/onboarding-to-engine';
 import { ENVIRONMENT_LABELS } from '@/lib/profile-labels';
 import type { UserProfile } from '@/lib/user-profile';
 
@@ -633,14 +638,19 @@ export function computePlanPreview(
       // that's the known, disclosed "for" vs "fit" gap this function's own
       // explanation-building step further down already accounts for.
       let trimmedLength = volumeResult.exercises.length;
-      if (timeAvailableMin !== undefined) {
+      // Today's pick wins; otherwise the session length they chose at
+      // onboarding (SESSION_CEILING_BY_DURATION) is the ceiling. Only a pick
+      // made today earns the "Shortened for the N minutes you have today"
+      // note — the standing answer shapes every plan quietly, the way a
+      // movement restriction does.
+      const timeCeiling = timeAvailableMin ?? SESSION_CEILING_BY_DURATION[input.duration ?? ''];
+      if (timeCeiling !== undefined) {
         while (
           trimmedLength > 2 &&
-          assembleWorkout(volumeResult.exercises.slice(0, trimmedLength), false).workout.totalDuration >
-            timeAvailableMin
+          assembleWorkout(volumeResult.exercises.slice(0, trimmedLength), false).workout.totalDuration > timeCeiling
         ) {
           trimmedLength -= 1;
-          timeTrimmed = true;
+          if (timeAvailableMin !== undefined) timeTrimmed = true;
         }
       }
       const trimmedExercises = volumeResult.exercises.slice(0, trimmedLength);

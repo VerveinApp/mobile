@@ -40,6 +40,14 @@
 // could. See exercise-filtering.ts for the matching gap-fill-side bias and
 // onboarding-to-engine.ts for the experience → bias mapping.
 //
+// DISCLOSED DIVERGENCE (Vervein addition, not in the vault): past that
+// beginner bias, bySelectionOrder now ranks by training value for everyone
+// (training moves before mobility, compound and patterned moves first, a
+// home kit list's own equipment preferred — see its comment), and each area
+// takes varied movement patterns before repeating one. Numeric order only
+// breaks ties. Library order alone was handing setups without the barbell
+// staples two isolation moves as their whole upper-body day.
+//
 // Standing symptom tags apply here (onboarding-collected, active every day);
 // conditions apply here too — contraindications are a hard Gate 1 exclusion
 // from the very first plan (founder-approved amendment, 2026-07-22).
@@ -152,7 +160,7 @@ export function generateBaselinePlan(ctx: OnboardingContext, userId: string): Ba
     focusAreas: ctx.focusAreas,
   };
   const { filtered } = filterAndSubstitute(candidatePlan, constraints, ctx.biasSimpleExercises);
-  const eligible = [...filtered].sort(bySelectionOrder(ctx.biasSimpleExercises));
+  const eligible = [...filtered].sort(bySelectionOrder(ctx.biasSimpleExercises, ctx.ownedEquipment));
 
   // --- Composition (Founder Decision): N per focus area. ---
   const areaTargets: BodyArea[] = ctx.focusAreas.includes('full')
@@ -163,15 +171,26 @@ export function generateBaselinePlan(ctx: OnboardingContext, userId: string): Ba
   const chosenIds = new Set<string>();
   for (const area of areaTargets) {
     let taken = 0;
-    // First pass: the area's own pool. Second pass: full-body exercises can
-    // fill any area's remaining slots (they train that area).
-    for (const pool of [eligible.filter((e) => e.body_area === area), eligible.filter((e) => e.body_area === 'full')]) {
-      for (const ex of pool) {
+    // Vervein addition: varied before repeated — a pick that shares an
+    // already-chosen movement pattern in this area (a second squat, a
+    // second press) only once nothing else fits, so an upper day reads as a
+    // push and a pull rather than two presses.
+    const usedPatterns = new Set<string>();
+    for (const allowRepeat of [false, true]) {
+      // First the area's own pool, then full-body exercises, which can fill
+      // any area's remaining slots (they train that area).
+      for (const pool of [eligible.filter((e) => e.body_area === area), eligible.filter((e) => e.body_area === 'full')]) {
+        for (const ex of pool) {
+          if (taken >= EXERCISES_PER_FOCUS_AREA) break;
+          if (chosenIds.has(ex.id)) continue;
+          const pattern = ex.movement_patterns[0];
+          if (!allowRepeat && pattern && usedPatterns.has(pattern)) continue;
+          chosen.push(ex);
+          chosenIds.add(ex.id);
+          if (pattern) usedPatterns.add(pattern);
+          taken++;
+        }
         if (taken >= EXERCISES_PER_FOCUS_AREA) break;
-        if (chosenIds.has(ex.id)) continue;
-        chosen.push(ex);
-        chosenIds.add(ex.id);
-        taken++;
       }
       if (taken >= EXERCISES_PER_FOCUS_AREA) break;
     }

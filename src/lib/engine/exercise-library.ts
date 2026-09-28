@@ -12,6 +12,7 @@
 // validation, freezing, the M7 fallback-pair boot check — is unchanged.
 
 import exerciseData from './data/exercise-library.json';
+import { equipmentRequirementsFor } from './equipment-requirements';
 import type { Equipment, Exercise, Impact, Intensity } from './types';
 
 const CANONICAL_INTENSITY: Intensity[] = ['low', 'medium', 'high'];
@@ -40,15 +41,56 @@ export function byNumericId(a: Exercise, b: Exercise): number {
  * never bends for this. Numeric ID stays the tiebreak either way, so
  * selection remains fully deterministic, just reordered.
  */
-export function bySelectionOrder(biasSimpleFirst: boolean) {
+export function bySelectionOrder(biasSimpleFirst: boolean, ownedEquipment?: readonly string[] | null) {
+  // Only a real kit list ranks by kit — a full gym (null) or bodyweight
+  // ([]) has nothing to prefer between.
+  const preferKit = !!ownedEquipment && ownedEquipment.length > 0;
+  // TRAINING VALUE (Vervein addition, not in the vault): numeric order
+  // alone followed the library's authoring order, which put ex_116
+  // Dumbbell Lateral Raise and ex_117 Bicep Curl ahead of ex_205 Pull-Up —
+  // any setup without the barbell staples (ex_101–107) got two isolation
+  // moves as its whole upper-body day. Training moves before mobility and
+  // recovery; then, outside core, compound before the rest, moves with a
+  // real movement pattern (squat, hinge, push, pull…) before pattern-less
+  // odds and ends, and — for a home kit list — moves that use it before
+  // ones that don't, so the kit someone owns shows up in their plan. Core
+  // keeps library order after the type split: its "compound" entries are
+  // the niche ones (loaded spinal flexion, barbell rollouts) and the
+  // library already leads with the staples (plank, bird dog). One fixed key
+  // per exercise, so the order is consistent whichever two are compared.
+  // Still only an ordering: nothing is removed.
+  const key = (ex: Exercise): number[] => {
+    const core = ex.body_area === 'core';
+    return [
+      biasSimpleFirst && ex.complexity === 'moderate' ? 1 : 0,
+      typeRank(ex),
+      core || ex.is_compound === 'compound' ? 0 : 1,
+      core || ex.movement_patterns.length > 0 ? 0 : 1,
+      !preferKit || core || usesKit(ex) ? 0 : 1,
+    ];
+  };
   return (a: Exercise, b: Exercise): number => {
-    if (biasSimpleFirst) {
-      const penaltyA = a.complexity === 'moderate' ? 1 : 0;
-      const penaltyB = b.complexity === 'moderate' ? 1 : 0;
-      if (penaltyA !== penaltyB) return penaltyA - penaltyB;
+    const ka = key(a);
+    const kb = key(b);
+    for (let i = 0; i < ka.length; i++) {
+      if (ka[i] !== kb[i]) return ka[i] - kb[i];
     }
     return byNumericId(a, b);
   };
+}
+
+function typeRank(ex: Exercise): number {
+  if (ex.type === 'strength' || ex.type === 'power') return 0;
+  if (ex.type === 'cardio') return 1;
+  if (ex.type === 'mobility') return 2;
+  return 3;
+}
+
+// Already eligible by the time it's ranked, so any requirement it has is
+// one the list covers.
+function usesKit(ex: Exercise): boolean {
+  const needs = equipmentRequirementsFor(ex.id);
+  return !!needs && needs.length > 0;
 }
 
 class ExerciseLibraryModule {

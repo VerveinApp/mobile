@@ -93,6 +93,18 @@ export const SESSION_MIN_BY_DURATION: Record<string, number> = {
   '60-plus': 65,
 };
 
+/**
+ * The top of each onboarding session-length range, used as the plan's
+ * default time ceiling on days no time is picked at check-in — the answer
+ * used to be collected and never read, so a "30–45 min" person could be
+ * shown an hour. 60+ has no top, so no ceiling.
+ */
+export const SESSION_CEILING_BY_DURATION: Record<string, number> = {
+  'under-30': 30,
+  '30-45': 45,
+  '45-60': 60,
+};
+
 const DAY_NAME_TO_SESSION_DAY: Record<string, SessionDay> = {
   monday: 'mon',
   tuesday: 'tue',
