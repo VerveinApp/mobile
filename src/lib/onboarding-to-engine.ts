@@ -39,6 +39,7 @@
 
 import type { ConstraintProfile, Equipment, FocusArea, Intensity, SessionDay } from '@/lib/engine/types';
 import type { OnboardingContext } from '@/lib/engine/baseline-plan';
+import { ownedEquipmentFor } from '@/lib/owned-equipment';
 import { isStandingSymptomTag } from '@/lib/symptom-tags';
 import type { UserProfile } from '@/lib/user-profile';
 
@@ -150,6 +151,7 @@ export function profileToOnboardingContext(profile: UserProfile): OnboardingCont
     conditions: [],
     standingSymptomTags: [...new Set(profile.standingSymptoms ?? [])].filter(isStandingSymptomTag),
     movementRestrictions: profile.movementRestrictions ?? [],
+    ownedEquipment: ownedEquipmentFor(profile.environment, profile.equipment),
     biasSimpleExercises: BIAS_SIMPLE_BY_EXPERIENCE[profile.experience ?? ''] ?? false,
   };
 }

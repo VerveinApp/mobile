@@ -72,6 +72,9 @@ export type OnboardingContext = {
   conditions: string[]; // founder-approved amendment — contraindications apply from the first plan
   standingSymptomTags: string[];
   movementRestrictions: string[];
+  // Vervein addition — the equipment actually on hand; see
+  // EffectiveConstraintSet.ownedEquipment. Absent = tier ceiling only.
+  ownedEquipment?: readonly string[] | null;
   // SOFT EXPERIENCE BIAS (Vervein addition, not in the vault — see the
   // COMPOSITION comment below and exercise-filtering.ts's matching header
   // note for the full rationale). true for profile.experience ===
@@ -118,7 +121,8 @@ function onboardingConstraints(ctx: OnboardingContext): EffectiveConstraintSet {
   return {
     intensityCeiling,
     impactCeiling,
-    equipmentCeiling: ctx.equipment,
+    equipmentCeiling: ctx.ownedEquipment != null ? 'full_gym' : ctx.equipment,
+    ownedEquipment: ctx.ownedEquipment ?? null,
     excludeBodyAreas: [...excludeBodyAreas],
     excludeMovementPatterns: [...new Set(ctx.movementRestrictions)] as MovementPattern[],
     forceAddTypes: [...forceAddTypes],

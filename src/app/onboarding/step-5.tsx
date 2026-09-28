@@ -20,6 +20,7 @@ import { BackArrowGraphic } from '@/components/auth/verify-email-graphics';
 import { OnboardingProgress } from '@/components/onboarding/onboarding-progress';
 import { HorizontalRuler } from '@/components/onboarding/horizontal-ruler';
 import { saveOnboardingDraft } from '@/lib/onboarding-draft';
+import { asksForEquipment } from '@/lib/owned-equipment';
 
 const CANVAS_WIDTH = 375;
 const CANVAS_HEIGHT = 812;
@@ -102,6 +103,7 @@ export default function OnboardingConsentBiometricsScreen() {
     goal,
     experience,
     environment,
+    equipment,
     verifiedEmail,
     healthConsent: incomingConsent,
     sex: incomingSex,
@@ -113,6 +115,7 @@ export default function OnboardingConsentBiometricsScreen() {
     goal?: string;
     experience?: string;
     environment?: string;
+    equipment?: string;
     verifiedEmail?: string;
     healthConsent?: string;
     sex?: string;
@@ -126,6 +129,7 @@ export default function OnboardingConsentBiometricsScreen() {
     goal: goal ?? '',
     experience: experience ?? '',
     environment: environment ?? '',
+    equipment: equipment ?? '',
     verifiedEmail: verifiedEmail ?? '',
   };
 
@@ -225,7 +229,7 @@ export default function OnboardingConsentBiometricsScreen() {
 
         <Pressable
           style={styles.backButton}
-          onPress={() => goBack('/onboarding/step-4', baseParams)}
+          onPress={() => goBack(asksForEquipment(environment) ? '/onboarding/equipment' : '/onboarding/step-4', baseParams)}
           hitSlop={12}
           accessibilityRole="button"
           accessibilityLabel="Go back"

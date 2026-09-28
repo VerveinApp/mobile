@@ -13,6 +13,15 @@ import { DURATION_LABELS, ENVIRONMENT_LABELS, EXPERIENCE_LABELS, GOAL_LABELS } f
 import { enableSessionReminders, isReminderEnabled } from '@/lib/session-reminders';
 import { useAppColors } from '@/lib/theme-context';
 import { usePreloadedSheet } from '@/components/settings/use-preloaded-sheet';
+import {
+  DEFAULT_OWNED_EQUIPMENT,
+  OWNED_EQUIPMENT,
+  OWNED_EQUIPMENT_LABELS,
+  asksForEquipment,
+  parseOwnedEquipment,
+  serializeOwnedEquipment,
+  type OwnedEquipment,
+} from '@/lib/owned-equipment';
 import { getProfile, updateProfile } from '@/lib/user-profile';
 
 // Same option ids as onboarding/step-2 (goal), step-3 (experience),
@@ -54,6 +63,7 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal, { onDismiss?: () => 
   const [goal, setGoal] = useState('');
   const [experience, setExperience] = useState('');
   const [environment, setEnvironment] = useState('');
+  const [ownedEquipment, setOwnedEquipment] = useState<Set<OwnedEquipment>>(new Set());
   const [duration, setDuration] = useState('');
   const [days, setDays] = useState<string[]>([]);
   const [commitmentIndex, setCommitmentIndex] = useState<number | null>(null);
@@ -64,6 +74,13 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal, { onDismiss?: () => 
     setGoal(profile?.goal ?? '');
     setExperience(profile?.experience ?? '');
     setEnvironment(profile?.environment ?? '');
+    // Their saved list, or — never answered — what the engine already
+    // assumes for their setup (a home gym's, if they're not on one yet, so
+    // switching to Home Gym here starts from something sensible).
+    const env = profile?.environment;
+    setOwnedEquipment(
+      new Set(parseOwnedEquipment(profile?.equipment) ?? DEFAULT_OWNED_EQUIPMENT[asksForEquipment(env) ? env : 'home-gym'])
+    );
     setDuration(profile?.duration ?? '');
     setDays(profile?.days ? profile.days.split(',').filter(Boolean) : []);
     const idx = profile?.commitmentLevel ? Number(profile.commitmentLevel) - 1 : null;
@@ -75,6 +92,16 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal, { onDismiss?: () => 
   const closeHover = useHoverFade();
   const saveHover = useHoverFade();
   const savePress = useLiquidPress();
+
+  const toggleOwned = (item: OwnedEquipment) => {
+    hapticSelect();
+    setOwnedEquipment((prev) => {
+      const next = new Set(prev);
+      if (next.has(item)) next.delete(item);
+      else next.add(item);
+      return next;
+    });
+  };
 
   const toggleDay = (id: string) => {
     hapticSelect();
@@ -91,6 +118,9 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal, { onDismiss?: () => 
       goal,
       experience,
       environment,
+      // Only a home gym or minimal setup has a list; switching to a full
+      // gym or bodyweight leaves the saved one alone for switching back.
+      ...(asksForEquipment(environment) ? { equipment: serializeOwnedEquipment(ownedEquipment) } : {}),
       duration,
       days: days.join(','),
       commitmentLevel: String((commitmentIndex as number) + 1),
@@ -169,7 +199,7 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal, { onDismiss?: () => 
         />
         <PillGrid
           styles={styles}
-          label="Equipment"
+          label="Where You Train"
           options={ENVIRONMENT_OPTIONS}
           labels={ENVIRONMENT_LABELS}
           value={environment}
@@ -178,6 +208,35 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal, { onDismiss?: () => 
             setEnvironment(id);
           }}
         />
+        {asksForEquipment(environment) ? (
+          <View style={styles.section}>
+            <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>What You Have</Text>
+            <View style={styles.pillGrid}>
+              {OWNED_EQUIPMENT.map((item) => {
+                const isSelected = ownedEquipment.has(item);
+                return (
+                  <Pressable
+                    key={item}
+                    style={({ pressed }) => [styles.gridPillHit, pressed && PRESSED_DIM]}
+                    onPress={() => toggleOwned(item)}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: isSelected }}
+                  >
+                    <View style={[styles.gridPillVisual, isSelected && styles.gridPillVisualSelected]}>
+                      <Text
+                        style={[styles.gridPillText, isSelected && styles.gridPillTextSelected]}
+                        numberOfLines={2}
+                        maxFontSizeMultiplier={1.2}
+                      >
+                        {OWNED_EQUIPMENT_LABELS[item]}
+                      </Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
         <PillGrid
           styles={styles}
           label="Session Length"

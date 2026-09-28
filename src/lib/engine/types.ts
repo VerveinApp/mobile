@@ -79,6 +79,15 @@ export type EffectiveConstraintSet = {
   // contraindications field as the hard Gate 1 exclusion the Condition Prior
   // notes already define. Exposing already-approved data, not a new policy.
   excludeContraindicatedFor: string[];
+  /**
+   * Vervein addition — the equipment actually on hand (see
+   * equipment-requirements.ts). null/undefined = no item-level limit, the
+   * tier ceiling above decides alone. A list means only exercises whose
+   * needs it covers pass, and the tier ceiling is lifted to full_gym by
+   * whoever builds this set, since the list is the more precise answer (a
+   * home barbell is a home barbell).
+   */
+  ownedEquipment?: readonly string[] | null;
 };
 
 export type Exercise = {

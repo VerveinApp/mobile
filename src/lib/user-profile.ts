@@ -21,6 +21,13 @@ export type UserProfile = {
   goal?: string;
   experience?: string;
   environment?: string;
+  /** What's on hand for a home gym or minimal setup — owned-equipment.ts's
+   * ids, comma-separated like `days`. undefined = never answered (the
+   * setup's default list applies); 'none' = answered "none of these". Read by
+   * the engine via onboarding-to-engine.ts. Device-only for now: the synced
+   * profiles table has no column for it, so a new device falls back to the
+   * setup's default list until it's answered again. */
+  equipment?: string;
   duration?: string;
   commitmentLevel?: string;
   /** Comma-separated lowercase weekday names, e.g. "tuesday,friday,sunday". */
@@ -155,6 +162,7 @@ export async function finishOnboarding(
     | 'goal'
     | 'experience'
     | 'environment'
+    | 'equipment'
     | 'duration'
     | 'commitmentLevel'
     | 'days'
@@ -171,6 +179,9 @@ export async function finishOnboarding(
     goal: answers.goal,
     experience: answers.experience,
     environment: answers.environment,
+    // '' is a route param that never carried a list — not asked (a full
+    // gym or bodyweight setup). An answered-empty list arrives as 'none'.
+    equipment: answers.equipment || undefined,
     duration: answers.duration,
     commitmentLevel: answers.commitmentLevel,
     days: answers.days,

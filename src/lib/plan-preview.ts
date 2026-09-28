@@ -73,6 +73,7 @@ import { bodyAreaPriorityScore, type TrainingState } from '@/lib/engine/training
 import { scaleVolume } from '@/lib/engine/volume-scaling';
 import { assembleWorkout } from '@/lib/engine/workout-assembly';
 import { localDateStr } from '@/lib/local-date';
+import { ownedEquipmentFor } from '@/lib/owned-equipment';
 import { EQUIPMENT_BY_ENVIRONMENT, LOCAL_USER_ID, profileToOnboardingContext } from '@/lib/onboarding-to-engine';
 import { ENVIRONMENT_LABELS } from '@/lib/profile-labels';
 import type { UserProfile } from '@/lib/user-profile';
@@ -323,6 +324,9 @@ export const BODY_AREA_PRIORITY_LABEL: Record<Exercise['body_area'], string> = {
 // own `preview`-vs-`baseline` pair could contaminate each other again.
 let cachedProfileInput: PlanPreviewInput | null = null;
 let cachedEquipment: Equipment | null = null;
+// Home gym and minimal share a tier but not a list, so the tier alone can't
+// key the pool once a list decides what's in it.
+let cachedOwnedKey: string | null = null;
 let cachedBiasSimpleExercises: boolean | null = null;
 let cachedBaselinePlan: BaselinePlan | null = null;
 
@@ -330,11 +334,14 @@ function getBaselinePlanCached(
   input: PlanPreviewInput,
   ctx: OnboardingContext,
   effectiveEquipment: Equipment,
+  effectiveOwnedEquipment: readonly string[] | null,
   effectiveBiasSimpleExercises: boolean
 ): BaselinePlan {
+  const ownedKey = effectiveOwnedEquipment === null ? '*' : effectiveOwnedEquipment.join(',');
   if (
     input === cachedProfileInput &&
     effectiveEquipment === cachedEquipment &&
+    ownedKey === cachedOwnedKey &&
     effectiveBiasSimpleExercises === cachedBiasSimpleExercises &&
     cachedBaselinePlan
   ) {
@@ -342,9 +349,15 @@ function getBaselinePlanCached(
   }
   cachedProfileInput = input;
   cachedEquipment = effectiveEquipment;
+  cachedOwnedKey = ownedKey;
   cachedBiasSimpleExercises = effectiveBiasSimpleExercises;
   cachedBaselinePlan = generateBaselinePlan(
-    { ...ctx, equipment: effectiveEquipment, biasSimpleExercises: effectiveBiasSimpleExercises },
+    {
+      ...ctx,
+      equipment: effectiveEquipment,
+      ownedEquipment: effectiveOwnedEquipment,
+      biasSimpleExercises: effectiveBiasSimpleExercises,
+    },
     LOCAL_USER_ID
   );
   return cachedBaselinePlan;
@@ -464,6 +477,17 @@ export function computePlanPreview(
 ): PlanPreviewResult {
   const ctx = profileToOnboardingContext(input);
   const effectiveEquipment = equipmentOverride ? (EQUIPMENT_BY_ENVIRONMENT[equipmentOverride] ?? ctx.equipment) : ctx.equipment;
+  // The list follows the same override: a full gym today has everything,
+  // bodyweight today has nothing, and a home or minimal day uses their own
+  // saved list — the kit they've said they own — falling back to that
+  // setup's defaults only without one. Never the defaults over their list:
+  // a kettlebell-only home picking "Minimal" for the day would otherwise be
+  // handed dumbbell work they don't have. An override this doesn't
+  // recognise changes nothing, same as the tier.
+  const effectiveOwnedEquipment =
+    equipmentOverride && EQUIPMENT_BY_ENVIRONMENT[equipmentOverride]
+      ? ownedEquipmentFor(equipmentOverride, input.equipment)
+      : (ctx.ownedEquipment ?? null);
   // Vervein addition — a real return-after-absence biases toward simpler,
   // more familiar exercises for that one session, the same real mechanism
   // ctx.biasSimpleExercises already gives a beginner (see baseline-plan.ts's
@@ -474,7 +498,13 @@ export function computePlanPreview(
   // detection now also touching what gets selected, not just what gets said.
   const effectiveBiasSimpleExercises =
     ctx.biasSimpleExercises || (daysSinceLastCheckIn !== undefined && daysSinceLastCheckIn >= RETURN_GAP_MIN_DAYS);
-  const baselinePlan = getBaselinePlanCached(input, ctx, effectiveEquipment, effectiveBiasSimpleExercises);
+  const baselinePlan = getBaselinePlanCached(
+    input,
+    ctx,
+    effectiveEquipment,
+    effectiveOwnedEquipment,
+    effectiveBiasSimpleExercises
+  );
 
   // Step 2 — today's constraint set, re-filtered against the baseline pool.
   const checkIn: DailyCheckIn = {
@@ -490,7 +520,8 @@ export function computePlanPreview(
     ctx.standingSymptomTags,
     ctx.movementRestrictions,
     effectiveEquipment,
-    ctx.conditions
+    ctx.conditions,
+    effectiveOwnedEquipment
   );
   const filterResult = filterAndSubstitute(baselinePlan, dailyConstraints, effectiveBiasSimpleExercises);
   // Body-area priority reorder (Vervein addition — see the function's own

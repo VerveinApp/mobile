@@ -1,0 +1,829 @@
+{
+"ex_209": [
+[
+"suspension"
+],
+[
+"barbell"
+]
+],
+"ex_214": [],
+"ex_215": [],
+"ex_226": [
+[
+"band"
+]
+],
+"ex_243": [
+[
+"medball"
+]
+],
+"ex_271": [
+[
+"barbell"
+]
+],
+"ex_274": [
+[
+"gym"
+]
+],
+"ex_275": [
+[
+"gym"
+]
+],
+"ex_308": [
+[
+"gym"
+]
+],
+"ex_309": [
+[
+"gym"
+]
+],
+"ex_332": [
+[
+"barbell",
+"bench"
+]
+],
+"ex_346": [],
+"ex_349": [
+[
+"bench"
+]
+],
+"ex_355": [
+[
+"pullup_bar"
+],
+[
+"suspension"
+]
+],
+"ex_401": [],
+"ex_459": [],
+"ex_460": [],
+"ex_461": [
+[
+"band"
+],
+[
+"dumbbell"
+]
+],
+"ex_473": [
+[
+"band"
+],
+[
+"gym"
+]
+],
+"ex_475": [
+[
+"dumbbell"
+],
+[
+"kettlebell"
+],
+[
+"barbell"
+]
+],
+"ex_477": [
+[
+"dumbbell"
+],
+[
+"kettlebell"
+]
+],
+"ex_480": [
+[
+"dumbbell"
+],
+[
+"kettlebell"
+],
+[
+"barbell"
+]
+],
+"ex_484": [
+[
+"bench"
+]
+],
+"ex_513": [
+[
+"dumbbell"
+],
+[
+"kettlebell"
+],
+[
+"barbell"
+]
+],
+"ex_522": [
+[
+"dumbbell",
+"pullup_bar"
+],
+[
+"kettlebell",
+"pullup_bar"
+]
+],
+"ex_527": [
+[
+"gym"
+]
+],
+"ex_547": [
+[
+"gym"
+]
+],
+"ex_570": [
+[
+"gym"
+]
+],
+"ex_605": [
+[
+"bench"
+],
+[
+"box"
+]
+],
+"ex_633": [
+[
+"dumbbell"
+],
+[
+"kettlebell"
+],
+[
+"barbell"
+]
+],
+"ex_638": [
+[
+"dumbbell"
+],
+[
+"kettlebell"
+]
+],
+"ex_654": [
+[
+"barbell"
+]
+],
+"ex_658": [
+[
+"gym"
+]
+],
+"ex_670": [
+[
+"barbell"
+]
+],
+"ex_671": [
+[
+"gym"
+]
+],
+"ex_672": [
+[
+"dumbbell",
+"pullup_bar"
+],
+[
+"kettlebell",
+"pullup_bar"
+]
+],
+"ex_693": [
+[
+"bench"
+]
+],
+"ex_701": [
+[
+"suspension"
+]
+],
+"ex_734": [],
+"ex_774": [
+[
+"band"
+]
+],
+"ex_780": [
+[
+"band"
+]
+],
+"ex_801": [
+[
+"dumbbell",
+"stability_ball"
+]
+],
+"ex_804": [
+[
+"dumbbell",
+"stability_ball"
+]
+],
+"ex_809": [
+[
+"gym"
+]
+],
+"ex_843": [
+[
+"gym"
+]
+],
+"ex_844": [],
+"ex_845": [],
+"ex_849": [
+[
+"band"
+],
+[
+"dumbbell"
+],
+[
+"gym"
+]
+],
+"ex_850": [
+[
+"dumbbell"
+]
+],
+"ex_851": [
+[
+"dumbbell"
+]
+],
+"ex_875": [
+[
+"suspension"
+]
+],
+"ex_879": [
+[
+"gym"
+]
+],
+"ex_917": [
+[
+"barbell"
+]
+],
+"ex_918": [
+[
+"dumbbell"
+],
+[
+"kettlebell"
+]
+],
+"ex_971": [
+[
+"band",
+"barbell"
+]
+],
+"ex_972": [
+[
+"band",
+"barbell"
+]
+],
+"ex_982": [],
+"ex_988": [
+[
+"barbell"
+]
+],
+"ex_997": [
+[
+"band"
+]
+],
+"ex_1002": [
+[
+"barbell"
+],
+[
+"dumbbell"
+]
+],
+"ex_1012": [
+[
+"dumbbell"
+]
+],
+"ex_1032": [
+[
+"barbell"
+]
+],
+"ex_1033": [
+[
+"dumbbell"
+],
+[
+"kettlebell"
+],
+[
+"barbell"
+]
+],
+"ex_1036": [
+[
+"dumbbell",
+"pullup_bar"
+],
+[
+"kettlebell",
+"pullup_bar"
+]
+],
+"ex_1041": [
+[
+"gym"
+]
+],
+"ex_1051": [
+[
+"barbell"
+]
+],
+"ex_1053": [
+[
+"barbell"
+]
+],
+"ex_1070": [],
+"ex_1071": [],
+"ex_1109": [],
+"ex_1114": [],
+"ex_1115": [],
+"ex_1120": [
+[
+"barbell"
+]
+],
+"ex_1121": [],
+"ex_1122": [
+[
+"dumbbell"
+],
+[
+"kettlebell"
+],
+[
+"barbell"
+]
+],
+"ex_1124": [
+[
+"bench",
+"dumbbell"
+]
+],
+"ex_1125": [
+[
+"dumbbell"
+],
+[
+"kettlebell"
+]
+],
+"ex_1126": [
+[
+"barbell"
+],
+[
+"dumbbell"
+]
+],
+"ex_1127": [
+[
+"barbell",
+"bench"
+],
+[
+"bench",
+"dumbbell"
+]
+],
+"ex_1129": [
+[
+"dumbbell"
+]
+],
+"ex_1130": [
+[
+"barbell"
+],
+[
+"dumbbell"
+]
+],
+"ex_1132": [
+[
+"bench",
+"dumbbell"
+]
+],
+"ex_1134": [
+[
+"dumbbell"
+],
+[
+"kettlebell"
+],
+[
+"barbell"
+]
+],
+"ex_1135": [],
+"ex_1139": [
+[
+"barbell",
+"bench"
+],
+[
+"bench",
+"dumbbell"
+],
+[
+"bench",
+"kettlebell"
+]
+],
+"ex_1141": [
+[
+"barbell",
+"bench"
+]
+],
+"ex_1142": [
+[
+"bench"
+],
+[
+"box"
+]
+],
+"ex_1152": [
+[
+"gym"
+]
+],
+"ex_1153": [
+[
+"gym"
+]
+],
+"ex_1160": [],
+"ex_1167": [
+[
+"barbell",
+"bench"
+]
+],
+"ex_1169": [
+[
+"band"
+],
+[
+"gym"
+]
+],
+"ex_1181": [],
+"ex_1187": [
+[
+"barbell"
+]
+],
+"ex_1188": [],
+"ex_1189": [
+[
+"gym"
+]
+],
+"ex_1193": [
+[
+"gym"
+]
+],
+"ex_1195": [
+[
+"band"
+],
+[
+"gym"
+]
+],
+"ex_1206": [],
+"ex_1208": [
+[
+"barbell"
+]
+],
+"ex_1238": [],
+"ex_1239": [],
+"ex_1240": [
+[
+"dumbbell"
+],
+[
+"kettlebell"
+],
+[
+"barbell"
+]
+],
+"ex_1243": [
+[
+"gym"
+]
+],
+"ex_1244": [
+[
+"dumbbell"
+]
+],
+"ex_1264": [
+[
+"gym"
+]
+],
+"ex_1272": [
+[
+"gym"
+]
+],
+"ex_1274": [
+[
+"gym"
+]
+],
+"ex_1284": [],
+"ex_1290": [
+[
+"gym"
+]
+],
+"ex_1293": [
+[
+"pullup_bar"
+]
+],
+"ex_1298": [],
+"ex_1299": [],
+"ex_1301": [],
+"ex_1315": [
+[
+"gym"
+]
+],
+"ex_1317": [
+[
+"bench"
+]
+],
+"ex_1319": [
+[
+"band"
+],
+[
+"dumbbell"
+]
+],
+"ex_1323": [],
+"ex_1326": [
+[
+"dumbbell"
+],
+[
+"kettlebell"
+],
+[
+"barbell"
+]
+],
+"ex_1329": [
+[
+"dumbbell"
+],
+[
+"kettlebell"
+],
+[
+"barbell"
+]
+],
+"ex_1330": [
+[
+"gym"
+]
+],
+"ex_1331": [
+[
+"dumbbell"
+],
+[
+"kettlebell"
+],
+[
+"barbell"
+]
+],
+"ex_1332": [],
+"ex_1334": [],
+"ex_1336": [],
+"ex_1337": [],
+"ex_1339": [
+[
+"band"
+],
+[
+"gym"
+]
+],
+"ex_1341": [
+[
+"dumbbell"
+]
+],
+"ex_1344": [
+[
+"bench",
+"dumbbell"
+],
+[
+"bench",
+"kettlebell"
+]
+],
+"ex_1346": [],
+"ex_1359": [],
+"ex_1367": [
+[
+"gym"
+]
+],
+"ex_1390": [],
+"ex_1391": [],
+"ex_1392": [],
+"ex_1393": [
+[
+"gym"
+]
+],
+"ex_1396": [
+[
+"gym"
+]
+],
+"ex_1401": [
+[
+"barbell",
+"bench"
+]
+],
+"ex_1403": [
+[
+"barbell"
+]
+],
+"ex_1404": [
+[
+"box"
+]
+],
+"ex_1406": [],
+"ex_1407": [],
+"ex_1418": [
+[
+"barbell"
+]
+],
+"ex_1421": [
+[
+"dumbbell"
+]
+],
+"ex_1425": [
+[
+"gym"
+]
+],
+"ex_1426": [
+[
+"gym"
+]
+],
+"ex_1427": [
+[
+"gym"
+]
+],
+"ex_1437": [],
+"ex_1439": [
+[
+"gym"
+]
+],
+"ex_1442": [
+[
+"dumbbell",
+"pullup_bar"
+],
+[
+"kettlebell",
+"pullup_bar"
+]
+],
+"ex_1469": [
+[
+"barbell"
+]
+],
+"ex_1470": [
+[
+"barbell"
+]
+],
+"ex_1499": [
+[
+"barbell"
+]
+],
+"ex_1505": [],
+"ex_1513": [],
+"ex_1514": [
+[
+"band"
+],
+[
+"dumbbell"
+],
+[
+"kettlebell"
+]
+],
+"ex_1534": [],
+"ex_1535": [],
+"ex_1536": [],
+"ex_1538": [],
+"ex_1555": [
+[
+"barbell",
+"bench"
+]
+],
+"ex_1558": [
+[
+"gym"
+]
+],
+"ex_1560": [
+[
+"gym"
+]
+],
+"ex_1563": [
+[
+"gym"
+]
+],
+"ex_1568": [],
+"ex_1569": [],
+"ex_1570": [],
+"ex_1571": [],
+"ex_1572": [],
+"ex_1574": [],
+"ex_1575": [],
+"ex_1579": [
+[
+"medball"
+]
+]
+}

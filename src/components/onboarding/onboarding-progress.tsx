@@ -21,7 +21,9 @@ export const ONBOARDING_STEP_COUNT = 7;
  * stagger — a "here's how far you've come" reveal every time you land on a
  * new step, not a one-off effect that only fires once for the whole flow.
  */
-export function OnboardingProgress({ step }: { step: number }) {
+/** `settled` for a follow-up screen within a step (onboarding/equipment.tsx
+ * after step 4): its segment is already full, so it doesn't fill again. */
+export function OnboardingProgress({ step, settled = false }: { step: number; settled?: boolean }) {
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   return (
@@ -32,7 +34,7 @@ export function OnboardingProgress({ step }: { step: number }) {
           step mounted — the whole bar visibly resetting and refilling on
           every screen instead of just advancing by one. */}
       {Array.from({ length: ONBOARDING_STEP_COUNT }, (_, i) => (
-        <ProgressSegment key={i} active={i < step} animateIn={i === step - 1} styles={styles} />
+        <ProgressSegment key={i} active={i < step} animateIn={!settled && i === step - 1} styles={styles} />
       ))}
     </View>
   );

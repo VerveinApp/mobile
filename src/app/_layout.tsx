@@ -150,6 +150,7 @@ function RootNavigator() {
           <Stack.Screen name="onboarding/step-2" />
           <Stack.Screen name="onboarding/step-3" />
           <Stack.Screen name="onboarding/step-4" />
+          <Stack.Screen name="onboarding/equipment" />
           <Stack.Screen name="onboarding/step-5" />
           <Stack.Screen name="onboarding/step-6" />
           <Stack.Screen name="onboarding/step-7" />

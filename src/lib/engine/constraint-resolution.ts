@@ -55,7 +55,10 @@ export function computeEffectiveConstraints(
   standingSymptomTags: string[],
   movementRestrictions: string[],
   equipment: Equipment,
-  conditions: string[]
+  conditions: string[],
+  // Vervein addition — see EffectiveConstraintSet.ownedEquipment. Defaults
+  // to no item-level limit, byte-identical to every call without it.
+  ownedEquipment: readonly string[] | null = null
 ): EffectiveConstraintSet {
   const energyRow = ENERGY_MODIFIER_TABLE[checkIn.energyScore];
 
@@ -96,7 +99,8 @@ export function computeEffectiveConstraints(
   return {
     intensityCeiling,
     impactCeiling,
-    equipmentCeiling: equipment,
+    equipmentCeiling: ownedEquipment !== null ? 'full_gym' : equipment,
+    ownedEquipment,
     excludeBodyAreas: [...excludeBodyAreas],
     excludeMovementPatterns: [...excludeMovementPatterns],
     forceAddTypes: [...forceAddTypes],

@@ -54,6 +54,7 @@ export default function OnboardingCommitmentScreen() {
     goal,
     experience,
     environment,
+    equipment,
     verifiedEmail,
     healthConsent,
     sex,
@@ -68,6 +69,7 @@ export default function OnboardingCommitmentScreen() {
     goal?: string;
     experience?: string;
     environment?: string;
+    equipment?: string;
     verifiedEmail?: string;
     healthConsent?: string;
     sex?: string;
@@ -84,6 +86,7 @@ export default function OnboardingCommitmentScreen() {
     goal: goal ?? '',
     experience: experience ?? '',
     environment: environment ?? '',
+    equipment: equipment ?? '',
     verifiedEmail: verifiedEmail ?? '',
     healthConsent: healthConsent ?? 'false',
     sex: sex ?? '',

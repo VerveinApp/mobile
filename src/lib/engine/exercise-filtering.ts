@@ -49,6 +49,7 @@
 
 import type { BaselinePlan, EffectiveConstraintSet, Exercise, FilteredExerciseList } from './types';
 import { exerciseLibrary, INTENSITY_RANK, IMPACT_RANK, EQUIPMENT_RANK, bySelectionOrder } from './exercise-library';
+import { hasEquipmentFor } from './equipment-requirements';
 import { isTrainableExercise } from '../non-trainable-exercises';
 
 function bodyAreaExcluded(ex: Exercise, c: EffectiveConstraintSet): boolean {
@@ -68,7 +69,8 @@ function contraindicated(ex: Exercise, c: EffectiveConstraintSet): boolean {
 export function passesConstraints(ex: Exercise, c: EffectiveConstraintSet): boolean {
   const intensityOk = ex.intensity === null || INTENSITY_RANK[ex.intensity] <= INTENSITY_RANK[c.intensityCeiling];
   const impactOk = IMPACT_RANK[ex.impact] <= IMPACT_RANK[c.impactCeiling];
-  const equipmentOk = EQUIPMENT_RANK[ex.equipment] <= EQUIPMENT_RANK[c.equipmentCeiling];
+  const equipmentOk =
+    EQUIPMENT_RANK[ex.equipment] <= EQUIPMENT_RANK[c.equipmentCeiling] && hasEquipmentFor(ex, c.ownedEquipment);
   const patternOk = !ex.movement_patterns.some((p) => c.excludeMovementPatterns.includes(p));
   return intensityOk && impactOk && equipmentOk && !bodyAreaExcluded(ex, c) && patternOk && !contraindicated(ex, c);
 }
@@ -84,7 +86,9 @@ function exclusionReason(
   if (contraindicated(ex, c)) return 'contraindication';
   if (ex.intensity !== null && INTENSITY_RANK[ex.intensity] > INTENSITY_RANK[c.intensityCeiling]) return 'intensity';
   if (IMPACT_RANK[ex.impact] > IMPACT_RANK[c.impactCeiling]) return 'impact';
-  if (EQUIPMENT_RANK[ex.equipment] > EQUIPMENT_RANK[c.equipmentCeiling]) return 'equipment';
+  if (EQUIPMENT_RANK[ex.equipment] > EQUIPMENT_RANK[c.equipmentCeiling] || !hasEquipmentFor(ex, c.ownedEquipment)) {
+    return 'equipment';
+  }
   if (bodyAreaExcluded(ex, c)) return 'body-area';
   if (!isTrainableExercise(ex.id)) return 'non-trainable';
   return 'restriction'; // the only remaining dimension — movement patterns
