@@ -12,25 +12,19 @@ import {
 } from 'react-native';
 
 import { useCanvasScale } from '@/lib/canvas-scale';
-import ReanimatedAnimated, {
-  FadeIn,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withSequence,
-  withTiming,
-} from 'react-native-reanimated';
+import ReanimatedAnimated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
-import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
+import { useEnabledFadeStyle, useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight, hapticSuccess } from '@/lib/haptics';
-import { MOTION_DURATION } from '@/lib/motion';
+import { LIST_ROW_EXITING, LIST_ROW_LAYOUT, MOTION_DURATION, MOTION_EASING } from '@/lib/motion';
 import { prepareLocalDataForAccount } from '@/lib/account-switch';
 import { hasCompletedOnboarding, markOnboardingComplete } from '@/lib/onboarding-draft';
 import { goBack } from '@/lib/onboarding-nav';
 import { pullProfileFromRemote } from '@/lib/profile-sync';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { supabase } from '@/lib/supabase';
-import { Type, sheenGradient } from '@/constants/theme';
+import { useShake } from '@/lib/use-shake';
+import { TabularNums, Type, sheenGradient } from '@/constants/theme';
 import { useAppColors, useAppTheme } from '@/lib/theme-context';
 import { finishOnboarding, saveProfile } from '@/lib/user-profile';
 import {
@@ -84,7 +78,9 @@ export default function VerifyEmailScreen() {
 
   const [digits, setDigits] = useState<string[]>(Array(CODE_LENGTH).fill(''));
   const [codeError, setCodeError] = useState<string | null>(null);
-  const [verifying, setVerifying] = useState(false);
+  // 'verified' holds from the moment Supabase accepts the code until this
+  // screen navigates away (or the restore after it fails) — see submitCode.
+  const [phase, setPhase] = useState<'idle' | 'verifying' | 'verified'>('idle');
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
   const inputRefs = useRef<(TextInput | null)[]>([]);
   // True once this screen's code has been verified — see handleContinue.
@@ -94,6 +90,9 @@ export default function VerifyEmailScreen() {
   const [cooldown, setCooldown] = useState(RESEND_COOLDOWN_SECONDS);
 
   const isCodeIncomplete = digits.join('').length < CODE_LENGTH;
+  // 'Verified' is a success, not an unavailable state — it isn't dimmed.
+  const continueEnabledFade = useEnabledFadeStyle(!(isCodeIncomplete || phase === 'verifying'));
+  const continueLabel = phase === 'verifying' ? 'Verifying…' : phase === 'verified' ? 'Verified' : 'Continue';
 
   const entering = useFadeInEntering();
   const resendHover = useHoverFade();
@@ -115,6 +114,10 @@ export default function VerifyEmailScreen() {
   };
 
   const handleDigitChange = (index: number, value: string) => {
+    // The accepted code stays put while the account restores — ignoring the
+    // change lets the controlled value put the box back. Not editable={false}:
+    // that would drop the keyboard (and shift the whole canvas) mid-success.
+    if (phase === 'verified') return;
     const digitsOnly = value.replace(/[^0-9]/g, '');
 
     // A paste (or autofill) delivers the whole code into one box at once —
@@ -155,22 +158,9 @@ export default function VerifyEmailScreen() {
 
   const handleContinue = () => submitCode(digits.join(''));
 
-  // A small horizontal shake on a rejected code — the same "that didn't
-  // take" gesture iOS uses for a wrong passcode, alongside the haptic and
-  // the error text. Skipped under Reduce Motion.
-  const reducedMotion = useReducedMotion();
-  const shakeX = useSharedValue(0);
-  const shake = () => {
-    if (reducedMotion) return;
-    shakeX.value = withSequence(
-      withTiming(-8, { duration: 45 }),
-      withTiming(8, { duration: 70 }),
-      withTiming(-5, { duration: 60 }),
-      withTiming(5, { duration: 60 }),
-      withTiming(0, { duration: 50 })
-    );
-  };
-  const otpRowShakeStyle = useAnimatedStyle(() => ({ transform: [{ translateX: shakeX.value }] }));
+  // A small horizontal shake on a rejected code, alongside the haptic and
+  // the error text (see use-shake.ts).
+  const { shake, shakeStyle: otpRowShakeStyle } = useShake();
 
   const submitCode = async (code: string) => {
     if (isSubmittingRef.current) return;
@@ -187,9 +177,9 @@ export default function VerifyEmailScreen() {
     }
     setCodeError(null);
     // Synchronous guard — auto-submit on the sixth digit and a tap on
-    // Continue (or a double tap) can land before `verifying` re-renders.
+    // Continue (or a double tap) can land before `phase` re-renders.
     isSubmittingRef.current = true;
-    setVerifying(true);
+    setPhase('verifying');
     // A code can only be verified once — if an earlier tap already verified
     // it and only the profile restore below failed (offline), a retry must
     // skip straight to that step instead of re-sending a now-used code.
@@ -200,7 +190,7 @@ export default function VerifyEmailScreen() {
       const { data, error } = await supabase.auth.verifyOtp({ email: params.email, token: code, type: 'email' });
       if (error) {
         isSubmittingRef.current = false;
-        setVerifying(false);
+        setPhase('idle');
         setCodeError(error.message);
         hapticError();
         shake();
@@ -212,84 +202,103 @@ export default function VerifyEmailScreen() {
       // that account and this one gets its own (see account-switch.ts).
       if (data.user) await prepareLocalDataForAccount(data.user.id);
     }
-    isSubmittingRef.current = false;
-    setVerifying(false);
+    // BUG FIX: this used to reopen isSubmittingRef and flip the button back
+    // to an enabled "Continue" right here — before the restore/finish below,
+    // which on the Sign-in path is a network round trip. A tap, the Return
+    // key on the last box, or editing a digit (auto-submit) in that window
+    // re-entered submitCode, skipped verifyOtp (already verified) and ran the
+    // same branch twice at once: a second pull, saveProfile and
+    // markOnboardingComplete, then two dismissAll()+replace() calls. The gate
+    // now stays closed until this screen navigates away or the restore
+    // itself fails, and the accepted code shows as accepted meanwhile.
+    setPhase('verified');
     hapticSuccess();
-    // This screen has three real entry points now, not one: mid-onboarding
-    // (real profile params in the route, onboarding not complete yet),
-    // re-authenticating after a plain Sign Out (no profile params at all,
-    // onboarding already complete on this device — see settings/index.tsx's
-    // handleSignOut), and "Already have an account? Sign in" from
-    // welcome.tsx (also no profile params, but onboarding is NOT complete on
-    // this device — that screen's own precondition, per its doc comment, is
-    // reachable only when there's no local profile yet). Only the true
-    // mid-onboarding path should touch the profile — the other two must not
-    // fall into saveProfile with a batch of undefined fields.
-    if (await hasCompletedOnboarding()) {
-      // dismissAll() first — this app's whole flow lives in one flat root
-      // Stack (see app/_layout.tsx's own comment), so replace() alone only
-      // swaps this screen and leaves create-account/welcome underneath it
-      // reachable with a single edge-swipe-back, landing on a screen that
-      // looks like signing in did nothing. Same fix as settings/index.tsx's
-      // handleSignOut/handleConfirmDeleteAccount/handleConfirmDeleteData.
-      router.dismissAll();
-      router.replace('/(tabs)' as never);
-      return;
-    }
-    if (!params.name) {
-      // No local profile AND no real onboarding data was ever collected in
-      // this session — the welcome.tsx Sign In path, most commonly a
-      // returning user on a new device or after a reinstall. Before
-      // assuming there's nothing to restore, check whether this account has
-      // a synced profile from another device (see lib/profile-sync.ts) —
-      // sign-in should mean something for a real returning account, not
-      // force the entire questionnaire again just because this specific
-      // device has never seen it.
-      const remote = await pullProfileFromRemote();
-      if (remote.kind === 'found') {
-        await saveProfile(remote.profile);
-        await markOnboardingComplete();
-        // Same dismissAll() fix as the branch above — see that comment.
+    try {
+      // This screen has three real entry points now, not one: mid-onboarding
+      // (real profile params in the route, onboarding not complete yet),
+      // re-authenticating after a plain Sign Out (no profile params at all,
+      // onboarding already complete on this device — see settings/index.tsx's
+      // handleSignOut), and "Already have an account? Sign in" from
+      // welcome.tsx (also no profile params, but onboarding is NOT complete on
+      // this device — that screen's own precondition, per its doc comment, is
+      // reachable only when there's no local profile yet). Only the true
+      // mid-onboarding path should touch the profile — the other two must not
+      // fall into saveProfile with a batch of undefined fields.
+      if (await hasCompletedOnboarding()) {
+        // dismissAll() first — this app's whole flow lives in one flat root
+        // Stack (see app/_layout.tsx's own comment), so replace() alone only
+        // swaps this screen and leaves create-account/welcome underneath it
+        // reachable with a single edge-swipe-back, landing on a screen that
+        // looks like signing in did nothing. Same fix as settings/index.tsx's
+        // handleSignOut/handleConfirmDeleteAccount/handleConfirmDeleteData.
         router.dismissAll();
         router.replace('/(tabs)' as never);
         return;
       }
-      if (remote.kind === 'error') {
-        // Couldn't tell whether a synced profile exists — never assume "no"
-        // and start the questionnaire over (finishing it would overwrite the
-        // real one). Already verified, so Continue retries just this step.
-        hapticError();
-        setCodeError("Signed in, but couldn't reach your account to restore your plan. Check your connection and tap Continue.");
+      if (!params.name) {
+        // No local profile AND no real onboarding data was ever collected in
+        // this session — the welcome.tsx Sign In path, most commonly a
+        // returning user on a new device or after a reinstall. Before
+        // assuming there's nothing to restore, check whether this account has
+        // a synced profile from another device (see lib/profile-sync.ts) —
+        // sign-in should mean something for a real returning account, not
+        // force the entire questionnaire again just because this specific
+        // device has never seen it.
+        const remote = await pullProfileFromRemote();
+        if (remote.kind === 'found') {
+          await saveProfile(remote.profile);
+          await markOnboardingComplete();
+          // Same dismissAll() fix as the branch above — see that comment.
+          router.dismissAll();
+          router.replace('/(tabs)' as never);
+          return;
+        }
+        if (remote.kind === 'error') {
+          // Couldn't tell whether a synced profile exists — never assume "no"
+          // and start the questionnaire over (finishing it would overwrite the
+          // real one). Already verified, so Continue retries just this step.
+          isSubmittingRef.current = false;
+          setPhase('idle');
+          hapticError();
+          setCodeError("Signed in, but couldn't reach your account to restore your plan. Check your connection and tap Continue.");
+          return;
+        }
+        // Genuinely nothing to restore — route into the real questionnaire
+        // instead of permanently marking onboarding "complete" with garbage.
+        // This email is already verified, though — carry it forward as an
+        // ordinary route param (onboarding/index.tsx forwards it step by
+        // step, same as `name`) so create-account.tsx's second visit at the
+        // end of the questionnaire can skip re-sending and re-entering
+        // another OTP code for an email this device just proved ownership
+        // of. A route param, not a global AsyncStorage flag — see
+        // onboarding/index.tsx's own doc comment for why that distinction is
+        // what actually keeps an unrelated, later "Get Started" attempt on
+        // the same device from ever picking this up by accident.
+        router.replace({ pathname: '/onboarding', params: { verifiedEmail: params.email } } as never);
         return;
       }
-      // Genuinely nothing to restore — route into the real questionnaire
-      // instead of permanently marking onboarding "complete" with garbage.
-      // This email is already verified, though — carry it forward as an
-      // ordinary route param (onboarding/index.tsx forwards it step by
-      // step, same as `name`) so create-account.tsx's second visit at the
-      // end of the questionnaire can skip re-sending and re-entering
-      // another OTP code for an email this device just proved ownership
-      // of. A route param, not a global AsyncStorage flag — see
-      // onboarding/index.tsx's own doc comment for why that distinction is
-      // what actually keeps an unrelated, later "Get Started" attempt on
-      // the same device from ever picking this up by accident.
-      router.replace({ pathname: '/onboarding', params: { verifiedEmail: params.email } } as never);
-      return;
+      // Onboarding is fully complete once email verification succeeds — this
+      // was the last step in the flow, not a launch point back into it. The
+      // draft itself gets cleared right after, so the parts of it Home still
+      // needs (experience/duration/commitment/days) are copied into a small
+      // durable profile first — see lib/user-profile.ts's finishOnboarding.
+      // Supabase's own session (the real account) is separately persisted by
+      // the client's AsyncStorage adapter — this local profile is still the
+      // engine's own input data, not a duplicate of auth state. Awaited
+      // before navigating on — all-set/trajectory read the profile again a
+      // couple screens later, and there's no reason to leave that read racing
+      // this write when awaiting costs nothing visible (see the same fix in
+      // onboarding/create-account.tsx, where skipping the await was a real bug).
+      await finishOnboarding(params, params.email);
+      router.replace('/onboarding/all-set' as never);
+    } catch {
+      // Verified, but a local write (or the restore) threw — reopen the gate
+      // so Continue retries just this part (verifiedRef skips the code).
+      isSubmittingRef.current = false;
+      setPhase('idle');
+      hapticError();
+      setCodeError('Signed in, but something went wrong finishing setup. Tap Continue to try again.');
     }
-    // Onboarding is fully complete once email verification succeeds — this
-    // was the last step in the flow, not a launch point back into it. The
-    // draft itself gets cleared right after, so the parts of it Home still
-    // needs (experience/duration/commitment/days) are copied into a small
-    // durable profile first — see lib/user-profile.ts's finishOnboarding.
-    // Supabase's own session (the real account) is separately persisted by
-    // the client's AsyncStorage adapter — this local profile is still the
-    // engine's own input data, not a duplicate of auth state. Awaited
-    // before navigating on — all-set/trajectory read the profile again a
-    // couple screens later, and there's no reason to leave that read racing
-    // this write when awaiting costs nothing visible (see the same fix in
-    // onboarding/create-account.tsx, where skipping the await was a real bug).
-    await finishOnboarding(params, params.email);
-    router.replace('/onboarding/all-set' as never);
   };
 
   const handleResend = async () => {
@@ -345,6 +354,17 @@ export default function VerifyEmailScreen() {
             {digits.map((digit, index) => (
               <View key={index} style={[styles.otpBox, focusedIndex === index && styles.otpBoxFocused]}>
                 <View pointerEvents="none" style={styles.otpBoxSheen} />
+                {/* The accepted code sweeps green box by box — the success
+                    counterpart to the wrong-code shake. Under the input so the
+                    digits stay on top. */}
+                {phase === 'verified' ? (
+                  <ReanimatedAnimated.View
+                    pointerEvents="none"
+                    entering={FadeIn.delay(index * 40).duration(MOTION_DURATION.fast).easing(MOTION_EASING.standard)}
+                    exiting={FadeOut.duration(MOTION_DURATION.fast)}
+                    style={styles.otpBoxVerified}
+                  />
+                ) : null}
                 <TextInput
                   ref={(ref) => {
                     inputRefs.current[index] = ref;
@@ -375,25 +395,40 @@ export default function VerifyEmailScreen() {
           </ReanimatedAnimated.View>
 
           {codeError ? (
-            <ReanimatedAnimated.Text entering={FadeIn.duration(MOTION_DURATION.fast)} style={styles.codeErrorText} maxFontSizeMultiplier={1.3}>
+            <ReanimatedAnimated.Text
+              entering={FadeIn.duration(MOTION_DURATION.fast)}
+              exiting={LIST_ROW_EXITING}
+              style={styles.codeErrorText}
+              maxFontSizeMultiplier={1.3}
+            >
               {codeError}
             </ReanimatedAnimated.Text>
           ) : null}
 
-          <Pressable
-            style={[styles.primaryButton, (isCodeIncomplete || verifying) && styles.primaryButtonDisabled]}
-            onPress={handleContinue}
-            disabled={isCodeIncomplete || verifying}
-          >
-            <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>
-              {verifying ? 'Verifying…' : 'Continue'}
-            </Text>
-            {verifying ? null : (
-              <View style={styles.buttonArrow}>
-                <ArrowUpIconGraphic size={24} />
-              </View>
-            )}
-          </Pressable>
+          {/* Glides down when an error opens up above it and back up when
+              it clears, instead of jumping (this group flows — see otpGroup).
+              The same view fades the button's disabled dim in and out. */}
+          <ReanimatedAnimated.View layout={LIST_ROW_LAYOUT} style={continueEnabledFade}>
+            <Pressable
+              style={styles.primaryButton}
+              onPress={handleContinue}
+              disabled={isCodeIncomplete || phase !== 'idle'}
+            >
+              <ReanimatedAnimated.Text
+                key={continueLabel}
+                entering={FadeIn.duration(MOTION_DURATION.fast)}
+                style={styles.primaryText}
+                maxFontSizeMultiplier={1.15}
+              >
+                {continueLabel}
+              </ReanimatedAnimated.Text>
+              {phase === 'idle' ? (
+                <View style={styles.buttonArrow}>
+                  <ArrowUpIconGraphic size={24} />
+                </View>
+              ) : null}
+            </Pressable>
+          </ReanimatedAnimated.View>
         </View>
 
         <View style={styles.resendCardContent}>
@@ -625,6 +660,19 @@ function createStyles(
     otpBoxFocused: {
       borderColor: '#438C63',
     },
+    // Inset by the box's own hairline so the green edge replaces it rather
+    // than sitting just inside it (the box clips to its rounded corners).
+    otpBoxVerified: {
+      position: 'absolute',
+      top: -StyleSheet.hairlineWidth,
+      left: -StyleSheet.hairlineWidth,
+      right: -StyleSheet.hairlineWidth,
+      bottom: -StyleSheet.hairlineWidth,
+      borderRadius: CARD_RADIUS,
+      borderWidth: 1,
+      borderColor: '#438C63',
+      backgroundColor: 'rgba(67,140,99,0.10)',
+    },
     otpInput: {
       width: '100%',
       height: '100%',
@@ -651,9 +699,6 @@ function createStyles(
       borderRadius: 6,
       alignItems: 'center',
       justifyContent: 'center',
-    },
-    primaryButtonDisabled: {
-      opacity: 0.5,
     },
     primaryText: {
       color: '#ffffff',
@@ -747,10 +792,13 @@ function createStyles(
     resendTextDisabled: {
       color: colors.textSecondary,
     },
+    // Tabular so the countdown stops jittering sideways each second ('0:11'
+    // is narrower than '0:10' in Geist's proportional figures).
     countdownText: {
       color: 'rgba(144,144,144,0.7)',
       fontSize: 10,
       fontFamily: 'Geist-Medium',
+      ...TabularNums,
     },
     chevronIcon: {
       width: 24,

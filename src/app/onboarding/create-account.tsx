@@ -13,18 +13,26 @@ import {
 } from 'react-native';
 
 import { useCanvasScale } from '@/lib/canvas-scale';
-import ReanimatedAnimated, { FadeIn } from 'react-native-reanimated';
+import ReanimatedAnimated, {
+  FadeIn,
+  FadeOut,
+  ReduceMotion,
+  useAnimatedStyle,
+  withTiming,
+  ZoomIn,
+} from 'react-native-reanimated';
 import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 
-import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
+import { useDisabledScrimStyle, useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight, hapticSelect, hapticSuccess } from '@/lib/haptics';
-import { MOTION_DURATION } from '@/lib/motion';
+import { LIST_ROW_EXITING, LIST_ROW_LAYOUT, MOTION_DURATION } from '@/lib/motion';
 import { prepareLocalDataForAccount } from '@/lib/account-switch';
 import { hasCompletedOnboarding, markOnboardingComplete } from '@/lib/onboarding-draft';
 import { goBack } from '@/lib/onboarding-nav';
 import { pullProfileFromRemote } from '@/lib/profile-sync';
 import { signInWithApple, signInWithGoogle } from '@/lib/social-auth';
 import { supabase } from '@/lib/supabase';
+import { useShake } from '@/lib/use-shake';
 import { finishOnboarding, saveProfile } from '@/lib/user-profile';
 import {
   AppleIconGraphic,
@@ -62,6 +70,9 @@ const AGE_CHECK_TOP = 718;
 // dial) so it reads as a deliberate "this moment matters" cue, not
 // decoration. Account creation is the other moment that earns it.
 const isGlassAvailable = isLiquidGlassAvailable();
+
+// The age checkbox's red nudge and green checked fill fade rather than snap.
+const AGE_CHECK_FADE = { duration: MOTION_DURATION.fast, reduceMotion: ReduceMotion.System } as const;
 
 /**
  * The last screen in onboarding, not the first — reached only after the
@@ -131,11 +142,21 @@ export default function CreateAccountScreen() {
   // those buttons, so the error text alone left people hunting for it.
   const [ageNudge, setAgeNudge] = useState(false);
   const ageNudgeTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The red alone, snapping on and off, was easy to miss 100–250pt below
+  // the button that was tapped; a shake gives the eye something to find.
+  const ageShake = useShake();
   const nudgeAgeCheck = () => {
     if (ageNudgeTimeout.current) clearTimeout(ageNudgeTimeout.current);
     setAgeNudge(true);
+    ageShake.shake();
     ageNudgeTimeout.current = setTimeout(() => setAgeNudge(false), 1400);
   };
+  const ageNudgeStyle = useAnimatedStyle(() => ({
+    opacity: withTiming(ageNudge && !ageConfirmed ? 1 : 0, AGE_CHECK_FADE),
+  }));
+  const ageCheckedStyle = useAnimatedStyle(() => ({
+    opacity: withTiming(ageConfirmed ? 1 : 0, AGE_CHECK_FADE),
+  }));
   useEffect(
     () => () => {
       if (ageNudgeTimeout.current) clearTimeout(ageNudgeTimeout.current);
@@ -188,6 +209,7 @@ export default function CreateAccountScreen() {
 
   const isEmailEmpty = email.trim().length === 0;
   const isContinueDisabled = isEmailEmpty || sendingCode;
+  const continueScrimStyle = useDisabledScrimStyle(isContinueDisabled);
 
   // Both branches converge on First Look now (see step-7's handleBuildPlan
   // — the consent-only potential-score payoff was cut), so this is always
@@ -452,65 +474,83 @@ export default function CreateAccountScreen() {
           </View>
 
           {emailError ? (
-            <ReanimatedAnimated.Text entering={FadeIn.duration(MOTION_DURATION.fast)} style={styles.errorText} maxFontSizeMultiplier={1.3}>
+            <ReanimatedAnimated.Text
+              entering={FadeIn.duration(MOTION_DURATION.fast)}
+              exiting={LIST_ROW_EXITING}
+              style={styles.errorText}
+              maxFontSizeMultiplier={1.3}
+            >
               {emailError}
             </ReanimatedAnimated.Text>
           ) : null}
 
-          <Pressable
-            style={styles.primaryButtonHit}
-            onPress={handleContinue}
-            disabled={isContinueDisabled}
-            onHoverIn={continueHover.onHoverIn}
-            onHoverOut={continueHover.onHoverOut}
-            onPressIn={continuePress.onPressIn}
-            onPressOut={continuePress.onPressOut}
-            android_ripple={AndroidRippleOnAccent}
-          >
-            <Animated.View
-              style={[
-                styles.primaryButtonVisual,
-                isGlassAvailable && styles.primaryButtonVisualGlass,
-                isContinueDisabled && styles.primaryButtonDisabled,
-                { transform: [{ scale: continuePress.scale }] },
-              ]}
+          {/* Glides down when an error opens up above it and back up when it
+              clears, instead of jumping (the card flows — see styles.card).
+              A layout transition only moves the frame, and there's no
+              entering/exiting here, so the GlassView inside is unaffected. */}
+          <ReanimatedAnimated.View layout={LIST_ROW_LAYOUT}>
+            <Pressable
+              style={styles.primaryButtonHit}
+              onPress={handleContinue}
+              disabled={isContinueDisabled}
+              onHoverIn={continueHover.onHoverIn}
+              onHoverOut={continueHover.onHoverOut}
+              onPressIn={continuePress.onPressIn}
+              onPressOut={continuePress.onPressOut}
+              android_ripple={AndroidRippleOnAccent}
             >
-              {isGlassAvailable ? (
-                <GlassView
+              <Animated.View
+                style={[
+                  styles.primaryButtonVisual,
+                  isGlassAvailable && styles.primaryButtonVisualGlass,
+                  { transform: [{ scale: continuePress.scale }] },
+                ]}
+              >
+                {isGlassAvailable ? (
+                  <GlassView
+                    pointerEvents="none"
+                    glassEffectStyle="regular"
+                    tintColor="#1c3d29"
+                    style={[StyleSheet.absoluteFill, styles.behindContent, { borderRadius: 6 }]}
+                  />
+                ) : null}
+                <Animated.View
                   pointerEvents="none"
-                  glassEffectStyle="regular"
-                  tintColor="#1c3d29"
-                  style={[StyleSheet.absoluteFill, styles.behindContent, { borderRadius: 6 }]}
+                  style={[
+                    StyleSheet.absoluteFill,
+                    styles.hoverWash,
+                    styles.behindContent,
+                    { opacity: continueHover.anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.12] }) },
+                  ]}
                 />
-              ) : null}
-              <Animated.View
-                pointerEvents="none"
-                style={[
-                  StyleSheet.absoluteFill,
-                  styles.hoverWash,
-                  styles.behindContent,
-                  { opacity: continueHover.anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.12] }) },
-                ]}
-              />
-              <Animated.View
-                pointerEvents="none"
-                style={[
-                  StyleSheet.absoluteFill,
-                  styles.hoverWash,
-                  styles.behindContent,
-                  { opacity: continuePress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
-                ]}
-              />
-              <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>
-                {sendingCode ? 'Sending…' : 'Continue'}
-              </Text>
-              {sendingCode ? null : (
-                <View style={styles.buttonArrow}>
-                  <ArrowUpIconGraphic size={24} />
-                </View>
-              )}
-            </Animated.View>
-          </Pressable>
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    StyleSheet.absoluteFill,
+                    styles.hoverWash,
+                    styles.behindContent,
+                    { opacity: continuePress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
+                  ]}
+                />
+                <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>
+                  {sendingCode ? 'Sending…' : 'Continue'}
+                </Text>
+                {sendingCode ? null : (
+                  <View style={styles.buttonArrow}>
+                    <ArrowUpIconGraphic size={24} />
+                  </View>
+                )}
+                {/* The disabled dim, now fading in and out. Not an opacity on
+                    the visual itself (the old static 0.5): that's the
+                    GlassView's ancestor, which must never fade. A card-coloured
+                    scrim over the content gives the same 50% dim instead. */}
+                <ReanimatedAnimated.View
+                  pointerEvents="none"
+                  style={[StyleSheet.absoluteFill, styles.disabledScrim, continueScrimStyle]}
+                />
+              </Animated.View>
+            </Pressable>
+          </ReanimatedAnimated.View>
 
           <View style={styles.dividerRow}>
             <View style={styles.dividerLine} />
@@ -626,30 +666,44 @@ export default function CreateAccountScreen() {
           accessibilityState={{ checked: ageConfirmed }}
           accessibilityLabel="I'm at least 16 and agree to VerveIn's Terms of Service and Privacy Policy"
         >
-          <View style={[styles.ageCheckbox, ageNudge && !ageConfirmed && styles.ageCheckboxNudge, ageConfirmed && styles.ageCheckboxChecked]}>
-            {ageConfirmed ? <SymbolView name="checkmark" size={11} tintColor="#ffffff" weight="bold" /> : null}
-          </View>
-          <Text style={styles.termsText} maxFontSizeMultiplier={1.4}>
-            {'I’m at least 16 and agree to VerveIn’s '}
-            <Text
-              style={styles.termsLink}
-              // Route and content both real — see legal/terms.tsx and
-              // src/lib/legal/terms-content.ts.
-              onPress={() => router.push('/legal/terms' as never)}
-            >
-              Terms of Service
+          {/* The row's content shakes, not the Pressable, so the tap target
+              itself never moves. */}
+          <ReanimatedAnimated.View style={[styles.ageCheckInner, ageShake.shakeStyle]}>
+            <View style={styles.ageCheckbox}>
+              <ReanimatedAnimated.View pointerEvents="none" style={[styles.ageCheckboxFill, styles.ageCheckboxNudge, ageNudgeStyle]} />
+              <ReanimatedAnimated.View pointerEvents="none" style={[styles.ageCheckboxFill, styles.ageCheckboxChecked, ageCheckedStyle]} />
+              {ageConfirmed ? (
+                // A glyph, not text, and it settles at scale 1 — safe to spring.
+                <ReanimatedAnimated.View
+                  entering={ZoomIn.springify(260).dampingRatio(0.7)}
+                  exiting={FadeOut.duration(MOTION_DURATION.fast)}
+                >
+                  <SymbolView name="checkmark" size={11} tintColor="#ffffff" weight="bold" />
+                </ReanimatedAnimated.View>
+              ) : null}
+            </View>
+            <Text style={styles.termsText} maxFontSizeMultiplier={1.4}>
+              {'I’m at least 16 and agree to VerveIn’s '}
+              <Text
+                style={styles.termsLink}
+                // Route and content both real — see legal/terms.tsx and
+                // src/lib/legal/terms-content.ts.
+                onPress={() => router.push('/legal/terms' as never)}
+              >
+                Terms of Service
+              </Text>
+              <Text> and </Text>
+              <Text
+                style={styles.termsLink}
+                // Route and content both real — see legal/privacy.tsx and
+                // src/lib/legal/privacy-content.ts.
+                onPress={() => router.push('/legal/privacy' as never)}
+              >
+                Privacy Policy
+              </Text>
+              <Text>.</Text>
             </Text>
-            <Text> and </Text>
-            <Text
-              style={styles.termsLink}
-              // Route and content both real — see legal/privacy.tsx and
-              // src/lib/legal/privacy-content.ts.
-              onPress={() => router.push('/legal/privacy' as never)}
-            >
-              Privacy Policy
-            </Text>
-            <Text>.</Text>
-          </Text>
+          </ReanimatedAnimated.View>
         </Pressable>
       </View>
     </KeyboardAvoidingView>
@@ -857,8 +911,9 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       backgroundColor: 'rgba(41,86,58,0.4)',
       borderWidth: 0,
     },
-    primaryButtonDisabled: {
-      opacity: 0.5,
+    disabledScrim: {
+      borderRadius: 6,
+      backgroundColor: colors.surface,
     },
     primaryText: {
       color: '#ffffff',
@@ -939,6 +994,8 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       left: 26,
       right: 26,
       top: AGE_CHECK_TOP,
+    },
+    ageCheckInner: {
       flexDirection: 'row',
       alignItems: 'flex-start',
       gap: 7,
@@ -954,6 +1011,17 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       borderColor: colors.textQuaternary,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    // The nudge and checked looks sit over the base box (covering its
+    // border too) and fade by opacity, rather than swapping its colours.
+    ageCheckboxFill: {
+      position: 'absolute',
+      top: -1.5,
+      left: -1.5,
+      right: -1.5,
+      bottom: -1.5,
+      borderRadius: 5,
+      borderWidth: 1.5,
     },
     ageCheckboxNudge: {
       borderColor: '#E5484D',

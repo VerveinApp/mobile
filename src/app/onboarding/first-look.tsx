@@ -13,7 +13,8 @@ import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
 import { goBack } from '@/lib/onboarding-nav';
 import { useFadeInEntering } from '@/lib/screen-transitions';
-import { AndroidRippleOnAccent, Type, sheenGradient } from '@/constants/theme';
+import { useCountTo } from '@/lib/use-count-to';
+import { AndroidRippleOnAccent, TabularNums, Type, sheenGradient } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 import {
   ArrowUpIconGraphic,
@@ -25,6 +26,11 @@ import { saveOnboardingDraft } from '@/lib/onboarding-draft';
 
 const CANVAS_WIDTH = 375;
 const CANVAS_HEIGHT = 812;
+// The feeling-good card lands this long after the screen, and its numbers
+// only start counting once it has finished arriving — one constant for both
+// so the count can't drift ahead of the card it lives in.
+const GOOD_CARD_DELAY = 380;
+const COUNT_DELAY = GOOD_CARD_DELAY + MOTION_DURATION.slow;
 
 /**
  * The payoff screen the entire flow is built around reaching — differentiation
@@ -117,17 +123,19 @@ export default function OnboardingFirstLookScreen() {
         </ReanimatedAnimated.View>
 
         <ReanimatedAnimated.View
-          entering={reducedMotion ? undefined : FadeInDown.duration(MOTION_DURATION.slow).delay(380).easing(MOTION_EASING.standard)}
+          entering={reducedMotion ? undefined : FadeInDown.duration(MOTION_DURATION.slow).delay(GOOD_CARD_DELAY).easing(MOTION_EASING.standard)}
           style={[styles.card, styles.cardSecond]}
         >
           <View pointerEvents="none" style={styles.cardSheen} />
           <Text style={[styles.cardLabel, styles.cardLabelAccent]} maxFontSizeMultiplier={1.2}>Feeling good day</Text>
-          <View style={[styles.cardStatBlock, styles.cardStatBlockAccent]}>
-            <Text style={styles.cardStat} maxFontSizeMultiplier={1.2}>
-              {goodEnergy.exerciseCount} <Text style={styles.cardStatUnit}>exercises</Text> · {goodEnergy.durationMin}{' '}
-              <Text style={styles.cardStatUnit}>min</Text>
-            </Text>
-          </View>
+          <GoodDayStat
+            fromCount={lowEnergy.exerciseCount}
+            toCount={goodEnergy.exerciseCount}
+            fromMin={lowEnergy.durationMin}
+            toMin={goodEnergy.durationMin}
+            instant={reducedMotion}
+            styles={styles}
+          />
           <Text style={styles.cardExplanation} maxFontSizeMultiplier={1.4}>{goodEnergy.explanation}</Text>
         </ReanimatedAnimated.View>
 
@@ -175,6 +183,43 @@ export default function OnboardingFirstLookScreen() {
         </Pressable>
       </ReanimatedAnimated.View>
       </View>
+    </View>
+  );
+}
+
+/**
+ * The feeling-good day's numbers start at the low-energy day's and count up
+ * once the card lands, so the difference is seen happening rather than read
+ * off two static blocks. Only this block re-renders per frame. Reduce Motion
+ * shows the final numbers straight away; VoiceOver reads the settled values.
+ */
+function GoodDayStat({
+  fromCount,
+  toCount,
+  fromMin,
+  toMin,
+  instant,
+  styles,
+}: {
+  fromCount: number;
+  toCount: number;
+  fromMin: number;
+  toMin: number;
+  instant: boolean;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  const shownCount = useCountTo(toCount, instant, fromCount, COUNT_DELAY);
+  const shownMin = useCountTo(toMin, instant, fromMin, COUNT_DELAY);
+  return (
+    <View
+      style={[styles.cardStatBlock, styles.cardStatBlockAccent]}
+      accessible
+      accessibilityLabel={`${toCount} exercises, ${toMin} minutes`}
+    >
+      <Text style={styles.cardStat} maxFontSizeMultiplier={1.2}>
+        {shownCount} <Text style={styles.cardStatUnit}>exercises</Text> · {shownMin}{' '}
+        <Text style={styles.cardStatUnit}>min</Text>
+      </Text>
     </View>
   );
 }
@@ -298,10 +343,13 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     cardStatBlockAccent: {
       borderColor: 'rgba(67,140,99,0.6)',
     },
+    // Tabular so the feeling-good block doesn't resize on every frame of
+    // its count-up (the units inherit it).
     cardStat: {
       color: colors.text,
       fontSize: Type.headerTitle,
       fontFamily: 'Geist-Bold',
+      ...TabularNums,
     },
     cardStatUnit: {
       color: colors.textTertiary,
