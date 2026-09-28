@@ -9,7 +9,7 @@
  * Each entry is a list of alternatives, any one of which is enough; each
  * alternative is the set of items it needs together. `[]` (no entry) means
  * nothing at all. 'gym' stands for anything outside the home list below
- * (cables, machines, sleds, climbing walls, reformers…) — only a full gym
+ * (machines, sleds, climbing walls, reformers…) — only a full gym
  * satisfies it.
  *
  *   goblet squat         → [["dumbbell"], ["kettlebell"]]
@@ -25,7 +25,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = path.join(__dirname, '..');
+// Run from the repo root (node scripts/tag-exercise-equipment.js), same as
+// reset-project.js.
+const ROOT = process.cwd();
 const LIBRARY = path.join(ROOT, 'src/lib/engine/data/exercise-library.json');
 const OUT = path.join(ROOT, 'src/lib/engine/data/exercise-equipment.json');
 
@@ -35,7 +37,7 @@ const BODYWEIGHT = /\bbodyweight\b|\(no load\)|chair-based|\bchair\b|\btowel\b|\
 
 // Gym-only kit: naming any of these settles it, whatever else is named.
 const GYM_KIT =
-  /\bcable|pulley|machine|smith|belt squat|\bghd\b|t-bar|sled|prowler|\btire\b|\bkeg\b|atlas stone|\byoke\b|log (clean|press)|\baxle\b|slosh|sandbag|battle rope|heavy bag|speed bag|double-end bag|reformer|cadillac|pilates (chair|ring)|wunda|climbing|\bclimb\b|boulder|campus board|fingerboard|hangboard|peg ?board|agility ladder|reaction ball|\bpool\b|aqua|water (aerobics|walking|jogging|running)|swim|indian club|\bmace\b|clubbell|bulgarian bag|inversion table|vibration plate|balance board|wobble board|bosu|trampoline|rebounder|parallette|dip (station|bars?)|parallel bars?|\bdips?\b(?!.*(bench|chair|hip))|ab (wheel|roller)|weight(ed)? vest|ankle weights?|wrist weights?|\bchains?\b|bamboo bar|trap bar|hex bar|safety (squat )?bar|cambered|swiss bar|football bar|landmine|jammer|viking press|captain.?s chair|roman chair|power tower|isokinetic|leg sled|jacob.?s ladder|keiser|punching|boxing bag|\bmitts?\b|pads? drill|kick shield|rope climb|rope pull|tug-of-war|hand ?cycle|arm ergometer|upper body ergometer|massage table|physio table|plinth|blood flow restriction|\bbfr\b/;
+  /machine|smith|belt squat|\bghd\b|t-bar|sled|prowler|\btire\b|\bkeg\b|atlas stone|\byoke\b|log (clean|press)|\baxle\b|slosh|sandbag|battle rope|heavy bag|speed bag|double-end bag|reformer|cadillac|pilates (chair|ring)|wunda|climbing|\bclimb\b|boulder|campus board|fingerboard|hangboard|peg ?board|agility ladder|reaction ball|\bpool\b|aqua|water (aerobics|walking|jogging|running)|swim|indian club|\bmace\b|clubbell|bulgarian bag|inversion table|vibration plate|balance board|wobble board|bosu|trampoline|rebounder|ab (wheel|roller)|wrist weights?|\bchains?\b|bamboo bar|trap bar|hex bar|safety (squat )?bar|cambered|swiss bar|football bar|landmine|jammer|viking press|captain.?s chair|roman chair|power tower|isokinetic|leg sled|jacob.?s ladder|keiser|punching|boxing bag|\bmitts?\b|pads? drill|kick shield|rope climb|rope pull|tug-of-war|hand ?cycle|arm ergometer|upper body ergometer|massage table|physio table|plinth|blood flow restriction|\bbfr\b/;
 
 // Moves usually done on gym stations — gym-only unless the name says what
 // home kit does it instead ("Band Lat Pulldown", "Stability Ball Back
@@ -56,6 +58,10 @@ const RULES = [
   [/medicine ball|med ball|slam ball|wall ball|ball slam|\bmb\b/, [['medball']]],
   [/stability ball|swiss ball|physio ball|exercise ball|stir the pot|ball (hamstring curl|pike|rollout|crunch|pass|wall squat)/, [['stability_ball']]],
   [/foam roll|lacrosse ball|massage ball|tennis ball|peanut ball|massage gun|percussion|\broller\b/, [['foam_roller']]],
+  [/\bcable|pulley|functional trainer/, [['cable']]],
+  [/dip (station|bars?)|parallel bars?|parallette|\bdips?\b(?!.*(bench|chair|hip))/, [['dip_bars']]],
+  [/weight(ed)? vest|rucking/, [['weight_vest']]],
+  [/ankle weights?/, [['ankle_weights']]],
   [/jump rope|skipping rope|double[- ]unders?|rope skip|skipping\b/, [['cardio']]],
   [/box jump|plyo box|depth (jump|drop|push)|box (squat|pistol|drop)|box jump over|single-leg box/, [['box']]],
   // A step-up just needs something sturdy to step onto.
@@ -73,7 +79,7 @@ const PLUS_BENCH = /\bbench\b(?! dip)|incline|decline|chest-supported|seal row|p
 
 /** Hand-reviewed decisions for names the rules can't read, and fixes where
  * a rule reads a name wrong. Keyed by exercise id; value as in the output. */
-const OVERRIDES = require('./exercise-equipment-overrides.json');
+const OVERRIDES = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts/exercise-equipment-overrides.json'), 'utf8'));
 
 function uniqSorted(list) {
   return [...new Set(list)].sort();

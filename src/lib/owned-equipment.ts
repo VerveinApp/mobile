@@ -16,6 +16,10 @@ export const OWNED_EQUIPMENT = [
   'medball',
   'stability_ball',
   'box',
+  'cable',
+  'dip_bars',
+  'weight_vest',
+  'ankle_weights',
   'cardio',
   'foam_roller',
 ] as const;
@@ -33,6 +37,10 @@ export const OWNED_EQUIPMENT_LABELS: Record<OwnedEquipment, string> = {
   medball: 'Medicine ball',
   stability_ball: 'Stability ball',
   box: 'Plyo box',
+  cable: 'Cable machine',
+  dip_bars: 'Dip bars or parallettes',
+  weight_vest: 'Weight vest',
+  ankle_weights: 'Ankle weights',
   cardio: 'Cardio machine or jump rope',
   foam_roller: 'Foam roller',
 };

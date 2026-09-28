@@ -211,7 +211,9 @@ export default function OnboardingEquipmentScreen() {
 }
 
 const CARD_RADIUS = 10;
-const GRID_GAP = 8;
+// Sixteen options on the fixed 375×812 canvas: eight rows of 38pt end at
+// 612, clear of Continue at 656.
+const GRID_GAP = 6;
 const CHIP_WIDTH = (343 - GRID_GAP) / 2;
 
 function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColor: string) {
@@ -283,7 +285,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
     grid: {
       position: 'absolute',
       left: 16,
-      top: 280,
+      top: 266,
       width: 343,
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -291,7 +293,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
     },
     chip: {
       width: CHIP_WIDTH,
-      height: 46,
+      height: 38,
       flexDirection: 'row',
       alignItems: 'center',
       paddingLeft: 12,
