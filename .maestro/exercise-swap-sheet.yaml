@@ -100,16 +100,17 @@ appId: app.vervein
 # Real, observed non-determinism: selecting the segment sometimes lands
 # directly on the workout screen already, sometimes still needs "Start
 # session" tapped explicitly (a layout-timing race in the app itself, not
-# this flow). Handled both ways instead of assuming either one.
+# this flow). Handled both ways instead of assuming either one. The
+# check-in screen now also shows the live session size and, at Great, the
+# finisher offer, which push "Start session" below the fold even at Energy
+# 5 — so it's scrolled to rather than assumed on-screen.
 - runFlow:
     when:
       notVisible: "Exercise 1 of .*"
     commands:
-      - runFlow:
-          when:
-            visible: "Start session"
-          commands:
-            - tapOn: "Start session"
+      - scrollUntilVisible:
+          element: "Start session"
+      - tapOn: "Start session"
 - extendedWaitUntil:
     visible:
       text: "Exercise 1 of .*"
