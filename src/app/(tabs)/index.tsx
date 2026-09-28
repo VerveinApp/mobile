@@ -47,6 +47,7 @@ import { getTodaySession, type TodaySession } from '@/lib/today-session';
 import { getTrainingState } from '@/lib/training-state-loader';
 import { tierOf, type TrainingState } from '@/lib/engine/training-state';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
+import { dismissEquipmentPrompt, shouldAskForEquipment } from '@/lib/equipment-prompt';
 import { TodaysTrainingCard } from '@/components/home/todays-training-card';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 import { SymbolView } from '@/components/ui/app-symbol';
@@ -154,6 +155,7 @@ export default function SummaryScreen() {
   const [trainingState, setTrainingState] = useState<TrainingState | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showHealthKitBanner, setShowHealthKitBanner] = useState(false);
+  const [showEquipmentPrompt, setShowEquipmentPrompt] = useState(false);
   const isPremium = usePremiumEntitlement();
   // BUG FIX (found in a later full-app audit): `today`/`isRestDay` below are
   // plain consts recomputed from `new Date()` on every SummaryScreen render
@@ -332,6 +334,34 @@ export default function SummaryScreen() {
     }
   }, []);
 
+  // Re-read on every focus (and profile change), so answering on the
+  // equipment screen and coming back clears it straight away.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      shouldAskForEquipment(profile).then((ask) => {
+        if (!cancelled) setShowEquipmentPrompt(ask);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [profile])
+  );
+
+  const handleSetEquipment = useCallback(() => {
+    hapticImpactLight();
+    router.push({
+      pathname: '/onboarding/equipment',
+      params: { mode: 'edit', environment: profile?.environment ?? '' },
+    } as never);
+  }, [profile?.environment]);
+
+  const handleDismissEquipmentPrompt = useCallback(async () => {
+    hapticSelect();
+    setShowEquipmentPrompt(false);
+    await dismissEquipmentPrompt();
+  }, []);
+
   const handleDismissHealthKitBanner = useCallback(async () => {
     hapticSelect();
     setShowHealthKitBanner(false);
@@ -458,10 +488,46 @@ export default function SummaryScreen() {
           </ReanimatedAnimated.View>
         ) : null}
 
+        {/* Plans for a home setup that never said what it has use a default
+            kit — worth one ask. Shown instead of the Apple Health card, not
+            stacked with it; that one waits until this is answered. */}
+        {showEquipmentPrompt ? (
+          <ReanimatedAnimated.View exiting={bannerExiting} style={styles.healthKitBanner}>
+            <View style={styles.healthKitBannerRow}>
+              <SymbolView name="dumbbell.fill" size={15} tintColor="#5FBE84" />
+              <Text style={styles.healthKitBannerText} maxFontSizeMultiplier={1.4}>
+                What equipment do you have? Your plans use a basic home kit until you say.
+              </Text>
+            </View>
+            <View style={styles.healthKitBannerActions}>
+              <Pressable
+                style={({ pressed }) => [styles.healthKitBannerDismiss, pressed && PRESSED_DIM]}
+                onPress={handleDismissEquipmentPrompt}
+                hitSlop={8}
+                accessibilityRole="button"
+              >
+                <Text style={styles.healthKitBannerDismissText} maxFontSizeMultiplier={1.2}>
+                  Not now
+                </Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.healthKitBannerConnect, pressed && PRESSED_DIM]}
+                onPress={handleSetEquipment}
+                hitSlop={8}
+                accessibilityRole="button"
+              >
+                <Text style={styles.healthKitBannerConnectText} maxFontSizeMultiplier={1.2}>
+                  Set equipment
+                </Text>
+              </Pressable>
+            </View>
+          </ReanimatedAnimated.View>
+        ) : null}
+
         {/* Fades out when dismissed or connected, and everything below
             glides up into its space (contentLayout) — it used to vanish
             and let the whole screen jump. */}
-        {showHealthKitBanner ? (
+        {showHealthKitBanner && !showEquipmentPrompt ? (
           <ReanimatedAnimated.View exiting={bannerExiting} style={styles.healthKitBanner}>
             <View style={styles.healthKitBannerRow}>
               <SymbolView name="heart.fill" size={15} tintColor="#5FBE84" />

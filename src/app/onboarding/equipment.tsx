@@ -30,6 +30,7 @@ import { BackArrowGraphic } from '@/components/auth/verify-email-graphics';
 import { OnboardingProgress } from '@/components/onboarding/onboarding-progress';
 import { SymbolView } from '@/components/ui/app-symbol';
 import { saveOnboardingDraft } from '@/lib/onboarding-draft';
+import { updateProfile } from '@/lib/user-profile';
 
 const CANVAS_WIDTH = 375;
 const CANVAS_HEIGHT = 812;
@@ -42,6 +43,10 @@ const CANVAS_HEIGHT = 812;
  * to step 5. Starts with the setup's usual kit ticked — one tap to confirm
  * for most people — and "none of these" is a real answer, not a blocked
  * Continue.
+ *
+ * mode=edit (Home's one-time equipment card) reuses it outside onboarding:
+ * no progress bar, and Save writes the answer and goes back instead of
+ * carrying on to step 5.
  */
 export default function OnboardingEquipmentScreen() {
   const scale = useCanvasScale();
@@ -49,7 +54,8 @@ export default function OnboardingEquipmentScreen() {
   const washColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
   const styles = useMemo(() => createStyles(colors, washColor), [colors, washColor]);
 
-  const { name, goal, experience, environment, verifiedEmail, equipment } = useLocalSearchParams<{
+  const { mode, name, goal, experience, environment, verifiedEmail, equipment } = useLocalSearchParams<{
+    mode?: string;
     name?: string;
     goal?: string;
     experience?: string;
@@ -89,8 +95,24 @@ export default function OnboardingEquipmentScreen() {
     });
   };
 
-  const handleContinue = () => {
+  const editing = mode === 'edit';
+  const [saving, setSaving] = useState(false);
+  // Home pushes this, so there's normally somewhere to go back to — Home
+  // itself when there isn't (a cold deep link).
+  const leaveEdit = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/(tabs)' as never);
+  };
+
+  const handleContinue = async () => {
     hapticImpactLight();
+    if (editing) {
+      if (saving) return;
+      setSaving(true);
+      await updateProfile({ equipment: serializeOwnedEquipment(selected) });
+      leaveEdit();
+      return;
+    }
     const params = { ...baseParams, equipment: serializeOwnedEquipment(selected) };
     saveOnboardingDraft({ step: 5, params });
     router.push({ pathname: '/onboarding/step-5', params } as never);
@@ -101,17 +123,19 @@ export default function OnboardingEquipmentScreen() {
       <View style={[styles.canvas, { transform: [{ scale }] }]}>
       <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
 
-        <OnboardingProgress step={4} settled />
+        {editing ? null : <OnboardingProgress step={4} settled />}
 
         <Pressable
           style={styles.backButton}
           onPress={() =>
-            goBack('/onboarding/step-4', {
-              name: baseParams.name,
-              goal: baseParams.goal,
-              experience: baseParams.experience,
-              verifiedEmail: baseParams.verifiedEmail,
-            })
+            editing
+              ? leaveEdit()
+              : goBack('/onboarding/step-4', {
+                  name: baseParams.name,
+                  goal: baseParams.goal,
+                  experience: baseParams.experience,
+                  verifiedEmail: baseParams.verifiedEmail,
+                })
           }
           hitSlop={12}
           accessibilityRole="button"
@@ -177,7 +201,8 @@ export default function OnboardingEquipmentScreen() {
           onPressOut={continuePress.onPressOut}
           android_ripple={AndroidRippleOnAccent}
           accessibilityRole="button"
-          accessibilityLabel={selected.size > 0 ? 'Continue' : 'Continue with none of these'}
+          disabled={saving}
+          accessibilityLabel={editing ? 'Save' : selected.size > 0 ? 'Continue' : 'Continue with none of these'}
         >
           <Animated.View style={styles.primaryButtonVisual}>
             <Animated.View
@@ -197,7 +222,7 @@ export default function OnboardingEquipmentScreen() {
               ]}
             />
             <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>
-              {selected.size > 0 ? 'Continue' : 'None of these'}
+              {editing ? 'Save' : selected.size > 0 ? 'Continue' : 'None of these'}
             </Text>
             <View style={styles.buttonArrow}>
               <ArrowUpIconGraphic size={24} />
