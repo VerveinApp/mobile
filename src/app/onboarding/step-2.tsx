@@ -1,10 +1,13 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo } from 'react';
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+
+import { useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated from 'react-native-reanimated';
 
 import { goBack } from '@/lib/onboarding-nav';
 import { useFadeInEntering } from '@/lib/screen-transitions';
+import { Type } from '@/constants/theme';
 import { useAppColors } from '@/lib/theme-context';
 import { LogoMarkAccentGraphic, LogoMarkGraphic } from '@/components/auth/create-account-graphics';
 import { BackArrowGraphic } from '@/components/auth/verify-email-graphics';
@@ -31,8 +34,7 @@ const GOALS: SelectableCardOption<GoalId>[] = [
 ];
 
 export default function OnboardingGoalScreen() {
-  const { width: windowWidth } = useWindowDimensions();
-  const scale = windowWidth / CANVAS_WIDTH;
+  const scale = useCanvasScale();
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -131,18 +133,19 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     title: {
       position: 'absolute',
-      left: 100,
-      top: 181,
-      width: 176,
+      left: 0,
+      right: 0,
+      top: 188,
+      paddingHorizontal: 52,
       color: colors.text,
-      fontSize: 18,
+      fontSize: Type.headerTitle,
       lineHeight: 27,
       textAlign: 'center',
       fontFamily: 'Geist-SemiBold',
     },
     titleAccent: {
       color: '#438C63',
-      fontSize: 20,
+      fontSize: Type.headerTitle,
     },
     cardStack: {
       position: 'absolute',

@@ -1,12 +1,15 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Animated, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+
+import { useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated from 'react-native-reanimated';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { goBack } from '@/lib/onboarding-nav';
 import { useFadeInEntering } from '@/lib/screen-transitions';
+import { AndroidRippleOnAccent, Type } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 import {
   ArrowUpIconGraphic,
@@ -15,18 +18,22 @@ import {
 } from '@/components/auth/create-account-graphics';
 import { BackArrowGraphic } from '@/components/auth/verify-email-graphics';
 import { OnboardingProgress } from '@/components/onboarding/onboarding-progress';
-import { WheelPicker } from '@/components/onboarding/wheel-picker';
+import { HorizontalRuler } from '@/components/onboarding/horizontal-ruler';
 import { saveOnboardingDraft } from '@/lib/onboarding-draft';
+import { asksForEquipment } from '@/lib/owned-equipment';
 
 const CANVAS_WIDTH = 375;
 const CANVAS_HEIGHT = 812;
 
-// PLACEHOLDER COPY — legal review required before ship. Real opt-in gate
-// (not just reassuring copy) ahead of collecting any body-related data, per
-// Washington's My Health My Data Act and equivalent health-data consent
-// requirements. The checkbox below is a functioning gate — the fields
-// beneath it stay inert until it's checked — only the wording is a stand-in.
-const CONSENT_COPY = 'I agree to share this to tailor my training load.';
+// Real opt-in gate (not just reassuring copy) ahead of collecting any
+// body-related data, per Washington's My Health My Data Act and equivalent
+// health-data consent requirements — the fields beneath it stay inert until
+// it's checked. The wording says what those laws expect a consent to say:
+// that it's STORED (with the account, i.e. synced to our server — the old
+// "share this" never said where), why, and how to take it back (Settings →
+// Body & Biometrics → Stop sharing health info). Kept to two lines: the card
+// has ~68pt before the first field below it. Still worth a lawyer's read.
+const CONSENT_COPY = 'I agree to VerveIn saving these with my account to tailor my training. I can withdraw this in Settings.';
 
 type SexId = 'female' | 'male';
 type UnitSystem = 'imperial' | 'metric';
@@ -86,8 +93,7 @@ function kgToKgIndex(kg: number): number {
  * separate screen you couldn't reach without it.
  */
 export default function OnboardingConsentBiometricsScreen() {
-  const { width: windowWidth } = useWindowDimensions();
-  const scale = windowWidth / CANVAS_WIDTH;
+  const scale = useCanvasScale();
   const { colors, resolvedScheme } = useAppTheme();
   const washColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
   const styles = useMemo(() => createStyles(colors, washColor), [colors, washColor]);
@@ -97,21 +103,25 @@ export default function OnboardingConsentBiometricsScreen() {
     goal,
     experience,
     environment,
+    equipment,
     verifiedEmail,
     healthConsent: incomingConsent,
     sex: incomingSex,
     heightCm,
     weightKg,
+    age,
   } = useLocalSearchParams<{
     name?: string;
     goal?: string;
     experience?: string;
     environment?: string;
+    equipment?: string;
     verifiedEmail?: string;
     healthConsent?: string;
     sex?: string;
     heightCm?: string;
     weightKg?: string;
+    age?: string;
   }>();
 
   const baseParams = {
@@ -119,6 +129,7 @@ export default function OnboardingConsentBiometricsScreen() {
     goal: goal ?? '',
     experience: experience ?? '',
     environment: environment ?? '',
+    equipment: equipment ?? '',
     verifiedEmail: verifiedEmail ?? '',
   };
 
@@ -184,6 +195,13 @@ export default function OnboardingConsentBiometricsScreen() {
       sex: sex as SexId,
       heightCm: String(heightCmValue),
       weightKg: String(weightKgValue),
+      // No age control on this fixed-canvas screen (a third wheel didn't fit
+      // next to height/weight without real visual verification this session
+      // couldn't get) — age is collected from Settings' Biometrics sheet
+      // instead, same "optional, fill in later" contract sex/height/weight
+      // already have. Carries forward whatever came in via back-navigation
+      // unchanged rather than fabricating a default.
+      age: age ?? '',
     };
     saveOnboardingDraft({ step: 6, params });
     router.push({ pathname: '/onboarding/step-6', params } as never);
@@ -197,6 +215,7 @@ export default function OnboardingConsentBiometricsScreen() {
       sex: '',
       heightCm: '',
       weightKg: '',
+      age: '',
     };
     saveOnboardingDraft({ step: 6, params });
     router.push({ pathname: '/onboarding/step-6', params } as never);
@@ -210,7 +229,7 @@ export default function OnboardingConsentBiometricsScreen() {
 
         <Pressable
           style={styles.backButton}
-          onPress={() => goBack('/onboarding/step-4', baseParams)}
+          onPress={() => goBack(asksForEquipment(environment) ? '/onboarding/equipment' : '/onboarding/step-4', baseParams)}
           hitSlop={12}
           accessibilityRole="button"
           accessibilityLabel="Go back"
@@ -350,49 +369,49 @@ export default function OnboardingConsentBiometricsScreen() {
           {unit === 'imperial' ? (
             <>
               <View style={styles.heightWheelRow}>
-                <WheelPicker
+                <HorizontalRuler
                   key="feet"
                   items={FEET_ITEMS}
+                  accessibilityLabel="Height, feet"
                   selectedIndex={feetIndex}
                   onChange={(index) => setHeightCmValue(feetInchesToCm(index, inchesIndex))}
-                  width={76}
                 />
-                <WheelPicker
+                <HorizontalRuler
                   key="inches"
                   items={INCHES_ITEMS}
+                  accessibilityLabel="Height, inches"
                   selectedIndex={inchesIndex}
                   onChange={(index) => setHeightCmValue(feetInchesToCm(feetIndex, index))}
-                  width={76}
                 />
               </View>
               <View style={styles.weightWheelWrap}>
-                <WheelPicker
+                <HorizontalRuler
                   key="lb"
                   items={WEIGHT_LB_ITEMS}
+                  accessibilityLabel="Weight"
                   selectedIndex={lbIndex}
                   onChange={(index) => setWeightKgValue(lbToKg(index))}
-                  width={110}
                 />
               </View>
             </>
           ) : (
             <>
               <View style={styles.heightWheelRow}>
-                <WheelPicker
+                <HorizontalRuler
                   key="cm"
                   items={HEIGHT_CM_ITEMS}
+                  accessibilityLabel="Height"
                   selectedIndex={cmIndex}
                   onChange={(index) => setHeightCmValue(index + 120)}
-                  width={163}
                 />
               </View>
               <View style={styles.weightWheelWrap}>
-                <WheelPicker
+                <HorizontalRuler
                   key="kg"
                   items={WEIGHT_KG_ITEMS}
+                  accessibilityLabel="Weight"
                   selectedIndex={kgIndex}
                   onChange={(index) => setWeightKgValue(index + 35)}
-                  width={110}
                 />
               </View>
             </>
@@ -401,12 +420,15 @@ export default function OnboardingConsentBiometricsScreen() {
 
         <Pressable
           style={styles.primaryButtonHit}
+          // 38pt tall by design; the slop brings the tap target past 44pt.
+          hitSlop={{ top: 6, bottom: 6 }}
           onPress={handleContinue}
           disabled={isUnselected}
           onHoverIn={continueHover.onHoverIn}
           onHoverOut={continueHover.onHoverOut}
           onPressIn={continuePress.onPressIn}
           onPressOut={continuePress.onPressOut}
+          android_ripple={AndroidRippleOnAccent}
         >
           <Animated.View
             style={[
@@ -506,14 +528,24 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       left: 33.83,
       top: 0,
     },
+    // BUG FIX (found in a later full-app audit): title/subtitle/consentRow
+    // and fieldsBlock (below) were all 20px higher than step-6/7's identical
+    // title+subtitle layout (title top:188, subtitle top:222 there vs. 168/
+    // 202 here) — this screen was likely built before that convention
+    // settled. Shifting only the heading would have shrunk the gap to
+    // consentRow from 30px to 10px; shifting everything below it by the
+    // same +20 instead brings this in line with the convention while
+    // preserving every internal gap exactly (confirmed against the
+    // documented ~80px wheel-to-button gap and the 812pt canvas bottom —
+    // the lowest element still lands 140+px clear of it).
     title: {
       position: 'absolute',
       left: 0,
       right: 0,
-      top: 168,
+      top: 188,
       paddingHorizontal: 44,
       color: colors.text,
-      fontSize: 20,
+      fontSize: Type.headerTitle,
       lineHeight: 27,
       textAlign: 'center',
       fontFamily: 'Geist-SemiBold',
@@ -522,10 +554,10 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       position: 'absolute',
       left: 0,
       right: 0,
-      top: 202,
+      top: 222,
       paddingHorizontal: 60,
       color: colors.textSecondary,
-      fontSize: 11,
+      fontSize: Type.caption,
       lineHeight: 16.5,
       textAlign: 'center',
       fontFamily: 'Geist-Medium',
@@ -533,7 +565,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
     consentRow: {
       position: 'absolute',
       left: 16,
-      top: 232,
+      top: 252,
       width: 343,
     },
     consentCard: {
@@ -581,7 +613,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
     fieldsBlock: {
       position: 'absolute',
       left: 0,
-      top: 0,
+      top: 20,
       width: CANVAS_WIDTH,
     },
     fieldLabel: {
@@ -589,7 +621,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       left: 16,
       top: 300,
       color: colors.textTertiary,
-      fontSize: 10.5,
+      fontSize: Type.micro,
       letterSpacing: 0.6,
       textTransform: 'uppercase',
       fontFamily: 'Geist-SemiBold',
@@ -675,19 +707,29 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       position: 'absolute',
       left: 16,
       top: 416,
-      width: 163,
+      width: 176,
       flexDirection: 'row',
-      justifyContent: 'space-between',
+      gap: 8,
     },
     weightWheelWrap: {
       position: 'absolute',
       left: 222,
       top: 416,
+      // Explicit width, not left-to-flex — this sits on the fixed canvas
+      // with no sibling in its row, so HorizontalRuler (which fills via
+      // flex when no width is passed) has nothing to measure against
+      // without one. 375 canvas width minus this box's own left inset and
+      // the same 16px margin the canvas uses on its other edges.
+      width: 137,
     },
     primaryButtonHit: {
       position: 'absolute',
       left: 46,
-      top: 656,
+      // Shifted up from the original 656 — HorizontalRuler (68 tall) is
+      // shorter than WheelPicker (160 tall) it replaced here, and this
+      // keeps the same ~80px gap below the wheels that the original
+      // spacing had.
+      top: 584,
       width: 285,
       height: 38,
     },
@@ -706,7 +748,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
     },
     primaryText: {
       color: '#ffffff',
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     buttonArrow: {
@@ -718,7 +760,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
     skipButtonHit: {
       position: 'absolute',
       left: 46,
-      top: 704,
+      top: 632,
       width: 285,
       height: 38,
     },
@@ -734,7 +776,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
     },
     skipText: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     hoverWash: {

@@ -1,6 +1,5 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
 import type { Condition } from '@/lib/conditions';
+import { clearStoredValue, readJsonList, writeJsonValue } from '@/lib/storage/json-storage';
 
 const KEY = 'vervein.conditionLog.v1';
 const MAX_ENTRIES = 200;
@@ -13,9 +12,9 @@ const MAX_ENTRIES = 200;
 // decision pending a real clinical-validation process): nothing here feeds
 // engine/exercise-filtering.ts or constraint-resolution.ts, and it
 // shouldn't until that validation exists. Held behind the same
-// healthConsent bucket, and — like body-measurements.ts — NOT yet linked
-// from any nav row; see this repo's own privacy-policy status before
-// wiring one in.
+// healthConsent bucket as body-measurements.ts — linked from Settings' DATA
+// section and from Log, same as that file, ahead of a real privacy policy
+// naming this data type (see this repo's own privacy-policy status).
 export type ConditionLogEntry = {
   id: string;
   /** YYYY-MM-DD — the day it happened, which may be today or backfilled. */
@@ -26,15 +25,6 @@ export type ConditionLogEntry = {
   createdAt: string;
 };
 
-async function readAll(): Promise<ConditionLogEntry[]> {
-  try {
-    const raw = await AsyncStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as ConditionLogEntry[]) : [];
-  } catch {
-    return [];
-  }
-}
-
 /** Appends one flare-up entry — unlike weight-log.ts/body-measurements.ts,
  * a single day can hold more than one entry (different conditions, or the
  * same one noted twice), so this never overwrites by date. `id` is the
@@ -44,27 +34,23 @@ async function readAll(): Promise<ConditionLogEntry[]> {
  * module has no test-environment shim), so every module data-backup.ts
  * touches has to stay free of it. */
 export async function addConditionLogEntry(id: string, date: string, condition: Condition, note?: string) {
-  try {
-    const entries = await readAll();
-    const trimmedNote = note?.trim();
-    const entry: ConditionLogEntry = {
-      id,
-      date,
-      condition,
-      note: trimmedNote || undefined,
-      createdAt: new Date().toISOString(),
-    };
-    const next = [...entries, entry].slice(-MAX_ENTRIES);
-    await AsyncStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    // Worst case this entry doesn't stick — never a crash.
-  }
+  const entries = await readJsonList<ConditionLogEntry>(KEY);
+  const trimmedNote = note?.trim();
+  const entry: ConditionLogEntry = {
+    id,
+    date,
+    condition,
+    note: trimmedNote || undefined,
+    createdAt: new Date().toISOString(),
+  };
+  const next = [...entries, entry].slice(-MAX_ENTRIES);
+  await writeJsonValue(KEY, next);
 }
 
 /** Every stored entry, most recent day first (createdAt as the tiebreaker
  * for same-day entries). */
 export async function getConditionLog(): Promise<ConditionLogEntry[]> {
-  const entries = await readAll();
+  const entries = await readJsonList<ConditionLogEntry>(KEY);
   return [...entries].sort((a, b) => {
     if (a.date !== b.date) return a.date < b.date ? 1 : -1;
     return a.createdAt < b.createdAt ? 1 : -1;
@@ -72,29 +58,17 @@ export async function getConditionLog(): Promise<ConditionLogEntry[]> {
 }
 
 export async function deleteConditionLogEntry(id: string) {
-  try {
-    const entries = await readAll();
-    await AsyncStorage.setItem(KEY, JSON.stringify(entries.filter((e) => e.id !== id)));
-  } catch {
-    // Worst case the entry reappears next load — never a crash.
-  }
+  const entries = await readJsonList<ConditionLogEntry>(KEY);
+  await writeJsonValue(KEY, entries.filter((e) => e.id !== id));
 }
 
 /** Wipes the whole log — Settings' "Delete My Data"/"Delete Account" flows only. */
 export async function clearConditionLog() {
-  try {
-    await AsyncStorage.removeItem(KEY);
-  } catch {
-    // Best-effort — same as never having logged anything.
-  }
+  await clearStoredValue(KEY);
 }
 
 /** Overwrites the whole log wholesale — data-backup.ts's restore path only. */
 export async function restoreConditionLog(entries: ConditionLogEntry[]): Promise<void> {
-  try {
-    const trimmed = [...entries].slice(-MAX_ENTRIES);
-    await AsyncStorage.setItem(KEY, JSON.stringify(trimmed));
-  } catch {
-    // Worst case this one field doesn't restore — the rest of the backup still applies independently.
-  }
+  const trimmed = [...entries].slice(-MAX_ENTRIES);
+  await writeJsonValue(KEY, trimmed);
 }

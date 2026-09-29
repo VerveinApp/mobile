@@ -2,9 +2,17 @@ import { useMemo } from 'react';
 import { Platform, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Svg, { Circle, Defs, LinearGradient, Path, Stop } from 'react-native-svg';
-import ReanimatedAnimated, { runOnJS, useAnimatedProps, useSharedValue, withTiming } from 'react-native-reanimated';
+import ReanimatedAnimated, {
+  ReduceMotion,
+  useAnimatedProps,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 
 import { hapticSelect } from '@/lib/haptics';
+import { MOTION_DURATION } from '@/lib/motion';
 import { useAppTheme } from '@/lib/theme-context';
 
 const AnimatedPath = ReanimatedAnimated.createAnimatedComponent(Path);
@@ -20,6 +28,14 @@ const STOP_INTERVALS = STOP_COUNT - 1;
 const START_ANGLE = 210;
 const SWEEP_RANGE = 300;
 const STEP = SWEEP_RANGE / STOP_INTERVALS;
+
+// A release carries on into its stop instead of easing in-and-out of it.
+// 0.9 overshoots well under a degree (the props below clamp it anyway, so a
+// settle at the top stop can't draw into the gap).
+const SNAP_SPRING = { duration: 280, dampingRatio: 0.9, reduceMotion: ReduceMotion.System } as const;
+// The handle turning from its empty look to the set one, and the check
+// drawing itself in, the first time a level is picked.
+const SET_FADE = { duration: MOTION_DURATION.base, reduceMotion: ReduceMotion.System } as const;
 
 /** Normalizes any angle difference to (-180, 180] so a drag that crosses the atan2 wraparound seam doesn't register as a sudden 360° jump. */
 function shortestDelta(from: number, to: number) {
@@ -101,6 +117,9 @@ export function CommitmentDial({ size = 220, canvasScale = 1, value, onChange, l
   const sweep = useSharedValue(value !== null ? value * STEP : 0);
   const lastAngle = useSharedValue(0);
   const lastIndex = useSharedValue(value !== null ? value : -1);
+  // 0 = never set (dark handle, no check), 1 = set. Seeded like sweep, so
+  // coming back to a set dial shows it set without replaying the fade.
+  const setProgress = useSharedValue(value !== null ? 1 : 0);
 
   const half = (Platform.OS === 'web' ? size * canvasScale : size) / 2;
   const angleAt = (x: number, y: number) => {
@@ -116,13 +135,14 @@ export function CommitmentDial({ size = 220, canvasScale = 1, value, onChange, l
   const snapTo = (idx: number) => {
     'worklet';
     const snapped = idx * STEP;
-    sweep.value = withTiming(snapped, { duration: 160 });
+    sweep.set(withSpring(snapped, SNAP_SPRING));
   };
 
   /** Used by VoiceOver/TalkBack increment/decrement — the drag path snaps and reports separately. */
   const setIndex = (idx: number) => {
     const clamped = clamp(idx, 0, STOP_INTERVALS);
     lastIndex.value = clamped;
+    setProgress.set(withTiming(1, SET_FADE));
     hapticSelect();
     onChange(clamped);
     snapTo(clamped);
@@ -145,8 +165,13 @@ export function CommitmentDial({ size = 220, canvasScale = 1, value, onChange, l
 
           const idx = indexFromSweep(sweep.value);
           if (lastIndex.value !== idx) {
+            // The first touch is what sets a level at all: light the handle
+            // up and tick like every later stop does — it used to change
+            // the value silently and snap the handle white in one frame.
+            if (lastIndex.value === -1) setProgress.set(withTiming(1, SET_FADE));
             lastIndex.value = idx;
-            runOnJS(onChange)(idx);
+            scheduleOnRN(hapticSelect);
+            scheduleOnRN(onChange, idx);
           }
         })
         .onUpdate((e) => {
@@ -159,8 +184,8 @@ export function CommitmentDial({ size = 220, canvasScale = 1, value, onChange, l
           const idx = indexFromSweep(sweep.value);
           if (lastIndex.value !== idx) {
             lastIndex.value = idx;
-            runOnJS(hapticSelect)();
-            runOnJS(onChange)(idx);
+            scheduleOnRN(hapticSelect);
+            scheduleOnRN(onChange, idx);
           }
         })
         .onEnd(() => {
@@ -180,26 +205,40 @@ export function CommitmentDial({ size = 220, canvasScale = 1, value, onChange, l
   const strokeWidth = size * 0.075;
   const handleR = size * 0.075;
   const checkSize = handleR * 1.15;
+  // Length of the check's two strokes (the offsets in checkAnimatedProps),
+  // so it can draw itself in with a dash. The hidden state pushes the dash a
+  // stroke-width past the start: a dash ending exactly on the path's end
+  // can leave a round-cap dot behind.
+  const checkLen = checkSize * (Math.hypot(0.24, 0.26) + Math.hypot(0.42, 0.54));
+  const checkHiddenOffset = checkLen + 2;
   const isSet = value !== null;
 
   const arcAnimatedProps = useAnimatedProps(() => {
-    const endAngle = START_ANGLE + sweep.value;
-    return { d: sweep.value > 0.5 ? describeArc(c, c, ringR, START_ANGLE, endAngle) : '' };
+    const s = clamp(sweep.get(), 0, SWEEP_RANGE);
+    return { d: s > 0.5 ? describeArc(c, c, ringR, START_ANGLE, START_ANGLE + s) : '' };
   });
 
-  const handleAnimatedProps = useAnimatedProps(() => {
-    const endAngle = START_ANGLE + sweep.value;
-    const point = pointAt(c, c, ringR, endAngle);
-    return { cx: point.x, cy: point.y };
+  // Two stacked handles instead of one whose fill/stroke flips: the set
+  // (white) one fades in over the empty one — a numeric opacity, not an
+  // SVG colour driven from the UI thread. The empty one's outline fades out
+  // underneath so light mode's faint set outline isn't darkened by it.
+  const handleUnsetAnimatedProps = useAnimatedProps(() => {
+    const point = pointAt(c, c, ringR, START_ANGLE + clamp(sweep.get(), 0, SWEEP_RANGE));
+    return { cx: point.x, cy: point.y, strokeOpacity: 1 - setProgress.get() };
+  });
+
+  const handleSetAnimatedProps = useAnimatedProps(() => {
+    const point = pointAt(c, c, ringR, START_ANGLE + clamp(sweep.get(), 0, SWEEP_RANGE));
+    return { cx: point.x, cy: point.y, opacity: setProgress.get() };
   });
 
   const checkAnimatedProps = useAnimatedProps(() => {
-    const endAngle = START_ANGLE + sweep.value;
-    const point = pointAt(c, c, ringR, endAngle);
+    const point = pointAt(c, c, ringR, START_ANGLE + clamp(sweep.get(), 0, SWEEP_RANGE));
     return {
       d: `M ${point.x - checkSize * 0.32} ${point.y + checkSize * 0.02}
           L ${point.x - checkSize * 0.08} ${point.y + checkSize * 0.28}
           L ${point.x + checkSize * 0.34} ${point.y - checkSize * 0.26}`,
+      strokeDashoffset: checkHiddenOffset * (1 - setProgress.get()),
     };
   });
 
@@ -245,26 +284,32 @@ export function CommitmentDial({ size = 220, canvasScale = 1, value, onChange, l
           />
 
           <AnimatedCircle
-            animatedProps={handleAnimatedProps}
+            animatedProps={handleUnsetAnimatedProps}
             r={handleR}
-            fill={isSet ? '#ffffff' : '#0C0C0C'}
+            fill="#0C0C0C"
+            stroke="#676767"
+            strokeWidth={1}
+          />
+          <AnimatedCircle
+            animatedProps={handleSetAnimatedProps}
+            r={handleR}
+            fill="#ffffff"
             // The "set" handle is a white fill — invisible against a white
             // light-mode canvas without an outline (dark mode's own white-on-
             // white stroke works fine since it sits on black). Only light
             // mode gets the extra outline; dark mode is untouched.
-            stroke={isSet ? (resolvedScheme === 'light' ? 'rgba(0,0,0,0.2)' : '#ffffff') : '#676767'}
+            stroke={resolvedScheme === 'light' ? 'rgba(0,0,0,0.2)' : '#ffffff'}
             strokeWidth={1}
           />
-          {isSet ? (
-            <AnimatedPath
-              animatedProps={checkAnimatedProps}
-              stroke="#2f6647"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              fill="none"
-            />
-          ) : null}
+          <AnimatedPath
+            animatedProps={checkAnimatedProps}
+            stroke="#2f6647"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            fill="none"
+            strokeDasharray={[checkLen, checkLen * 2]}
+          />
         </Svg>
       </View>
     </GestureDetector>

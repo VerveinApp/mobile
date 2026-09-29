@@ -1,6 +1,8 @@
 import { Component, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View, useColorScheme } from 'react-native';
 
+import { Type } from '@/constants/theme';
+
 type Props = { children: ReactNode };
 type State = { error: Error | null };
 
@@ -75,14 +77,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     gap: 12,
   },
+  // Geist, like every other screen — this was the one screen still in the
+  // system font. Safe here: fonts are loaded before anything under this
+  // boundary renders (RootLayout returns null until they are).
   title: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: Type.stat,
+    fontFamily: 'Geist-Bold',
     textAlign: 'center',
   },
   body: {
-    fontSize: 14,
+    fontSize: Type.bodyLarge,
     lineHeight: 20,
+    fontFamily: 'Geist-Regular',
     textAlign: 'center',
   },
   button: {
@@ -93,7 +99,7 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: Type.bodyLarge,
+    fontFamily: 'Geist-SemiBold',
   },
 });

@@ -1,30 +1,41 @@
 import { router } from 'expo-router';
 import { useCallback, useRef } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SymbolView, type SFSymbol } from 'expo-symbols';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import type { SFSymbol } from 'expo-symbols';
 import { BottomSheetModal } from '@gorhom/bottom-sheet';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SymbolView } from '@/components/ui/app-symbol';
 import { LogPastSessionSheet } from '@/components/settings/log-past-session-sheet';
-import { useHoverFade } from '@/lib/button-interactions';
+import { PremiumGate } from '@/components/premium-gate';
+import { AndroidCardElevation, AndroidRipple, Type } from '@/constants/theme';
+import { useHoverFade, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticImpactLight } from '@/lib/haptics';
+import { usePremiumEntitlement } from '@/lib/purchases';
 import { useAppColors } from '@/lib/theme-context';
 
 /**
  * A quick-access hub for backfilling things about a day that already
- * happened — reachable from the Profile tab and from Settings, both of
- * which stay as they were (this doesn't replace either, just adds a
- * faster, more discoverable path to the same real actions). Deliberately
- * external to the live check-in flow, same "I trained on a day I never
- * opened the app for" honesty as log-past-session-sheet.tsx's own doc
- * comment — nothing here runs the adaptive engine or pretends to be a
- * real-time session.
+ * happened.
+ *
+ * POLICY CHANGE (explicit product decision, not a bug fix): this whole hub
+ * is now gated behind VerveIn Plus as a single unit, via the same
+ * PremiumGate teaser every other Plus-only section in this app uses — never
+ * hides that it exists, just swaps the row list for a locked card that
+ * routes to the paywall on tap. This deliberately overrides the per-row
+ * nuance the hub used to have (Weight/Notes/Past Session were reachable
+ * free, Sleep/Nutrition logged free with only deeper history behind Plus,
+ * and the consent-gated three had no premium check at all) — those
+ * individual screens' own access logic is untouched and still reachable a
+ * different way (e.g. Settings' own DATA section), only this hub's own
+ * front door is now Plus-only.
  */
 export default function LogScreen() {
   const insets = useSafeAreaInsets();
   const colors = useAppColors();
   const styles = createStyles(colors);
   const backHover = useHoverFade();
+  const isPremium = usePremiumEntitlement();
 
   const logPastSessionSheetRef = useRef<BottomSheetModal>(null);
 
@@ -40,7 +51,8 @@ export default function LogScreen() {
           onHoverIn={backHover.onHoverIn}
           onHoverOut={backHover.onHoverOut}
           hitSlop={10}
-          style={styles.backButton}
+          style={({ pressed }) => [styles.backButton, pressed && PRESSED_DIM]}
+          android_ripple={{ ...AndroidRipple, borderless: true }}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
@@ -56,6 +68,7 @@ export default function LogScreen() {
           substitute for today&apos;s real check-in.
         </Text>
 
+        <PremiumGate isPremium={isPremium} label="Log">
         <View style={styles.card}>
           <LogRow
             styles={styles}
@@ -76,6 +89,46 @@ export default function LogScreen() {
           <LogRow
             styles={styles}
             colors={colors}
+            icon="bed.double"
+            label="Sleep"
+            subtitle="Add tonight's or a past night's sleep"
+            onPress={() => router.push('/settings/sleep-history' as never)}
+          />
+          <LogRow
+            styles={styles}
+            colors={colors}
+            icon="fork.knife"
+            label="Nutrition"
+            subtitle="Add today's or a past day's calories"
+            onPress={() => router.push('/settings/nutrition-history' as never)}
+          />
+          <LogRow
+            styles={styles}
+            colors={colors}
+            icon="photo.on.rectangle"
+            label="Progress Photo"
+            subtitle="Add today's or a past photo"
+            onPress={() => router.push('/settings/progress-photos' as never)}
+          />
+          <LogRow
+            styles={styles}
+            colors={colors}
+            icon="ruler"
+            label="Body Measurements"
+            subtitle="Waist, chest, and other numbers, for today or a past day"
+            onPress={() => router.push('/settings/body-measurements' as never)}
+          />
+          <LogRow
+            styles={styles}
+            colors={colors}
+            icon="list.bullet.clipboard"
+            label="Condition Log"
+            subtitle="A symptom or condition worth recording, for today or a past day"
+            onPress={() => router.push('/settings/condition-log' as never)}
+          />
+          <LogRow
+            styles={styles}
+            colors={colors}
             icon="note.text"
             label="Notes"
             subtitle="Anything freeform, not tied to a day"
@@ -83,6 +136,7 @@ export default function LogScreen() {
             last
           />
         </View>
+        </PremiumGate>
       </ScrollView>
 
       <LogPastSessionSheet ref={logPastSessionSheetRef} />
@@ -110,13 +164,14 @@ function LogRow({
   const hover = useHoverFade();
   return (
     <Pressable
-      style={[styles.row, !last && styles.rowDivider]}
+      style={({ pressed }) => [styles.row, !last && styles.rowDivider, pressed && PRESSED_DIM]}
       onPress={() => {
         hapticImpactLight();
         onPress();
       }}
       onHoverIn={hover.onHoverIn}
       onHoverOut={hover.onHoverOut}
+      android_ripple={AndroidRipple}
       accessibilityRole="button"
       accessibilityLabel={`${label}. ${subtitle}`}
     >
@@ -154,8 +209,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     headerTitle: {
       color: colors.text,
-      fontSize: 16,
-      fontFamily: 'Geist-SemiBold',
+      fontSize: Type.headerTitle,
+      letterSpacing: -0.2,
+      fontFamily: 'Geist-Bold',
     },
     scrollContent: {
       paddingHorizontal: 20,
@@ -164,16 +220,17 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     introText: {
       color: colors.textSecondary,
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       lineHeight: 18,
       fontFamily: 'Geist-Regular',
     },
     card: {
-      borderRadius: 16,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
+      borderRadius: Platform.OS === 'android' ? 20 : 16,
       backgroundColor: colors.surface,
       overflow: 'hidden',
+      ...(Platform.OS === 'android'
+        ? AndroidCardElevation
+        : { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.surfaceBorder }),
     },
     row: {
       flexDirection: 'row',
@@ -199,13 +256,13 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     rowLabel: {
       color: colors.text,
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-SemiBold',
     },
     rowSubtitle: {
       marginTop: 2,
       color: colors.textTertiary,
-      fontSize: 11.5,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Regular',
     },
   });

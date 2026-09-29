@@ -1,0 +1,191 @@
+import { router } from 'expo-router';
+import { useMemo, type ReactNode } from 'react';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SymbolView } from '@/components/ui/app-symbol';
+
+import { Type } from '@/constants/theme';
+import { useHoverFade, PRESSED_DIM } from '@/lib/button-interactions';
+import { useAppColors } from '@/lib/theme-context';
+
+export type LegalSection = {
+  heading: string;
+  /** Each string is its own paragraph. A leading "- " renders as a bullet line instead. */
+  body: string[];
+};
+
+/**
+ * Shared renderer for /legal/terms and /legal/privacy — real content lives
+ * in src/lib/legal/*.ts, not here. See those files' own header comments for
+ * the "drafted by AI, not attorney-reviewed" disclosure this screen's own
+ * effectiveDate footer intentionally does not hide.
+ */
+export function LegalDocumentScreen({
+  title,
+  effectiveDate,
+  intro,
+  sections,
+}: {
+  title: string;
+  effectiveDate: string;
+  intro: string;
+  sections: LegalSection[];
+}) {
+  const insets = useSafeAreaInsets();
+  const colors = useAppColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const backHover = useHoverFade();
+
+  return (
+    <View style={styles.root}>
+      <View style={[styles.headerRow, { paddingTop: insets.top + 8 }]}>
+        <Pressable
+          onPress={() => router.back()}
+          onHoverIn={backHover.onHoverIn}
+          onHoverOut={backHover.onHoverOut}
+          hitSlop={10}
+          style={({ pressed }) => [styles.backButton, pressed && PRESSED_DIM]}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
+          <SymbolView name="chevron.left" size={16} tintColor={colors.text} />
+        </Pressable>
+        <Text style={styles.headerTitle} maxFontSizeMultiplier={1.3}>{title}</Text>
+        <View style={styles.backButton} />
+      </View>
+
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <Text style={styles.effectiveDate} maxFontSizeMultiplier={1.3}>Effective {effectiveDate}</Text>
+        <Text style={styles.intro} maxFontSizeMultiplier={1.4} selectable>
+          {withEmailLinks(intro, styles.link)}
+        </Text>
+
+        {sections.map((section) => (
+          <View key={section.heading} style={styles.section}>
+            <Text style={styles.sectionHeading} maxFontSizeMultiplier={1.3}>{section.heading}</Text>
+            {section.body.map((paragraph, index) =>
+              paragraph.startsWith('- ') ? (
+                <View key={index} style={styles.bulletRow}>
+                  <Text style={styles.bulletDot}>{'•'}</Text>
+                  <Text style={styles.bulletText} maxFontSizeMultiplier={1.4} selectable>
+                    {withEmailLinks(paragraph.slice(2), styles.link)}
+                  </Text>
+                </View>
+              ) : (
+                <Text key={index} style={styles.paragraph} maxFontSizeMultiplier={1.4} selectable>
+                  {withEmailLinks(paragraph, styles.link)}
+                </Text>
+              )
+            )}
+          </View>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+const EMAIL_PATTERN = /([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/gi;
+
+/**
+ * Makes every email address in a paragraph a real mailto: link — the
+ * documents say "reach us at …" throughout, and that address used to be
+ * plain, un-tappable text in a screen whose whole point is telling people
+ * how to reach you.
+ */
+function withEmailLinks(text: string, linkStyle: TextStyle): ReactNode {
+  const parts = text.split(EMAIL_PATTERN);
+  if (parts.length === 1) return text;
+  return parts.map((part, i) =>
+    i % 2 === 1 ? (
+      <Text key={i} style={linkStyle} onPress={() => Linking.openURL(`mailto:${part}`)} accessibilityRole="link">
+        {part}
+      </Text>
+    ) : (
+      part
+    )
+  );
+}
+
+function createStyles(colors: ReturnType<typeof useAppColors>) {
+  return StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    headerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingBottom: 12,
+    },
+    backButton: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    headerTitle: {
+      color: colors.text,
+      fontSize: Type.subtitle,
+      fontFamily: 'Geist-SemiBold',
+    },
+    scrollContent: {
+      paddingHorizontal: 20,
+      paddingBottom: 48,
+    },
+    effectiveDate: {
+      color: colors.textTertiary,
+      fontSize: Type.caption,
+      fontFamily: 'Geist-Medium',
+      marginBottom: 12,
+    },
+    intro: {
+      color: colors.textSecondary,
+      fontSize: Type.subtitle - 1,
+      lineHeight: 22,
+      fontFamily: 'Geist-Medium',
+      marginBottom: 20,
+    },
+    section: {
+      marginBottom: 22,
+    },
+    sectionHeading: {
+      color: colors.text,
+      fontSize: Type.bodyLarge,
+      fontFamily: 'Geist-Bold',
+      marginBottom: 8,
+    },
+    paragraph: {
+      color: colors.textSecondary,
+      fontSize: Type.subtitle - 1,
+      lineHeight: 22,
+      fontFamily: 'Geist-Regular',
+      marginBottom: 8,
+    },
+    bulletRow: {
+      flexDirection: 'row',
+      marginBottom: 6,
+      paddingLeft: 2,
+    },
+    bulletDot: {
+      color: colors.textSecondary,
+      fontSize: Type.subtitle - 1,
+      fontFamily: 'Geist-Regular',
+      marginRight: 8,
+      lineHeight: 22,
+    },
+    link: {
+      color: colors.accentText,
+      fontFamily: 'Geist-Medium',
+    },
+    bulletText: {
+      flex: 1,
+      color: colors.textSecondary,
+      fontSize: Type.subtitle - 1,
+      lineHeight: 22,
+      fontFamily: 'Geist-Regular',
+    },
+  });
+}

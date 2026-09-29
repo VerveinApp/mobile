@@ -4,12 +4,18 @@ import { Platform } from 'react-native';
 import { getMostNeglectedBodyArea } from '@/lib/engine/training-state';
 import { localDateStr } from '@/lib/local-date';
 import { BODY_AREA_PRIORITY_LABEL } from '@/lib/plan-preview';
+import { WEEKDAY_NAMES } from '@/lib/profile-labels';
 import { getSessionHistory } from '@/lib/session-history';
-import { getTrainingState } from '@/lib/training-state';
+import { getTodaySession } from '@/lib/today-session';
+import { getTrainingState } from '@/lib/training-state-loader';
 import { getProfile } from '@/lib/user-profile';
 
 const ENABLED_KEY = 'vervein.remindersEnabled.v1';
 const LAST_RESCHEDULED_KEY = 'vervein.remindersLastRescheduled.v1';
+// Set the one time the post-session "want a nudge on training days?" offer
+// is shown (see shouldOfferReminderPrompt) — a single contextual ask, never
+// a repeating nag. Settings' own toggle stays available either way.
+const PROMPT_OFFERED_KEY = 'vervein.reminderPromptOffered.v1';
 // Every reminder this module schedules carries this identifier prefix, so
 // disabling (or re-enabling with a changed schedule) can cancel exactly its
 // own notifications via cancelScheduledNotificationAsync — never a blanket
@@ -17,7 +23,6 @@ const LAST_RESCHEDULED_KEY = 'vervein.remindersLastRescheduled.v1';
 // feature that schedules its own local notifications later.
 const ID_PREFIX = 'vervein-session-reminder-';
 
-const WEEKDAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 // Fallback only — see getPersonalizedReminderHour below, which this constant
 // backs off to until there's enough real check-in history to trust instead.
 const DEFAULT_REMINDER_HOUR = 8;
@@ -93,8 +98,14 @@ const RESCHEDULE_WINDOW_DAYS = 14;
 // catches the native-module error. Still lazy (never called at module top
 // level) and still cached after the first attempt, same as before; only
 // the loading mechanism changed.
+// Exported so other modules needing expo-notifications (e.g.
+// push-notifications.ts, for a real Expo push token instead of a local
+// schedule) reuse this exact lazy-require, instead of each reimplementing
+// the same fix and risking a subtly different — and untested — version of
+// it. See this function's own comment above for why it must stay a
+// synchronous require(), not a dynamic import().
 let cachedModule: typeof import('expo-notifications') | null | undefined;
-function getModule(): typeof import('expo-notifications') | null {
+export function getModule(): typeof import('expo-notifications') | null {
   if (cachedModule !== undefined) return cachedModule;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports -- see the disclosed fix-history comment above for why this must be a synchronous require(), not a dynamic import().
@@ -164,17 +175,86 @@ async function cancelAllReminders(Notifications: typeof import('expo-notificatio
  * fallback to the old generic line whenever the signal doesn't have enough
  * real evidence yet — same tiered-honesty rule as everywhere else this
  * engine surfaces a claim.
+ *
+ * BUG FIX: this used to read "X has fallen behind the rest lately" — debt/
+ * guilt framing landing as an unprompted push notification, arguably the
+ * worst place for it (an interruption telling someone they're behind,
+ * not just an in-app line they can shrug past). Same fix as plan-preview.ts's
+ * own matching sentence: a body area with a long real recency gap is
+ * well-rested, not neglected — same signal, readiness framing instead of a
+ * ledger of what's owed. States the fact, never a command to go train it.
  */
+// BUG FIX (user's own real device screenshot: the exact same "Whenever
+// works today." fired two days running): one fixed string per case reads as
+// a bot the moment someone notices the repeat, even though the underlying
+// signal is real each time. A random pick per (re)schedule — see
+// buildReminderContent below — fixes the repetition without touching what
+// the notification is actually allowed to claim. Every line here stays in
+// the same readiness framing as the original two (see this function's own
+// doc comment above): no "overdue"/"behind"/"neglected" wording sneaking
+// back in through a new variant.
+const AREA_READY_TEMPLATES: ((label: string) => string)[] = [
+  (label) => `${label} is well-rested and ready.`,
+  (label) => `${label} is fresh — good day for it.`,
+  (label) => `${label}'s had time to recover. Ready when you are.`,
+  (label) => `A good day for ${label}, whenever it fits.`,
+];
+const GENERIC_TEMPLATES: string[] = [
+  'Whenever works today.',
+  'No rush — just whenever fits.',
+  "Today's open. Train whenever works.",
+  'Just a nudge — no specific reason today.',
+];
+
+function pickRandom<T>(items: T[]): T {
+  return items[Math.floor(Math.random() * items.length)];
+}
+
 async function buildReminderContent(): Promise<{ title: string; body: string }> {
   const trainingState = await getTrainingState();
   const area = getMostNeglectedBodyArea(trainingState);
   if (area) {
     return {
       title: 'Training day',
-      body: `${BODY_AREA_PRIORITY_LABEL[area]} has fallen behind the rest lately.`,
+      body: pickRandom(AREA_READY_TEMPLATES)(BODY_AREA_PRIORITY_LABEL[area]),
     };
   }
-  return { title: 'Training day', body: 'Whenever works today.' };
+  return { title: 'Training day', body: pickRandom(GENERIC_TEMPLATES) };
+}
+
+// BUG FIX: scheduleRollingWindow's own cancel-then-reschedule sequence had
+// no mutual exclusion between callers — enableSessionReminders (a schedule
+// change from adjust-plan-sheet.tsx) and refreshSessionReminders (an
+// AppState foreground event) can both call it, and neither waited for the
+// other. Two calls landing close together (e.g. backgrounding the app right
+// after saving a schedule change, then foregrounding fast enough to fire a
+// refresh before the first call's own awaits settle) could interleave: A
+// cancels, B cancels (nothing left to cancel), A schedules its window, B's
+// own schedule call then either duplicates A's work or — if B's
+// getProfile() read raced in before the schedule change's updateProfile had
+// actually committed — silently reschedules the OLD days back on top of
+// the new ones the person just saved, with no error and no visible sign
+// anything went wrong. Chaining every real call onto this shared promise
+// serializes them: each one's full cancel+reschedule sequence finishes
+// before the next one's even starts, so whichever call is genuinely last
+// always wins cleanly instead of tearing an in-flight one.
+let schedulingChain: Promise<void> = Promise.resolve();
+
+/**
+ * Generic version of the same chaining primitive scheduleRollingWindow
+ * already used only for itself — queues arbitrary work onto the shared
+ * chain and returns that specific call's own promise (so its caller's own
+ * try/catch still sees a real rejection), while the shared chain variable
+ * itself always resolves to a no-op so one failure can't permanently wedge
+ * every future caller behind it.
+ */
+function runChained<T>(work: () => Promise<T>): Promise<T> {
+  const run = schedulingChain.then(work);
+  schedulingChain = run.then(
+    () => {},
+    () => {}
+  );
+  return run;
 }
 
 /**
@@ -189,7 +269,14 @@ async function buildReminderContent(): Promise<{ title: string; body: string }> 
  * own slot is skipped once that hour has already passed, so this can never
  * schedule a notification that would fire immediately.
  */
-async function scheduleRollingWindow(
+function scheduleRollingWindow(
+  Notifications: typeof import('expo-notifications'),
+  scheduledDays: string[]
+): Promise<void> {
+  return runChained(() => scheduleRollingWindowInner(Notifications, scheduledDays));
+}
+
+async function scheduleRollingWindowInner(
   Notifications: typeof import('expo-notifications'),
   scheduledDays: string[]
 ): Promise<void> {
@@ -199,9 +286,15 @@ async function scheduleRollingWindow(
 
   const content = await buildReminderContent();
   const reminderHour = await getPersonalizedReminderHour();
+  // BUG FIX: today's slot used to be scheduled even after today's check-in
+  // already happened — someone who trained at 7am still got a "Training
+  // day" nudge at their usual 6pm. A today-session existing at all means
+  // they've already shown up today, so there's nothing left to remind.
+  const checkedInToday = (await getTodaySession()) !== null;
   const now = new Date();
   const scheduleOps: Promise<unknown>[] = [];
   for (let offset = 0; offset < RESCHEDULE_WINDOW_DAYS; offset++) {
+    if (offset === 0 && checkedInToday) continue;
     const day = new Date(now);
     day.setDate(day.getDate() + offset);
     const weekday = WEEKDAY_NAMES[day.getDay()];
@@ -270,21 +363,34 @@ export async function enableSessionReminders(scheduledDays: string[]): Promise<b
       });
     }
 
-    await scheduleRollingWindow(Notifications, scheduledDays);
+    // BUG FIX: the reschedule and the ENABLED_KEY write used to be two
+    // separate steps — only the reschedule itself went through
+    // schedulingChain, so a concurrent disableSessionReminders (which used
+    // to write its own key directly, unchained) could land in between:
+    // this reschedule finishes, disable's cancellation+false-write happens,
+    // then this function's own unconditional 'true' write below silently
+    // stomped it back on — leaving reminders live-scheduled even though the
+    // user's real last action was turning them off. Bundling both steps
+    // into one chained unit with disableSessionReminders' own equivalent
+    // unit means whichever call was actually issued last is the one whose
+    // effects (both the real notifications AND the stored preference)
+    // persist, matching real user intent instead of racing.
+    await runChained(async () => {
+      await scheduleRollingWindowInner(Notifications, scheduledDays);
+      try {
+        await AsyncStorage.setItem(ENABLED_KEY, 'true');
+        // An explicit enable (or a schedule change via adjust-plan-sheet.tsx)
+        // always reschedules for real, right now — resetting this throttle
+        // stamp means the very next foreground refresh doesn't skip a
+        // legitimately-due reschedule just because "today" already matches.
+        await AsyncStorage.setItem(LAST_RESCHEDULED_KEY, localDateStr());
+      } catch {
+        // Worst case the preference doesn't persist across an app restart —
+        // the notifications themselves are already scheduled either way.
+      }
+    });
   } catch {
     return false;
-  }
-
-  try {
-    await AsyncStorage.setItem(ENABLED_KEY, 'true');
-    // An explicit enable (or a schedule change via adjust-plan-sheet.tsx)
-    // always reschedules for real, right now — resetting this throttle
-    // stamp means the very next foreground refresh doesn't skip a
-    // legitimately-due reschedule just because "today" already matches.
-    await AsyncStorage.setItem(LAST_RESCHEDULED_KEY, localDateStr());
-  } catch {
-    // Worst case the preference doesn't persist across an app restart —
-    // the notifications themselves are already scheduled either way.
   }
   return true;
 }
@@ -338,23 +444,111 @@ export async function refreshSessionReminders(): Promise<void> {
   }
 }
 
+// BUG FIX: this used to call cancelAllReminders directly, entirely outside
+// schedulingChain, while enableSessionReminders/refreshSessionReminders both
+// route their own work through it specifically to serialize against each
+// other. That left this one call free to interleave with either: a disable
+// landing while an enable's own reschedule was mid-flight could finish its
+// cancellation before that reschedule (and enable's own unconditional
+// 'true' write) completed, silently leaving reminders live-scheduled with
+// ENABLED_KEY back to 'true' even though the user's real last action was
+// turning them off. Bundled into one chained unit, same as enable's own
+// fix, so whichever call was actually issued last — not whichever happened
+// to finish its own unchained work first — is the one that sticks.
 export async function disableSessionReminders(): Promise<void> {
   const Notifications = getModule();
-  if (Notifications) {
-    try {
-      await cancelAllReminders(Notifications);
-    } catch {
-      // Worst case a stale reminder fires once more — never a crash, and
-      // the stored preference below still turns the toggle off either way.
+  await runChained(async () => {
+    if (Notifications) {
+      try {
+        await cancelAllReminders(Notifications);
+      } catch {
+        // Worst case a stale reminder fires once more — never a crash, and
+        // the stored preference below still turns the toggle off either way.
+      }
     }
-  }
+    try {
+      await AsyncStorage.setItem(ENABLED_KEY, 'false');
+      // Cleared so a later re-enable's first refresh isn't skipped by a stale
+      // throttle stamp from before reminders were turned off.
+      await AsyncStorage.removeItem(LAST_RESCHEDULED_KEY);
+    } catch {
+      // Worst case the preference doesn't persist — the real cancellation
+      // above already happened regardless.
+    }
+  });
+}
+
+/**
+ * Cancels just today's already-scheduled reminder — called the moment a
+ * check-in starts (see check-in.tsx's handleStartSession). The daily
+ * reschedule throttle means today's slot could otherwise still be pending
+ * from a refresh that ran earlier the same day, before the check-in existed;
+ * scheduleRollingWindowInner's own checkedInToday skip covers every later
+ * reschedule. Chained like every other scheduling operation here so it can't
+ * interleave with a reschedule that's mid-flight.
+ */
+export async function cancelTodaysReminder(): Promise<void> {
+  const Notifications = getModule();
+  if (!Notifications) return;
+  await runChained(async () => {
+    try {
+      await Notifications.cancelScheduledNotificationAsync(`${ID_PREFIX}${localDateStr()}`);
+    } catch {
+      // Nothing scheduled for today (or already fired) — nothing to cancel.
+    }
+  });
+}
+
+export type NotificationPermissionState = 'granted' | 'denied' | 'undetermined' | 'unsupported';
+
+/**
+ * The OS-level permission state, read without ever prompting. 'granted'
+ * includes iOS provisional authorization (quiet delivery the user can later
+ * upgrade from Notification Center) — see the SDK 57 docs' own guidance to
+ * read ios.status rather than the root fields alone.
+ */
+export async function getNotificationPermissionState(): Promise<NotificationPermissionState> {
+  const Notifications = getModule();
+  if (!Notifications) return 'unsupported';
   try {
-    await AsyncStorage.setItem(ENABLED_KEY, 'false');
-    // Cleared so a later re-enable's first refresh isn't skipped by a stale
-    // throttle stamp from before reminders were turned off.
-    await AsyncStorage.removeItem(LAST_RESCHEDULED_KEY);
+    const permissions = await Notifications.getPermissionsAsync();
+    if (
+      permissions.granted ||
+      permissions.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL ||
+      permissions.ios?.status === Notifications.IosAuthorizationStatus.EPHEMERAL
+    ) {
+      return 'granted';
+    }
+    return permissions.canAskAgain ? 'undetermined' : 'denied';
   } catch {
-    // Worst case the preference doesn't persist — the real cancellation
-    // above already happened regardless.
+    return 'unsupported';
+  }
+}
+
+/**
+ * Whether the post-session "want a nudge on your training days?" line
+ * should show: reminders aren't already on, the OS prompt has genuinely
+ * never been answered (asking again after a "Don't Allow" is impossible
+ * anyway), there are real training days to remind about, and this offer
+ * hasn't been made before. This replaces the old cold-launch permission
+ * prompt, which fired over the Welcome screen before anyone knew what the
+ * app was — a reflexive "Don't Allow" there disabled reminders for good.
+ */
+export async function shouldOfferReminderPrompt(scheduledDays: string[]): Promise<boolean> {
+  if (scheduledDays.length === 0) return false;
+  if (await isReminderEnabled()) return false;
+  try {
+    if ((await AsyncStorage.getItem(PROMPT_OFFERED_KEY)) === 'true') return false;
+  } catch {
+    return false;
+  }
+  return (await getNotificationPermissionState()) === 'undetermined';
+}
+
+export async function markReminderPromptOffered(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(PROMPT_OFFERED_KEY, 'true');
+  } catch {
+    // Worst case the offer can show once more — never a crash.
   }
 }

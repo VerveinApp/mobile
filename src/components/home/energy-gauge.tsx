@@ -1,18 +1,19 @@
 import { useEffect, useMemo } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Platform, type StyleProp, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import ReanimatedAnimated, {
-  Easing,
-  runOnJS,
+  type SharedValue,
   useAnimatedStyle,
-  useReducedMotion,
   useSharedValue,
-  withRepeat,
+  withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 
+import { Type } from '@/constants/theme';
 import { hapticSelect } from '@/lib/haptics';
+import { MOTION_DURATION, MOTION_EASING } from '@/lib/motion';
 import { useAppColors } from '@/lib/theme-context';
 
 const isGlassAvailable = isLiquidGlassAvailable();
@@ -79,12 +80,15 @@ type EnergyGaugeProps = {
  * own clearly-bounded rectangle rather than a pie-slice whose hit area is
  * easy to misjudge near the dome's edges.
  *
- * Selection mechanics carried over from the old dial: a haptic tick on
- * every segment crossed while dragging, and the selected segment's own
- * outline breathes (paused at a steady mid-value under Reduced Motion) —
- * same feel, just applied to a rectangle's border instead of an SVG wedge's
- * stroke. The same VoiceOver "adjustable" role + increment/decrement
- * actions are preserved unchanged from the original.
+ * Selection: a haptic tick on every segment crossed while dragging, and
+ * the picked segment springs up to full height and strength while the
+ * others settle back, shorter and dimmer — the same treatment as the
+ * vervein.app check-in demo. It's driven from the gesture's own shared
+ * index on the UI thread, so it follows the finger through a drag instead
+ * of waiting for the screen to re-render. Height carries the selection as
+ * well as the static white outline, so it never rests on color alone.
+ * Reduced Motion snaps instead of springing (Reanimated's default). The
+ * VoiceOver "adjustable" role + increment/decrement actions are unchanged.
  */
 export function EnergyGauge({ size = 260, canvasScale = 1, value, onChange, previousValue = null }: EnergyGaugeProps) {
   const colors = useAppColors();
@@ -95,47 +99,85 @@ export function EnergyGauge({ size = 260, canvasScale = 1, value, onChange, prev
   const selected = value !== null ? LEVELS[value - 1] : null;
   const isSet = value !== null;
 
-  // Same "breathes once settled" outline as the old dial's selected-wedge
-  // stroke — Reduced Motion users get the same bright outline held at a
-  // steady mid-value instead of the loop, still legible as "selected."
-  const reducedMotion = useReducedMotion();
-  const pulse = useSharedValue(0);
-  useEffect(() => {
-    pulse.value = reducedMotion ? 0.5 : withRepeat(withTiming(1, { duration: 900, easing: Easing.inOut(Easing.sin) }), -1, true);
-  }, [pulse, reducedMotion]);
-  const pulseAnimatedStyle = useAnimatedStyle(() => ({
-    borderWidth: 1.5 + pulse.value * 2.5,
-    opacity: 0.6 + pulse.value * 0.4,
-  }));
-
+  // The picked segment's index, owned by the UI thread: the gesture worklets
+  // write it the moment the finger crosses a segment, and every segment's
+  // spring reads it. The `value` prop trails it by a render.
   const lastIndex = useSharedValue(value !== null ? value - 1 : -1);
+  // Once the finger has picked, the gesture owns the selection. A heavy
+  // check-in render can hand back an in-between value from the same drag
+  // (or a quick run of taps) after the finger has already moved on, and
+  // syncing that echo into lastIndex would spring the segments back a step.
+  // So the prop is only followed for changes that can't be an echo: a
+  // restored session before any touch, or a reset to nothing picked (which
+  // also hands ownership back, so a later restore is followed again). The
+  // flag is set in the gesture worklets beside lastIndex itself, so it's
+  // already true by the time any echo reaches the effect. A parent that
+  // needs to set a different level after the user has touched the gauge
+  // should remount it with a `key`; check-in.tsx never does (a restored
+  // session swaps the gauge out for the resolved view).
+  const gestureOwnsSelection = useSharedValue(false);
+  useEffect(() => {
+    if (value === null) {
+      gestureOwnsSelection.set(false);
+      lastIndex.set(-1);
+      return;
+    }
+    if (!gestureOwnsSelection.get()) lastIndex.set(value - 1);
+  }, [value, lastIndex, gestureOwnsSelection]);
   // Same web coordinate-scaling correction the old dial applied to its own
   // gesture-origin math (see CommitmentDial's own doc comment) — only ever
   // exercised on web, a no-op at canvasScale's default of 1 everywhere else.
   const effectiveWidth = Platform.OS === 'web' ? size * canvasScale : size;
 
-  const setIndex = (idx: number, tick: boolean) => {
+  // Gesture path: lastIndex was already set on the UI thread, so this only
+  // ticks and reports (writing it here, a beat late, is what used to pull
+  // the segments back).
+  const reportFromGesture = (idx: number, tick: boolean) => {
     if (tick) hapticSelect();
-    lastIndex.value = idx;
     onChange(LEVELS[idx].score);
   };
 
-  const panGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .onBegin((e) => {
-          const idx = clamp(Math.floor((e.x / effectiveWidth) * SEGMENT_COUNT), 0, SEGMENT_COUNT - 1);
-          const changed = idx !== lastIndex.value;
-          lastIndex.value = idx;
-          runOnJS(setIndex)(idx, changed);
+  // BUG FIX: the pan used to select on onBegin — the instant a finger
+  // touched down, before it was known whether this was a drag across the
+  // gauge or the start of a vertical scroll of the check-in screen. Scrolling
+  // with a thumb that happened to land on the gauge changed today's energy.
+  // Now a pan only claims the touch once it's clearly horizontal (the same
+  // activeOffsetX/failOffsetY pairing the paywall's benefit pager uses), and
+  // a plain tap selects through its own Tap gesture.
+  const gauge = useMemo(
+    () => {
+      const indexAt = (x: number) => {
+        'worklet';
+        return clamp(Math.floor((x / effectiveWidth) * SEGMENT_COUNT), 0, SEGMENT_COUNT - 1);
+      };
+      const pan = Gesture.Pan()
+        .activeOffsetX([-8, 8])
+        .failOffsetY([-10, 10])
+        .onStart((e) => {
+          const idx = indexAt(e.x);
+          const changed = idx !== lastIndex.get();
+          lastIndex.set(idx);
+          gestureOwnsSelection.set(true);
+          scheduleOnRN(reportFromGesture, idx, changed);
         })
         .onUpdate((e) => {
-          const idx = clamp(Math.floor((e.x / effectiveWidth) * SEGMENT_COUNT), 0, SEGMENT_COUNT - 1);
-          if (idx !== lastIndex.value) {
-            lastIndex.value = idx;
-            runOnJS(setIndex)(idx, true);
+          const idx = indexAt(e.x);
+          if (idx !== lastIndex.get()) {
+            lastIndex.set(idx);
+            gestureOwnsSelection.set(true);
+            scheduleOnRN(reportFromGesture, idx, true);
           }
-        }),
+        });
+      const tap = Gesture.Tap().onEnd((e, success) => {
+        if (!success) return;
+        const idx = indexAt(e.x);
+        const changed = idx !== lastIndex.get();
+        lastIndex.set(idx);
+        gestureOwnsSelection.set(true);
+        scheduleOnRN(reportFromGesture, idx, changed);
+      });
+      return Gesture.Race(pan, tap);
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [onChange, effectiveWidth]
   );
@@ -143,16 +185,21 @@ export function EnergyGauge({ size = 260, canvasScale = 1, value, onChange, prev
   /** Used by VoiceOver/TalkBack increment/decrement — the drag path ticks and reports separately. */
   const handleAccessibilityAction = (event: { nativeEvent: { actionName: string } }) => {
     const current = value !== null ? value - 1 : -1;
-    if (event.nativeEvent.actionName === 'increment') {
-      setIndex(Math.min(current + 1, SEGMENT_COUNT - 1), true);
-    } else if (event.nativeEvent.actionName === 'decrement') {
-      setIndex(Math.max(current - 1, 0), true);
-    }
+    const next =
+      event.nativeEvent.actionName === 'increment'
+        ? Math.min(current + 1, SEGMENT_COUNT - 1)
+        : event.nativeEvent.actionName === 'decrement'
+          ? Math.max(current - 1, 0)
+          : null;
+    if (next === null) return;
+    hapticSelect();
+    lastIndex.set(next);
+    onChange(LEVELS[next].score);
   };
 
   return (
     <View style={styles.container}>
-      <GestureDetector gesture={panGesture}>
+      <GestureDetector gesture={gauge}>
         <View
           style={[styles.track, { width: size, height: trackHeight }]}
           accessible
@@ -172,31 +219,50 @@ export function EnergyGauge({ size = 260, canvasScale = 1, value, onChange, prev
         >
           {LEVELS.map((level, i) => {
             const isSelected = level.score === value;
-            const isPrevious = level.score === previousValue && level.score !== value;
             return (
-              <View
+              <GaugeSegment
                 key={level.score}
-                style={[
+                index={i}
+                selectedIndex={lastIndex}
+                color={MOOD_COLORS[level.score]}
+                shellStyle={[
                   styles.segment,
-                  {
-                    width: segmentWidth,
-                    height: trackHeight,
-                    backgroundColor: MOOD_COLORS[level.score],
-                    opacity: isSelected ? 1 : 0.85,
-                    marginRight: i < SEGMENT_COUNT - 1 ? SEGMENT_GAP : 0,
-                  },
+                  { width: segmentWidth, height: trackHeight, marginRight: i < SEGMENT_COUNT - 1 ? SEGMENT_GAP : 0 },
                 ]}
+                outlineStyle={styles.segmentOutline}
               >
+                {/* BUG FIX: was tintColor="#FFFFFF" — a white frost veil over
+                    whatever's underneath, which reads fine on the darker
+                    ends of MOOD_COLORS (red, green) but visibly washes out
+                    the lighter middle ones (orange, yellow) toward pale/
+                    faded instead of "selected." Tinting with the segment's
+                    own color instead reinforces its real hue through the
+                    glass — the standard tinted-glass pattern (matching a
+                    control's own accent color, not a mismatched white) —
+                    so the selected segment reads as more vivid, not less,
+                    regardless of which one it is. */}
                 {isGlassAvailable && isSelected ? (
-                  <GlassView glassEffectStyle="regular" tintColor="#FFFFFF" style={StyleSheet.absoluteFill} />
+                  <GlassView
+                    glassEffectStyle="regular"
+                    tintColor={MOOD_COLORS[level.score]}
+                    style={StyleSheet.absoluteFill}
+                  />
                 ) : null}
-                {isSelected ? (
-                  <ReanimatedAnimated.View pointerEvents="none" style={[styles.segmentOutline, pulseAnimatedStyle]} />
-                ) : null}
-                {isPrevious ? <View pointerEvents="none" style={styles.previousMarker} /> : null}
-              </View>
+              </GaugeSegment>
             );
           })}
+          {/* Yesterday's level, drawn over the row rather than inside its
+              segment: once anything is picked that segment is shrunk and
+              dimmed, which squashed this dot and nearly hid it. */}
+          {previousValue !== null && previousValue !== value ? (
+            <View
+              pointerEvents="none"
+              style={[
+                styles.previousMarker,
+                { left: (previousValue - 1) * (segmentWidth + SEGMENT_GAP) + segmentWidth / 2 - PREVIOUS_MARKER_SIZE / 2 },
+              ]}
+            />
+          ) : null}
         </View>
       </GestureDetector>
 
@@ -211,6 +277,75 @@ export function EnergyGauge({ size = 260, canvasScale = 1, value, onChange, prev
     </View>
   );
 }
+
+// Unpicked segments sit a little shorter and dimmer so the picked one
+// stands up out of the row. With nothing picked yet, every segment is full
+// height at the gauge's resting strength, inviting a first touch.
+const RESTING_OPACITY = 0.85;
+const PREVIOUS_MARKER_SIZE = 5;
+const RECEDED_OPACITY = 0.5;
+const RECEDED_SCALE = 0.78;
+const SEGMENT_SPRING = { duration: 420, dampingRatio: 0.62 };
+
+/**
+ * One segment. Its own component so each can hold its animated styles,
+ * which read the shared selected index directly: the spring, the dim and
+ * the outline all move on the same frame the finger crosses into it.
+ *
+ * Only the colour fill dims, never the segment itself. The glass tint and
+ * yesterday's marker sit above the fill at full strength: Apple's glass
+ * effect isn't meant to live under a fading parent, and the marker would
+ * otherwise fade out exactly when you're comparing against it.
+ */
+function GaugeSegment({
+  index,
+  selectedIndex,
+  color,
+  shellStyle,
+  outlineStyle,
+  children,
+}: {
+  index: number;
+  selectedIndex: SharedValue<number>;
+  color: string;
+  shellStyle: StyleProp<ViewStyle>;
+  outlineStyle: StyleProp<ViewStyle>;
+  children: React.ReactNode;
+}) {
+  const shellAnimatedStyle = useAnimatedStyle(() => {
+    const nothingPicked = selectedIndex.get() < 0;
+    const picked = selectedIndex.get() === index;
+    return { transform: [{ scaleY: withSpring(nothingPicked || picked ? 1 : RECEDED_SCALE, SEGMENT_SPRING) }] };
+  });
+  const fillAnimatedStyle = useAnimatedStyle(() => {
+    const nothingPicked = selectedIndex.get() < 0;
+    const picked = selectedIndex.get() === index;
+    return {
+      opacity: withTiming(nothingPicked ? RESTING_OPACITY : picked ? 1 : RECEDED_OPACITY, {
+        duration: MOTION_DURATION.fast,
+        easing: MOTION_EASING.standard,
+      }),
+    };
+  });
+  const outlineAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: withTiming(selectedIndex.get() === index ? 1 : 0, {
+      duration: MOTION_DURATION.fast,
+      easing: MOTION_EASING.standard,
+    }),
+  }));
+  return (
+    <ReanimatedAnimated.View style={[shellStyle, segmentStyles.origin, shellAnimatedStyle]}>
+      <ReanimatedAnimated.View style={[StyleSheet.absoluteFill, { backgroundColor: color }, fillAnimatedStyle]} />
+      {children}
+      <ReanimatedAnimated.View pointerEvents="none" style={[outlineStyle, outlineAnimatedStyle]} />
+    </ReanimatedAnimated.View>
+  );
+}
+
+const segmentStyles = StyleSheet.create({
+  // Shrinks toward the baseline, so the row keeps one bottom edge.
+  origin: { transformOrigin: 'bottom' },
+});
 
 function createStyles(colors: ReturnType<typeof useAppColors>) {
   return StyleSheet.create({
@@ -227,17 +362,20 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     segmentOutline: {
       ...StyleSheet.absoluteFill,
       borderRadius: 14,
+      borderWidth: 3,
       borderColor: 'rgba(255,255,255,0.95)',
     },
+    // Yesterday's level. The theme's text colour, not white: once a level is
+    // picked the other segments dim toward the background, and a white dot
+    // on a pale segment all but disappeared in light mode.
     previousMarker: {
       position: 'absolute',
       bottom: 6,
-      left: '50%',
-      marginLeft: -2,
-      width: 4,
-      height: 4,
-      borderRadius: 2,
-      backgroundColor: 'rgba(255,255,255,0.7)',
+      width: PREVIOUS_MARKER_SIZE,
+      height: PREVIOUS_MARKER_SIZE,
+      borderRadius: PREVIOUS_MARKER_SIZE / 2,
+      backgroundColor: colors.text,
+      opacity: 0.7,
     },
     readout: {
       marginTop: 14,
@@ -252,7 +390,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     readoutLabel: {
       marginTop: 2,
       color: '#438C63',
-      fontSize: 11,
+      fontSize: Type.caption,
       fontFamily: 'Geist-SemiBold',
     },
   });

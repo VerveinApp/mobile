@@ -1,5 +1,8 @@
 import { useState } from 'react';
 import { Animated, Easing } from 'react-native';
+import { ReduceMotion, useAnimatedStyle, withTiming } from 'react-native-reanimated';
+
+import { MOTION_DURATION, MOTION_EASING } from '@/lib/motion';
 
 const HOVER_TRANSITION_MS = 150;
 
@@ -51,4 +54,48 @@ export function useLiquidPress() {
   };
 
   return { scale, glow, onPressIn, onPressOut };
+}
+
+/**
+ * The touch-down feedback for every plain Pressable that has no glow of its
+ * own — rows, cards, pills, header buttons, dialog buttons. BUG FIX: on
+ * iPhone most of these gave no visual response at all: useHoverFade only
+ * fires for a mouse/trackpad pointer and android_ripple only on Android, so
+ * a tap registered as a haptic tick and nothing else. Applied as
+ * `style={({ pressed }) => [base, pressed && PRESSED_DIM]}`, iOS's own
+ * dim-while-held convention for tappable content.
+ */
+export const PRESSED_DIM = { opacity: 0.6 } as const;
+
+/** How far a disabled primary button dims — the old static `opacity: 0.5`. */
+export const DISABLED_BUTTON_OPACITY = 0.5;
+
+const ENABLED_FADE = {
+  duration: MOTION_DURATION.base,
+  easing: MOTION_EASING.standard,
+  reduceMotion: ReduceMotion.System,
+} as const;
+
+/**
+ * A primary button's disabled ⇄ enabled dim as a short fade rather than a
+ * one-frame snap. Put it on a Reanimated visual view (the Pressable's inner
+ * visual, not the Pressable); the first render lands on the right value with
+ * no animation. Never on a GlassView's ancestor — that kind of button dims
+ * with useDisabledScrimStyle over its content instead.
+ */
+export function useEnabledFadeStyle(enabled: boolean) {
+  return useAnimatedStyle(() => ({
+    opacity: withTiming(enabled ? 1 : DISABLED_BUTTON_OPACITY, ENABLED_FADE),
+  }));
+}
+
+/**
+ * The same fade for a button whose visual holds a GlassView (whose own
+ * ancestors must never change opacity): a scrim in the card surface colour,
+ * laid over the content, fades in to the same 50% dim instead.
+ */
+export function useDisabledScrimStyle(disabled: boolean) {
+  return useAnimatedStyle(() => ({
+    opacity: withTiming(disabled ? DISABLED_BUTTON_OPACITY : 0, ENABLED_FADE),
+  }));
 }

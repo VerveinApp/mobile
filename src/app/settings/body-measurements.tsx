@@ -1,9 +1,9 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Swipeable } from 'react-native-gesture-handler';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import ReanimatedAnimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView } from '@/components/ui/app-symbol';
 
 import {
   deleteBodyMeasurementEntry,
@@ -12,13 +12,20 @@ import {
   type BodyMeasurementEntry,
   type BodyMeasurementField,
 } from '@/lib/body-measurements';
-import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
+import { Type } from '@/constants/theme';
+import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { localDateStr } from '@/lib/local-date';
+import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { getUnitSystem, type UnitSystem } from '@/lib/unit-preference';
+import { parseDecimalInput } from '@/lib/weight-units';
 import { getProfile } from '@/lib/user-profile';
 import { HealthConsentGate } from '@/components/settings/health-consent-gate';
+import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
+import { Sparkline } from '@/components/ui/sparkline';
+import { SwipeRow } from '@/components/ui/swipe-row';
+import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 
 const FIELDS: { key: BodyMeasurementField; label: string }[] = [
   { key: 'waistCm', label: 'Waist' },
@@ -37,8 +44,10 @@ function cmToDisplay(cm: number, unit: UnitSystem): string {
   return unit === 'metric' ? String(Math.round(cm * 10) / 10) : String(Math.round((cm / 2.54) * 10) / 10);
 }
 function displayToCm(value: string, unit: UnitSystem): number | undefined {
-  const n = Number(value);
-  if (!value.trim() || Number.isNaN(n)) return undefined;
+  // parseDecimalInput, not Number(): a comma-decimal keypad ("72,5") used to
+  // parse as NaN and the measurement was silently dropped.
+  const n = parseDecimalInput(value);
+  if (n === null) return undefined;
   return unit === 'metric' ? n : n * 2.54;
 }
 
@@ -59,12 +68,18 @@ export default function BodyMeasurementsScreen() {
   const backHover = useHoverFade();
   const addHover = useHoverFade();
   const savePress = useLiquidPress();
+  const entering = useFadeInEntering();
 
   const [entries, setEntries] = useState<BodyMeasurementEntry[]>([]);
   const [unit, setUnit] = useState<UnitSystem>('imperial');
   const [loaded, setLoaded] = useState(false);
   const [hasConsent, setHasConsent] = useState(false);
   const [adding, setAdding] = useState(false);
+  // Same disabled-while-saving guard condition-log.tsx's handleSave now has
+  // — found in a later full-app audit as a shared missing pattern. Lower
+  // real impact here since saveBodyMeasurementEntry merges by date rather
+  // than appending, but a double-tap could still drop one write's fields.
+  const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState<Record<BodyMeasurementField, string>>({
     waistCm: '',
     chestCm: '',
@@ -72,6 +87,8 @@ export default function BodyMeasurementsScreen() {
     armCm: '',
     thighCm: '',
   });
+  const [chartField, setChartField] = useState<BodyMeasurementField>('waistCm');
+  const [chartWidth, setChartWidth] = useState(0);
 
   const reload = useCallback(() => {
     (async () => {
@@ -90,6 +107,7 @@ export default function BodyMeasurementsScreen() {
   };
 
   const handleSave = async () => {
+    if (saving) return;
     const fields: Partial<Record<BodyMeasurementField, number>> = {};
     for (const { key } of FIELDS) {
       const cm = displayToCm(draft[key], unit);
@@ -97,11 +115,13 @@ export default function BodyMeasurementsScreen() {
     }
     if (Object.keys(fields).length === 0) return;
     hapticImpactLight();
+    setSaving(true);
     const today = localDateStr();
     await saveBodyMeasurementEntry(today, fields);
     reload();
     setDraft({ waistCm: '', chestCm: '', hipCm: '', armCm: '', thighCm: '' });
     setAdding(false);
+    setSaving(false);
   };
 
   const handleDelete = async (date: string) => {
@@ -118,15 +138,32 @@ export default function BodyMeasurementsScreen() {
 
   const unitSuffix = unit === 'metric' ? 'cm' : 'in';
 
+  // Each field is independently optional per entry (someone might only log
+  // waist most days) — a field needs its own 2+ real, defined points to
+  // chart, not just 2+ entries overall. Never fabricates a value for a gap;
+  // a field with a skipped day simply has fewer points, not an interpolated
+  // one.
+  const chartableFields = FIELDS.filter(({ key }) => entries.filter((e) => e[key] !== undefined).length >= 2);
+  const activeChartField = chartableFields.some((f) => f.key === chartField) ? chartField : chartableFields[0]?.key;
+  const chartData = activeChartField
+    ? [...entries]
+        .reverse()
+        .filter((e) => e[activeChartField] !== undefined)
+        .map((e) => ({ value: e[activeChartField] as number }))
+    : [];
+
   return (
-    <View style={styles.root}>
+    // BUG FIX (found in a later full-app audit): this screen's numeric
+    // measurement fields have no keyboard-avoidance — same fix as
+    // settings/index.tsx already has.
+    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={[styles.headerRow, { paddingTop: insets.top + 8 }]}>
         <Pressable
           onPress={() => router.back()}
           onHoverIn={backHover.onHoverIn}
           onHoverOut={backHover.onHoverOut}
           hitSlop={10}
-          style={styles.backButton}
+          style={({ pressed }) => [styles.backButton, pressed && PRESSED_DIM]}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
@@ -136,13 +173,22 @@ export default function BodyMeasurementsScreen() {
         <View style={styles.backButton} />
       </View>
 
-      {!loaded ? null : !hasConsent ? (
+      {!loaded ? (
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <SkeletonBlock width={150} height={44} borderRadius={14} />
+          <View style={styles.section}>
+            <SkeletonBlock width={60} height={11} borderRadius={4} />
+            <SkeletonCard height={80} lines={2} />
+          </View>
+        </ScrollView>
+      ) : !hasConsent ? (
         <HealthConsentGate />
       ) : (
+        <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.section}>
             <Pressable
-              style={styles.addRow}
+              style={({ pressed }) => [styles.addRow, pressed && PRESSED_DIM]}
               onPress={handleToggleAdd}
               onHoverIn={addHover.onHoverIn}
               onHoverOut={addHover.onHoverOut}
@@ -178,15 +224,55 @@ export default function BodyMeasurementsScreen() {
                   onPress={handleSave}
                   onPressIn={savePress.onPressIn}
                   onPressOut={savePress.onPressOut}
+                  disabled={saving}
                   style={styles.saveButtonHit}
                 >
-                  <View style={styles.saveButton}>
-                    <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>Save</Text>
+                  <View style={[styles.saveButton, saving && styles.saveButtonDisabled]}>
+                    <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>
+                      {saving ? 'Saving…' : 'Save'}
+                    </Text>
                   </View>
                 </Pressable>
               </View>
             ) : null}
           </View>
+
+          {chartableFields.length > 0 && activeChartField ? (
+            <View style={styles.section}>
+              <View style={styles.chartHeaderRow}>
+                <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TREND</Text>
+                <View style={styles.chartFieldPills}>
+                  {chartableFields.map(({ key, label }) => {
+                    const active = activeChartField === key;
+                    return (
+                      <Pressable
+                        key={key}
+                        style={({ pressed }) => [styles.chartFieldPill, active && styles.chartFieldPillActive, pressed && PRESSED_DIM]}
+                        onPress={() => {
+                          hapticSelect();
+                          setChartField(key);
+                        }}
+                      >
+                        <Text
+                          style={[styles.chartFieldPillText, active && styles.chartFieldPillTextActive]}
+                          maxFontSizeMultiplier={1.2}
+                        >
+                          {label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+              <View style={[styles.card, styles.chartCardPadding]}>
+                <View style={styles.chartCardInner} onLayout={(e) => setChartWidth(e.nativeEvent.layout.width)}>
+                  {chartWidth > 0 ? (
+                    <Sparkline data={chartData} width={chartWidth} height={56} color="#5FBE84" />
+                  ) : null}
+                </View>
+              </View>
+            </View>
+          ) : null}
 
           <View style={styles.section}>
             <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>HISTORY</Text>
@@ -204,11 +290,11 @@ export default function BodyMeasurementsScreen() {
                     ({ key, label }) => `${label} ${cmToDisplay(entry[key] as number, unit)}${unitSuffix}`
                   );
                   return (
-                    <Swipeable
-                      key={entry.date}
-                      renderRightActions={() => (
+                    <ReanimatedAnimated.View key={entry.date} layout={LIST_ROW_LAYOUT} exiting={LIST_ROW_EXITING}>
+                    <SwipeRow
+                      renderActions={() => (
                         <Pressable
-                          style={styles.deleteAction}
+                          style={({ pressed }) => [styles.deleteAction, pressed && PRESSED_DIM]}
                           onPress={() => handleDelete(entry.date)}
                           accessibilityRole="button"
                           accessibilityLabel="Delete entry"
@@ -216,7 +302,7 @@ export default function BodyMeasurementsScreen() {
                           <SymbolView name="trash.fill" size={15} tintColor="#ffffff" />
                         </Pressable>
                       )}
-                      overshootRight={false}
+                      onFullSwipe={() => handleDelete(entry.date)}
                     >
                       <View
                         style={[
@@ -230,15 +316,17 @@ export default function BodyMeasurementsScreen() {
                           {parts.join(' · ')}
                         </Text>
                       </View>
-                    </Swipeable>
+                    </SwipeRow>
+                    </ReanimatedAnimated.View>
                   );
                 })}
               </View>
             )}
           </View>
         </ScrollView>
+        </ReanimatedAnimated.View>
       )}
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -247,6 +335,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     root: {
       flex: 1,
       backgroundColor: colors.background,
+    },
+    fadeLayer: {
+      flex: 1,
     },
     headerRow: {
       flexDirection: 'row',
@@ -264,8 +355,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     headerTitle: {
       color: colors.text,
-      fontSize: 16,
-      fontFamily: 'Geist-SemiBold',
+      fontSize: Type.headerTitle,
+      letterSpacing: -0.2,
+      fontFamily: 'Geist-Bold',
     },
     scrollContent: {
       paddingHorizontal: 20,
@@ -277,7 +369,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     sectionKicker: {
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       letterSpacing: 1,
       fontFamily: 'Geist-SemiBold',
     },
@@ -294,7 +386,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     addRowText: {
       color: colors.text,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
     addCard: {
@@ -313,7 +405,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     fieldLabel: {
       color: colors.textSecondary,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
     },
     fieldInputWrap: {
@@ -331,7 +423,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     fieldInput: {
       color: colors.text,
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-SemiBold',
       textAlign: 'right',
       minWidth: 32,
@@ -339,7 +431,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     fieldSuffix: {
       color: colors.textTertiary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
     },
     saveButtonHit: {
@@ -351,10 +443,50 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       backgroundColor: '#438C63',
       alignItems: 'center',
     },
+    saveButtonDisabled: {
+      opacity: 0.5,
+    },
     saveButtonText: {
       color: '#ffffff',
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-SemiBold',
+    },
+    chartHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    chartFieldPills: {
+      flexDirection: 'row',
+      gap: 6,
+    },
+    chartFieldPill: {
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 12,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.pillBorder,
+      backgroundColor: colors.pillBg,
+    },
+    chartFieldPillActive: {
+      borderColor: '#5FBE84',
+      backgroundColor: '#5FBE84',
+    },
+    chartFieldPillText: {
+      color: colors.textSecondary,
+      fontSize: Type.caption,
+      fontFamily: 'Geist-SemiBold',
+    },
+    chartFieldPillTextActive: {
+      color: '#ffffff',
+    },
+    chartCardPadding: {
+      padding: 16,
+    },
+    chartCardInner: {
+      width: '100%',
     },
     card: {
       borderRadius: 16,
@@ -376,7 +508,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     emptyText: {
       color: colors.textTertiary,
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
       lineHeight: 18,
       textAlign: 'center',
@@ -395,13 +527,13 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     entryDate: {
       color: colors.text,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
     },
     entryValues: {
       flex: 1,
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
       textAlign: 'right',
     },

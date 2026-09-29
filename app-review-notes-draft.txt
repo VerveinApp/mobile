@@ -1,0 +1,68 @@
+SIGN-IN FOR REVIEW
+VerveIn uses passwordless sign-in only (no username/password accounts exist).
+The fastest way in: tap "Continue with Apple" on the sign-in screen — this
+works immediately with your own Apple ID, no demo credentials needed.
+"Continue with Google" is also available as an alternative.
+If you sign in with email instead, a 6-digit code is emailed to that address
+(valid 15 minutes) — this requires access to that inbox, so Apple or Google
+sign-in is the recommended path for review.
+
+After first sign-in, the app leads through a short onboarding questionnaire
+(training goal, experience level, available equipment, weekly schedule)
+before reaching the main app.
+
+APP DESCRIPTION / TARGET AUDIENCE
+VerveIn is an adaptive fitness training app. It builds a personalized
+workout plan from the user's stated goals and equipment, then adjusts that
+plan session-to-session based on self-reported readiness (energy, soreness,
+sleep) and, optionally, real Apple Health data (steps, resting heart rate,
+sleep, active energy). Target audience: general fitness users, from
+beginners to experienced lifters, who want a training plan that responds to
+how they're actually doing rather than a fixed static program.
+
+DEVICES / OS VERSIONS TESTED
+[FILL IN: list the actual physical device(s) and iOS version(s) you tested
+this build on before submitting — e.g. "iPhone 14, iOS 18.x". Do not leave
+this blank; Apple explicitly asked for it.]
+
+THIRD-PARTY SERVICES USED
+- Supabase — account authentication and cross-device profile sync
+- RevenueCat — subscription/entitlement management for VerveIn Plus
+- Sign in with Apple / Google — social authentication
+- Apple HealthKit — optional, user-initiated; reads steps, resting heart
+  rate, sleep, and active energy to inform training readiness; can write
+  completed workouts back to Health. Off by default, disconnectable anytime
+  in Settings.
+- Expo push notification service — delivers two kinds of remote push
+  (a notice when someone joins with your referral code, and an occasional
+  re-engagement nudge after several days away, at most weekly); workout
+  reminders themselves are scheduled locally on the device. Notification
+  permission is only requested in context (the Settings reminder toggle,
+  or a one-time offer after the user's first completed session), never on
+  launch.
+- Sentry — crash and error reporting.
+
+SUBSCRIPTIONS
+VerveIn Plus (monthly and yearly auto-renewing subscriptions) is offered on
+the paywall, reachable from Settings and from any locked Plus section. The
+paywall states the price and period, that it renews automatically unless
+canceled at least 24 hours before the period ends, and links to the Terms
+of Service and Privacy Policy. A free-trial label only appears when the
+Apple ID is actually eligible for the trial. Restore Purchases is on the
+same screen.
+
+REGIONAL DIFFERENCES
+None. The app's features and content are identical in every region.
+Subscription pricing follows standard App Store per-region localized
+pricing; no functional differences.
+
+REGULATED INDUSTRY / PROTECTED MATERIAL
+Not applicable.
+
+SCREEN RECORDING
+[ATTACH OR LINK HERE — a screen recording captured on a physical device,
+running the latest iOS, showing: app launch → sign-in (via Continue with
+Apple) → onboarding → main app → the subscription/paywall flow → the
+HealthKit connect prompt. If App Store Connect's Review Notes field doesn't
+support a direct video attachment for your account, upload the recording
+somewhere private (e.g. an unlisted link) and paste that URL here.]

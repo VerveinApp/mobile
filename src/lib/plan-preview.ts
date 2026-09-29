@@ -34,33 +34,37 @@
  * driven by equipment ceiling, intensity ceiling, focus areas, and today's
  * energy, not by which of the four marketing-facing goals the user picked.
  *
- * SCOPE NOTE — acute symptom tags (picked fresh at each check-in, see
- * home/check-in.tsx and lib/symptom-tags.ts) ARE collected and DO flow
- * through here now — into the daily constraint re-filter (M5), the volume
- * multiplier chain (M8), and the explanation's TAG_LINES (M11). What's
- * still unported: STANDING symptom tags (asked once, persisting daily —
- * deliberately not built, see symptom-tags.ts's own scope note) and the
- * full condition-profile / contraindication system (M2's medical-condition
- * half), which stays collect-only-never-gating per the Chief Architect
- * Audit's own C3 finding until a real validation process exists. Those two
- * remain empty arrays / neutral defaults below.
+ * SCOPE NOTE — symptom tags flow through here from two places: acute ones
+ * picked fresh at each check-in (home/check-in.tsx) and standing ones set
+ * once in Settings (ctx.standingSymptomTags — see symptom-tags.ts's
+ * STANDING_SYMPTOM_TAGS). Both reach the daily constraint re-filter (M5) and
+ * the volume multiplier chain (M8); standing ones also shape the baseline
+ * itself (M3). Only acute ones get an explanation line — see Step 6. Still
+ * unported: the full condition-profile / contraindication system (M2's
+ * medical-condition half), which stays collect-only-never-gating per the
+ * Chief Architect Audit's own C3 finding until a real validation process
+ * exists — an empty array / neutral defaults below.
  */
 
 import { generateBaselinePlan, type OnboardingContext } from '@/lib/engine/baseline-plan';
 import { computeEffectiveConstraints } from '@/lib/engine/constraint-resolution';
-import { buildExplanation } from '@/lib/engine/explanation-string';
+import { buildExplanation, FINISHER_QUESTION } from '@/lib/engine/explanation-string';
 import { filterAndSubstitute } from '@/lib/engine/exercise-filtering';
 import { checkFallbackTrigger } from '@/lib/engine/fallback-logic';
 import { ENERGY_MODIFIER_TABLE } from '@/lib/engine/reference/energy-modifier-table';
 import { SYMPTOM_OVERRIDE_TABLE } from '@/lib/engine/reference/symptom-override-table';
+import type { SymptomTag } from '@/lib/symptom-tags';
 import type {
   BaselinePlan,
+  BodyArea,
   DailyCheckIn,
   EffectiveConstraintSet,
+  Equipment,
   Exercise,
   FallbackTrigger,
   PolicyApplicationRecord,
   RepStructure,
+  ScaledExercise,
   ScaledExerciseList,
   UserCalibration,
 } from '@/lib/engine/types';
@@ -69,7 +73,13 @@ import { bodyAreaPriorityScore, type TrainingState } from '@/lib/engine/training
 import { scaleVolume } from '@/lib/engine/volume-scaling';
 import { assembleWorkout } from '@/lib/engine/workout-assembly';
 import { localDateStr } from '@/lib/local-date';
-import { LOCAL_USER_ID, profileToOnboardingContext } from '@/lib/onboarding-to-engine';
+import { describeOwnedEquipment, ownedEquipmentFor } from '@/lib/owned-equipment';
+import {
+  EQUIPMENT_BY_ENVIRONMENT,
+  LOCAL_USER_ID,
+  profileToOnboardingContext,
+  SESSION_CEILING_BY_DURATION,
+} from '@/lib/onboarding-to-engine';
 import { ENVIRONMENT_LABELS } from '@/lib/profile-labels';
 import type { UserProfile } from '@/lib/user-profile';
 
@@ -147,6 +157,12 @@ export type PlanPreviewResult = {
    */
   overallSetsPct: number;
   /**
+   * What the optional finisher costs today, in minutes — known before it's
+   * accepted, so the offer can name it up front. null whenever there's no
+   * finisher to offer (any energy but 5, or a rest-day fallback).
+   */
+  finisherMinutes: number | null;
+  /**
    * Vervein addition, not in the vault — M8/M10's own flagged rounding-gap
    * diagnostics (see this function's own knownGaps-threading comment), real
    * and honest but written for engineers, not end users. Not rendered
@@ -179,6 +195,30 @@ export type PlanPreviewResult = {
 };
 
 /**
+ * One more set of the same exercise, with that set's share of the block's
+ * time added along with it. BUG FIX: the finisher used to add the set and
+ * leave durationMin alone, so the session's total never moved — and for a
+ * hold or carry, which the guided timer paces by splitting durationMin
+ * across its sets (exercise-timer.ts), the extra set made every hold
+ * shorter instead of adding any work (a 3-minute carry went from 60s a set
+ * to 45s). Rounded to the nearest minute, but never less than one more —
+ * rounding every exercise up instead overstated a 6-exercise finisher by
+ * ~4 minutes, while plain rounding would call a short hold's extra set free.
+ */
+function addFinisherSet(ex: ScaledExercise): ScaledExercise {
+  if (ex.adapted_sets === null) return ex;
+  const sets = ex.adapted_sets;
+  return {
+    ...ex,
+    adapted_sets: sets + 1,
+    adapted_duration_min:
+      ex.adapted_duration_min === null || ex.adapted_duration_min === 0
+        ? ex.adapted_duration_min
+        : Math.max(ex.adapted_duration_min + 1, Math.round((ex.adapted_duration_min * (sets + 1)) / sets)),
+  };
+}
+
+/**
  * Vervein addition, not in the vault — reads TrainingState's stimulusDebt
  * (shortfall by body area, real accumulated data, computed every run and
  * never consumed anywhere before this) and recency (days since an area was
@@ -198,11 +238,26 @@ export type PlanPreviewResult = {
  * least provisional evidence for one of the two fields — deliberate
  * epistemic humility, same rule as every other TrainingState reader in this
  * codebase: don't act on a field its own tier calls thin.
+ *
+ * `preferredBodyArea` (Vervein addition) is the one deliberate exception to
+ * "the engine decides, never the person" this reorder otherwise embodies —
+ * an explicit, opt-in choice always wins over the computed neglected-area
+ * signal, no tier check. Scoped specifically to check-in.tsx's rest-day
+ * "check in anyway" path (see its own isRestDay gate): a day the engine
+ * wasn't already planning to train at all is the one place honoring a
+ * person's own stated preference over the algorithm's own guess doesn't
+ * compete with this app's adaptive-plan identity for every OTHER day.
  */
 function reorderByBodyAreaPriority(
   filtered: Exercise[],
-  trainingState: TrainingState | undefined
+  trainingState: TrainingState | undefined,
+  preferredBodyArea?: BodyArea
 ): Exercise[] {
+  if (preferredBodyArea) {
+    return [...filtered].sort(
+      (a, b) => (b.body_area === preferredBodyArea ? 1 : 0) - (a.body_area === preferredBodyArea ? 1 : 0)
+    );
+  }
   if (!trainingState) return filtered;
   if (trainingState.stimulusDebt.tier === 'insufficient' && trainingState.recency.tier === 'insufficient') {
     return filtered;
@@ -253,13 +308,63 @@ export const BODY_AREA_PRIORITY_LABEL: Record<Exercise['body_area'], string> = {
 // Self-invalidates the moment a genuinely new profile object is passed in —
 // a real profile edit always produces a new object (setState never mutates
 // in place), so there's no staleness case a reference check could miss.
+//
+// BUG FIX (caught while adding equipmentOverride): also keys on the
+// effective equipment level, not just the profile reference. The pool
+// itself is generated at this equipment ceiling (onboardingConstraints
+// reads ctx.equipment) — without this, a day's real equipmentOverride could
+// only ever TIGHTEN what Gate 1 re-filters out of an already-generated
+// pool, never LOOSEN it, since the pool would still be capped at whatever
+// the STANDING profile's equipment was regardless of today's real answer.
+// It also fixes a real cross-contamination risk: check-in.tsx calls this
+// twice per render with the SAME profile reference (`preview`, with
+// whatever override is active, and `baseline`, deliberately without one) —
+// a cache keyed on profile identity alone would serve one call's plan to
+// the other whenever they disagree on equipment.
+// Also keys on the effective simple-exercise bias, same reasoning and same
+// bug class as the equipment key above — a real return-after-absence
+// (daysSinceLastCheckIn) can flip this to true for a session even when the
+// standing profile's own experience level wouldn't, and the pool itself
+// (not just the daily re-filter) needs to reflect that, or check-in.tsx's
+// own `preview`-vs-`baseline` pair could contaminate each other again.
 let cachedProfileInput: PlanPreviewInput | null = null;
+let cachedEquipment: Equipment | null = null;
+// Home gym and minimal share a tier but not a list, so the tier alone can't
+// key the pool once a list decides what's in it.
+let cachedOwnedKey: string | null = null;
+let cachedBiasSimpleExercises: boolean | null = null;
 let cachedBaselinePlan: BaselinePlan | null = null;
 
-function getBaselinePlanCached(input: PlanPreviewInput, ctx: OnboardingContext): BaselinePlan {
-  if (input === cachedProfileInput && cachedBaselinePlan) return cachedBaselinePlan;
+function getBaselinePlanCached(
+  input: PlanPreviewInput,
+  ctx: OnboardingContext,
+  effectiveEquipment: Equipment,
+  effectiveOwnedEquipment: readonly string[] | null,
+  effectiveBiasSimpleExercises: boolean
+): BaselinePlan {
+  const ownedKey = effectiveOwnedEquipment === null ? '*' : effectiveOwnedEquipment.join(',');
+  if (
+    input === cachedProfileInput &&
+    effectiveEquipment === cachedEquipment &&
+    ownedKey === cachedOwnedKey &&
+    effectiveBiasSimpleExercises === cachedBiasSimpleExercises &&
+    cachedBaselinePlan
+  ) {
+    return cachedBaselinePlan;
+  }
   cachedProfileInput = input;
-  cachedBaselinePlan = generateBaselinePlan(ctx, LOCAL_USER_ID);
+  cachedEquipment = effectiveEquipment;
+  cachedOwnedKey = ownedKey;
+  cachedBiasSimpleExercises = effectiveBiasSimpleExercises;
+  cachedBaselinePlan = generateBaselinePlan(
+    {
+      ...ctx,
+      equipment: effectiveEquipment,
+      ownedEquipment: effectiveOwnedEquipment,
+      biasSimpleExercises: effectiveBiasSimpleExercises,
+    },
+    LOCAL_USER_ID
+  );
   return cachedBaselinePlan;
 }
 
@@ -332,7 +437,9 @@ export function computePlanPreview(
    * one set per exercise — literally "a finisher set," not a second workout —
    * applied after the time-available trim so the stated time ceiling still
    * governs which exercises survive; the finisher is an explicit opt-in on
-   * top of that, not itself bounded by it.
+   * top of that, not itself bounded by it. Its time is counted, though (see
+   * addFinisherSet), and a finisher that takes the session past the chosen
+   * time says so rather than quietly overrunning it.
    */
   finisherAccepted?: boolean,
   /**
@@ -343,10 +450,66 @@ export function computePlanPreview(
    * rather than a broken sentence — every existing call site keeps working
    * unchanged if it doesn't pass this yet.
    */
-  healthReadinessReasons?: { rhrElevated: boolean; sleepDeficit: boolean }
+  healthReadinessReasons?: { rhrElevated: boolean; sleepDeficit: boolean },
+  /**
+   * Vervein addition, not in the vault — an explicit body-area choice from
+   * check-in.tsx's rest-day "check in anyway" flow only (see that screen's
+   * own isRestDay gate). Undefined on every other call site/day, byte-
+   * identical to today's existing behavior. See reorderByBodyAreaPriority's
+   * own doc comment for why this is allowed to override the engine's own
+   * neglected-area signal specifically here and nowhere else.
+   */
+  preferredBodyArea?: BodyArea,
+  /**
+   * Vervein addition, not in the vault — check-in.tsx's own "Where are you
+   * working out today?" answer, in the same onboarding-vocabulary keys
+   * ('full-gym'/'home-gym'/'minimal-equipment'/'bodyweight-only') the
+   * profile's own standing `environment` answer uses, mapped through the
+   * exact same EQUIPMENT_BY_ENVIRONMENT table onboarding-to-engine.ts
+   * already applies to that standing answer. Undefined means today's
+   * equipment matches the standing profile, byte-identical to every call
+   * site that doesn't pass one. Unlike the safety-driven ceilings above
+   * (intensity/impact, tightened only, never loosened — Most Restrictive
+   * Wins), equipment is an availability fact, not a safety limit, so a
+   * day's real answer fully REPLACES the standing one, in either direction
+   * — someone traveling has real LESS equipment than home; someone at a
+   * hotel gym for the day has real MORE. Same full-override precedent as
+   * preferredBodyArea above, for the same reason: this is the one input
+   * where what the person reports today is more true than a standing
+   * onboarding answer could be.
+   */
+  equipmentOverride?: string
 ): PlanPreviewResult {
   const ctx = profileToOnboardingContext(input);
-  const baselinePlan = getBaselinePlanCached(input, ctx);
+  const effectiveEquipment = equipmentOverride ? (EQUIPMENT_BY_ENVIRONMENT[equipmentOverride] ?? ctx.equipment) : ctx.equipment;
+  // The list follows the same override: a full gym today has everything,
+  // bodyweight today has nothing, and a home or minimal day uses their own
+  // saved list — the kit they've said they own — falling back to that
+  // setup's defaults only without one. Never the defaults over their list:
+  // a kettlebell-only home picking "Minimal" for the day would otherwise be
+  // handed dumbbell work they don't have. An override this doesn't
+  // recognise changes nothing, same as the tier.
+  const effectiveOwnedEquipment =
+    equipmentOverride && EQUIPMENT_BY_ENVIRONMENT[equipmentOverride]
+      ? ownedEquipmentFor(equipmentOverride, input.equipment)
+      : (ctx.ownedEquipment ?? null);
+  // Vervein addition — a real return-after-absence biases toward simpler,
+  // more familiar exercises for that one session, the same real mechanism
+  // ctx.biasSimpleExercises already gives a beginner (see baseline-plan.ts's
+  // own bySelectionOrder — a soft preference ordering, never a hard filter,
+  // so nothing becomes unselectable, just reordered behind). daysSinceLast
+  // CheckIn already gates the "welcome back" explanation wording below at
+  // this exact same RETURN_GAP_MIN_DAYS threshold; this is the same real
+  // detection now also touching what gets selected, not just what gets said.
+  const effectiveBiasSimpleExercises =
+    ctx.biasSimpleExercises || (daysSinceLastCheckIn !== undefined && daysSinceLastCheckIn >= RETURN_GAP_MIN_DAYS);
+  const baselinePlan = getBaselinePlanCached(
+    input,
+    ctx,
+    effectiveEquipment,
+    effectiveOwnedEquipment,
+    effectiveBiasSimpleExercises
+  );
 
   // Step 2 — today's constraint set, re-filtered against the baseline pool.
   const checkIn: DailyCheckIn = {
@@ -361,17 +524,18 @@ export function computePlanPreview(
     ctx.conditionProfile,
     ctx.standingSymptomTags,
     ctx.movementRestrictions,
-    ctx.equipment,
-    ctx.conditions
+    effectiveEquipment,
+    ctx.conditions,
+    effectiveOwnedEquipment
   );
-  const filterResult = filterAndSubstitute(baselinePlan, dailyConstraints, ctx.biasSimpleExercises);
+  const filterResult = filterAndSubstitute(baselinePlan, dailyConstraints, effectiveBiasSimpleExercises);
   // Body-area priority reorder (Vervein addition — see the function's own
   // doc comment). Every downstream use of "today's eligible exercises in
   // order" reads this, not filterResult.filtered directly, so the reorder
   // stays consistent across volume scaling, the trim step, and the final
   // per-exercise metadata zip below — a partial reorder (some call sites
   // updated, others not) would silently misalign body areas by index.
-  const prioritizedFiltered = reorderByBodyAreaPriority(filterResult.filtered, trainingState);
+  const prioritizedFiltered = reorderByBodyAreaPriority(filterResult.filtered, trainingState, preferredBodyArea);
   const prioritizedArea =
     prioritizedFiltered[0] && filterResult.filtered[0] && prioritizedFiltered[0].body_area !== filterResult.filtered[0].body_area
       ? prioritizedFiltered[0].body_area
@@ -380,7 +544,11 @@ export function computePlanPreview(
   // Standing ∪ acute, deduplicated — the same merge M13 does before both
   // the volume-scaling multiplier lookup and the explanation's tag lines.
   const activeTags = [...new Set([...ctx.standingSymptomTags, ...acuteSymptomTags])];
-  const activeSymptomOverrides = activeTags.map((t) => SYMPTOM_OVERRIDE_TABLE[t]).filter(Boolean);
+  // Cast, not a type-level guarantee — same reasoning as constraint-
+  // resolution.ts's identical cast. .filter(Boolean) (not a throw) is this
+  // call site's own existing, pre-existing behavior for an unrecognized
+  // tag — unchanged by this cast.
+  const activeSymptomOverrides = activeTags.map((t) => SYMPTOM_OVERRIDE_TABLE[t as SymptomTag]).filter(Boolean);
 
   // Step 3 — Fallback check.
   const fallback = checkFallbackTrigger(filterResult.filtered.length, energy, false);
@@ -399,6 +567,12 @@ export function computePlanPreview(
   // session is the engine's safety pair, never a candidate for an optional
   // add-on).
   let finisherApplied = false;
+  // Set alongside finisherApplied (Step 4.6) — see PlanPreviewResult's own
+  // field comment.
+  let finisherMinutes: number | null = null;
+  // The total before the finisher's sets were added, for the explanation's
+  // time sentence — only differs from workout.totalDuration once it's applied.
+  let durationBeforeFinisher = 0;
   // M8's own flagged rounding-gap messages (see volume-scaling.ts's header
   // comment) — collected here rather than discarded the moment scaleVolume
   // returns, which is what happened before this field existed. Empty for
@@ -464,14 +638,19 @@ export function computePlanPreview(
       // that's the known, disclosed "for" vs "fit" gap this function's own
       // explanation-building step further down already accounts for.
       let trimmedLength = volumeResult.exercises.length;
-      if (timeAvailableMin !== undefined) {
+      // Today's pick wins; otherwise the session length they chose at
+      // onboarding (SESSION_CEILING_BY_DURATION) is the ceiling. Only a pick
+      // made today earns the "Shortened for the N minutes you have today"
+      // note — the standing answer shapes every plan quietly, the way a
+      // movement restriction does.
+      const timeCeiling = timeAvailableMin ?? SESSION_CEILING_BY_DURATION[input.duration ?? ''];
+      if (timeCeiling !== undefined) {
         while (
           trimmedLength > 2 &&
-          assembleWorkout(volumeResult.exercises.slice(0, trimmedLength), false).workout.totalDuration >
-            timeAvailableMin
+          assembleWorkout(volumeResult.exercises.slice(0, trimmedLength), false).workout.totalDuration > timeCeiling
         ) {
           trimmedLength -= 1;
-          timeTrimmed = true;
+          if (timeAvailableMin !== undefined) timeTrimmed = true;
         }
       }
       const trimmedExercises = volumeResult.exercises.slice(0, trimmedLength);
@@ -485,10 +664,15 @@ export function computePlanPreview(
       // duration-only exercises (base_sets null — a stretch, a hold with no
       // countable set) have no "set" to add one to, so those pass through
       // unchanged rather than fabricating a sets value that never existed.
-      finisherApplied = energy === 5 && finisherAccepted === true;
-      assembledExercises = finisherApplied
-        ? trimmedExercises.map((ex) => (ex.adapted_sets !== null ? { ...ex, adapted_sets: ex.adapted_sets + 1 } : ex))
-        : trimmedExercises;
+      // Its cost is computed whether or not it's accepted, so the offer can
+      // name it before anyone says yes.
+      durationBeforeFinisher = assembleWorkout(trimmedExercises, false).workout.totalDuration;
+      const withFinisherSets = energy === 5 ? trimmedExercises.map(addFinisherSet) : null;
+      if (withFinisherSets) {
+        finisherMinutes = assembleWorkout(withFinisherSets, false).workout.totalDuration - durationBeforeFinisher;
+      }
+      finisherApplied = withFinisherSets !== null && finisherAccepted === true;
+      assembledExercises = finisherApplied && withFinisherSets ? withFinisherSets : trimmedExercises;
 
       // Recomputed over the surviving subset only, not volumeResult's own
       // pre-trim figure — same ratio-average formula volume-scaling.ts
@@ -535,12 +719,16 @@ export function computePlanPreview(
   // Step 5 — assembly (honest totalDuration).
   const { workout, knownGaps: assemblyKnownGaps } = assembleWorkout(assembledExercises, isRestDay);
 
-  // Step 6 — explanation.
+  // Step 6 — explanation. Acute tags only: a standing one is a setting,
+  // like a movement restriction, and gets no line of its own — the vault
+  // restates it every day, and a TAG_LINES sentence ("…today") repeated
+  // daily for something set once reads as nagging and buries what actually
+  // changed today. Settings' Ongoing Symptoms sheet says what each does.
+  const todaysTags = [...new Set(acuteSymptomTags)].filter((t) => !ctx.standingSymptomTags.includes(t));
   const { explanation: rawBaseExplanation } = buildExplanation(
     energy,
-    activeTags,
+    todaysTags,
     calibration,
-    assembledExercises,
     workout.totalDuration,
     overallSetsPct
   );
@@ -674,8 +862,26 @@ export function computePlanPreview(
   // debt) — priorityOf blends both, so naming one specific mechanism as THE
   // reason would overclaim whichever one didn't actually drive it this time.
   // Lowest priority of the capped observations: nice context, lowest stakes.
-  if (prioritizedArea) {
-    observations.push(`Started with ${BODY_AREA_PRIORITY_LABEL[prioritizedArea]} — it's fallen behind the rest lately.`);
+  // Two different real causes can move the same first exercise — the
+  // computed neglected-area signal above, or (rest-day "check in anyway"
+  // only) an explicit preferredBodyArea. Reusing "exactly what you asked
+  // for" for the first case would be a real inaccuracy: nothing about a
+  // self-chosen bonus session applies to a signal the person never touched.
+  //
+  // BUG FIX: this used to read "it's fallen behind the rest lately" — a
+  // debt/guilt framing (this app's own bodyAreaPriorityScore literally
+  // calls the underlying field stimulusDebt) for what the physiology
+  // actually is: a body area that hasn't been loaded in a while is
+  // RECOVERED, not neglected. Same real signal, opposite emotional
+  // valence — "well-rested" is the more honest read of what long recency
+  // means, not just the kinder one, and it's this app's own explicit stance
+  // against any "you're behind" framing (see the vault's own no-streaks
+  // rule this already lives alongside). Observation only, never a command —
+  // this states which area led the order, not that the user should train it.
+  if (prioritizedArea && preferredBodyArea && prioritizedArea === preferredBodyArea) {
+    observations.push(`Started with ${BODY_AREA_PRIORITY_LABEL[prioritizedArea]} — exactly what you asked for today.`);
+  } else if (prioritizedArea) {
+    observations.push(`Started with ${BODY_AREA_PRIORITY_LABEL[prioritizedArea]} — it's well-rested and ready for more.`);
   }
 
   const MAX_OBSERVATIONS = 3;
@@ -690,8 +896,10 @@ export function computePlanPreview(
   // toggle itself) only once capacityTrend has genuinely established an
   // improving direction — never claims a trend off thin data, same
   // established-tier-only rule as every other capacityTrend read.
+  // Once accepted, the template's own question has been answered: drop it
+  // rather than asking and confirming in the same breath.
   const withFinisherNote = finisherApplied
-    ? `${withObservations} ${
+    ? `${withObservations.replace(` ${FINISHER_QUESTION}`, '')} ${
         trainingState && trainingState.capacityTrend.tier === 'established' && trainingState.capacityTrend.value === 'improving'
           ? "Added a finisher set to each exercise — you've been trending up, so there's real room for it."
           : 'Added a finisher set to each exercise.'
@@ -710,9 +918,26 @@ export function computePlanPreview(
   // stubborn 2-exercise pair longer than the ceiling itself (e.g. two real
   // 5-minute holds against a shorter budget) can leave the result still
   // over. "For" stays true either way; "fit" wouldn't.
-  const explanation = timeTrimmed
-    ? `${withFinisherNote} Shortened for the ${timeAvailableMin} minutes you have today.`
-    : withFinisherNote;
+  //
+  // A finisher can take a session that fit back over the chosen time — it's
+  // added after the trim, on purpose (more work was asked for, so nothing
+  // is cut to make room). Said plainly rather than left for the person to
+  // discover mid-workout. Only when the finisher is what pushed it over:
+  // a 2-exercise floor that was already over (see "for" above) isn't the
+  // finisher's doing.
+  const finisherRunsOver =
+    finisherApplied &&
+    timeAvailableMin !== undefined &&
+    durationBeforeFinisher <= timeAvailableMin &&
+    workout.totalDuration > timeAvailableMin;
+  const timeNote = finisherRunsOver
+    ? timeTrimmed
+      ? ` Shortened for the ${timeAvailableMin} minutes you have today — the finisher takes it to ${workout.totalDuration}.`
+      : ` The finisher takes it to ${workout.totalDuration} minutes, past the ${timeAvailableMin} you have today.`
+    : timeTrimmed
+      ? ` Shortened for the ${timeAvailableMin} minutes you have today.`
+      : '';
+  const explanation = `${withFinisherNote}${timeNote}`;
 
   // knownGaps THREADING (Vervein addition, not in the vault) — M8
   // (volume-scaling.ts) and M10 (workout-assembly.ts) have always computed
@@ -763,7 +988,31 @@ export function computePlanPreview(
     };
   });
 
-  const equipmentNote = `Selected from your ${ENVIRONMENT_LABELS[input.environment ?? ''] ?? 'equipment'} setup.`;
+  // BUG FIX (caught while adding equipmentOverride): this always read the
+  // standing profile's environment, regardless of today's own override —
+  // on a day the override was active, this would have kept naming the
+  // standing setup even though a genuinely different one governed which
+  // exercises actually got selected. Names whichever one was real for today.
+  //
+  // BUG FIX #2 (found in a later full-app audit): this originally branched
+  // on equipmentOverride's bare truthiness, not on whether it actually
+  // resolved to a real Equipment value the way effectiveEquipment itself
+  // does above. For a value absent from EQUIPMENT_BY_ENVIRONMENT (stale
+  // data from an older backup, or a value the environment type gained
+  // before a table entry existed for it), effectiveEquipment already
+  // correctly falls back to the standing ctx.equipment — but this note
+  // would still say "today's [equipment fallback label]" while the
+  // standing setup was what actually governed selection. Gated on the same
+  // resolved lookup effectiveEquipment uses, so the two can never disagree.
+  const resolvedOverrideLabel = equipmentOverride ? ENVIRONMENT_LABELS[equipmentOverride] : undefined;
+  // A home list names the kit itself — "your Home Gym setup" says nothing
+  // about what the plan was actually built from.
+  const equipmentNote =
+    effectiveOwnedEquipment && effectiveOwnedEquipment.length > 0
+      ? `Built around your ${describeOwnedEquipment(effectiveOwnedEquipment)}.`
+      : resolvedOverrideLabel
+        ? `Selected from today's ${resolvedOverrideLabel} setup.`
+        : `Selected from your ${ENVIRONMENT_LABELS[input.environment ?? ''] ?? 'equipment'} setup.`;
 
   // Fallback-branch exercises are full Exercise objects with an `id`, not a
   // ScaledExercise's `exerciseId`/`adapted_sets` — but ledger/debt folds
@@ -804,6 +1053,7 @@ export function computePlanPreview(
     exercises,
     constraints: dailyConstraints,
     overallSetsPct,
+    finisherMinutes,
     knownGaps,
     trace: {
       fallbackFired: isRestDay,

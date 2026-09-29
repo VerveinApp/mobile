@@ -79,10 +79,10 @@ export type RedeemReferralOutcome =
  * owner across two accounts, and the actual RevenueCat reward grant, both
  * need privileged/secret access this client never has).
  *
- * DISCLOSED: same "written but not yet deployed" state as account.ts's
- * deleteAccount — until `supabase functions deploy redeem-referral` has
- * actually been run, every real call here will fail, and this honestly
- * reports that instead of pretending a reward was granted.
+ * Deployed 2026-09-13 alongside account.ts's deleteAccount — live and
+ * verified (returns 401 without a session, not 404). The `notDeployed` path
+ * below stays as a defensive fallback for the same reason described in
+ * deleteAccount's own comment.
  */
 export async function redeemReferralCode(code: string): Promise<RedeemReferralOutcome> {
   const { data, error } = await supabase.functions.invoke('redeem-referral', { body: { code } });

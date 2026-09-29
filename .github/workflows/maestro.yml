@@ -210,16 +210,16 @@ jobs:
       - name: Run Maestro flows
         run: |
           # Runs 9/10/12 all revealed the same root cause: tab-navigation,
-          # rest-day-checkin, exercise-swap-sheet, and progress-photo-add all
-          # assume an already-onboarded, signed-in profile -- true of every
-          # simulator used for local dev this session, never true of a
-          # genuinely fresh CI install. Each of those 4 now opens
-          # vervein://e2e-seed as its own first step (see app/e2e-seed.tsx)
-          # to seed that state before doing anything else; smoke-launch
-          # deliberately does NOT, since verifying the real first-launch
-          # screen is its whole point.
+          # rest-day-checkin, exercise-swap-sheet, progress-photo-add, and
+          # goals-weekly-burn all assume an already-onboarded, signed-in
+          # profile -- true of every simulator used for local dev this
+          # session, never true of a genuinely fresh CI install. Each of
+          # those 5 now opens vervein://e2e-seed as its own first step (see
+          # app/e2e-seed.tsx) to seed that state before doing anything else;
+          # smoke-launch deliberately does NOT, since verifying the real
+          # first-launch screen is its whole point.
           FAILED=0
-          for flow in smoke-launch tab-navigation rest-day-checkin exercise-swap-sheet progress-photo-add; do
+          for flow in smoke-launch tab-navigation rest-day-checkin exercise-swap-sheet progress-photo-add goals-weekly-burn; do
             # `if ! ...` (not a bare command) so one flow failing doesn't
             # abort the loop under -e -- every flow should get a chance to
             # run and report, not just whichever one happens to be first.

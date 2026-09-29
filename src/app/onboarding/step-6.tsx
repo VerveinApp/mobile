@@ -1,12 +1,15 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Animated, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+
+import { useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated from 'react-native-reanimated';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { goBack } from '@/lib/onboarding-nav';
 import { useFadeInEntering } from '@/lib/screen-transitions';
+import { AndroidRippleOnAccent, Type } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 import {
   ArrowUpIconGraphic,
@@ -55,8 +58,7 @@ function useOptionInteraction() {
  * what makes the merge fit on one screen at all.
  */
 export default function OnboardingScheduleScreen() {
-  const { width: windowWidth } = useWindowDimensions();
-  const scale = windowWidth / CANVAS_WIDTH;
+  const scale = useCanvasScale();
   const { colors, resolvedScheme } = useAppTheme();
   const washColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
   const styles = useMemo(() => createStyles(colors, washColor), [colors, washColor]);
@@ -66,11 +68,13 @@ export default function OnboardingScheduleScreen() {
     goal,
     experience,
     environment,
+    equipment,
     verifiedEmail,
     healthConsent,
     sex,
     heightCm,
     weightKg,
+    age,
     duration: incomingDuration,
     days: incomingDays,
   } = useLocalSearchParams<{
@@ -78,11 +82,13 @@ export default function OnboardingScheduleScreen() {
     goal?: string;
     experience?: string;
     environment?: string;
+    equipment?: string;
     verifiedEmail?: string;
     healthConsent?: string;
     sex?: string;
     heightCm?: string;
     weightKg?: string;
+    age?: string;
     duration?: string;
     days?: string;
   }>();
@@ -92,11 +98,13 @@ export default function OnboardingScheduleScreen() {
     goal: goal ?? '',
     experience: experience ?? '',
     environment: environment ?? '',
+    equipment: equipment ?? '',
     verifiedEmail: verifiedEmail ?? '',
     healthConsent: healthConsent ?? 'false',
     sex: sex ?? '',
     heightCm: heightCm ?? '',
     weightKg: weightKg ?? '',
+    age: age ?? '',
   };
 
   const [duration, setDuration] = useState<WorkoutDurationId | null>(
@@ -269,12 +277,15 @@ export default function OnboardingScheduleScreen() {
 
         <Pressable
           style={styles.primaryButtonHit}
+          // 38pt tall by design; the slop brings the tap target past 44pt.
+          hitSlop={{ top: 6, bottom: 6 }}
           onPress={handleContinue}
           disabled={isUnselected}
           onHoverIn={continueHover.onHoverIn}
           onHoverOut={continueHover.onHoverOut}
           onPressIn={continuePress.onPressIn}
           onPressOut={continuePress.onPressOut}
+          android_ripple={AndroidRippleOnAccent}
         >
           <Animated.View
             style={[
@@ -362,7 +373,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       top: 188,
       paddingHorizontal: 40,
       color: colors.text,
-      fontSize: 20,
+      fontSize: Type.headerTitle,
       lineHeight: 27,
       textAlign: 'center',
       fontFamily: 'Geist-SemiBold',
@@ -374,7 +385,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       top: 222,
       paddingHorizontal: 56,
       color: colors.textSecondary,
-      fontSize: 11,
+      fontSize: Type.caption,
       lineHeight: 16.5,
       textAlign: 'center',
       fontFamily: 'Geist-Medium',
@@ -384,7 +395,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       left: 16,
       top: 284,
       color: colors.textTertiary,
-      fontSize: 10.5,
+      fontSize: Type.micro,
       letterSpacing: 0.6,
       textTransform: 'uppercase',
       fontFamily: 'Geist-SemiBold',
@@ -485,7 +496,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
     },
     primaryText: {
       color: '#ffffff',
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     buttonArrow: {

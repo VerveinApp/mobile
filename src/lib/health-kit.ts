@@ -21,6 +21,7 @@ const READ_TYPES = [
   'HKQuantityTypeIdentifierStepCount',
   'HKQuantityTypeIdentifierRestingHeartRate',
   'HKCategoryTypeIdentifierSleepAnalysis',
+  'HKQuantityTypeIdentifierActiveEnergyBurned',
 ] as const;
 
 // The one writeable type this app asks for — a completed session showing up
@@ -102,6 +103,7 @@ export async function requestHealthKitAccess(): Promise<boolean> {
     granted = false;
   }
   if (granted) {
+    invalidateReadinessCache();
     try {
       await AsyncStorage.setItem(CONNECTED_KEY, 'true');
     } catch {
@@ -112,6 +114,7 @@ export async function requestHealthKitAccess(): Promise<boolean> {
 }
 
 export async function disconnectHealthKit(): Promise<void> {
+  invalidateReadinessCache();
   try {
     await AsyncStorage.removeItem(CONNECTED_KEY);
   } catch {
@@ -119,29 +122,100 @@ export async function disconnectHealthKit(): Promise<void> {
   }
 }
 
-/** Daily step totals for the last `days` days, oldest first. Empty if not connected or no data. */
+/**
+ * Local-midnight window for a daily statistics collection: an anchor at
+ * today's midnight (so every bucket is one real local calendar day) and a
+ * start `days - 1` midnights back (so the window is exactly `days` days).
+ */
+function dailyStatisticsWindow(days: number): { anchorDate: Date; startDate: Date } {
+  const anchorDate = new Date();
+  anchorDate.setHours(0, 0, 0, 0);
+  const startDate = new Date(anchorDate);
+  startDate.setDate(anchorDate.getDate() - (days - 1));
+  return { anchorDate, startDate };
+}
+
+/** Maps a daily statistics collection to this module's DailyMetric shape —
+ * days with no data at all are left out, same as the old per-sample sums. */
+function toDailyMetrics(buckets: readonly { startDate?: Date; sumQuantity?: { quantity: number } }[]): DailyMetric[] {
+  return buckets
+    .flatMap((bucket) =>
+      bucket.startDate && bucket.sumQuantity
+        ? [{ date: localDateStr(bucket.startDate), value: Math.round(bucket.sumQuantity.quantity) }]
+        : []
+    )
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * Daily step totals for the last `days` days, oldest first. Empty if not
+ * connected or no data.
+ *
+ * BUG FIX: this used to add up raw samples — but an iPhone and an Apple
+ * Watch both record steps for the same walk, and HealthKit keeps both, so
+ * every Watch owner's totals came out close to double. A cumulative-sum
+ * statistics query is HealthKit's own de-duplicated total (the same number
+ * the Health app shows), bucketed by local calendar day.
+ */
 export async function getRecentSteps(days: number): Promise<DailyMetric[]> {
   const HealthKit = await getModule();
   if (!HealthKit || !(await hasConnectedHealthKit())) return [];
-  const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const { anchorDate, startDate } = dailyStatisticsWindow(days);
   try {
-    const samples = await HealthKit.queryQuantitySamples('HKQuantityTypeIdentifierStepCount', {
-      filter: { date: { startDate } },
-      limit: 0,
-      unit: 'count',
-      ascending: true,
-    });
-    const byDate = new Map<string, number>();
-    for (const s of samples) {
-      const date = localDateStr(s.startDate);
-      byDate.set(date, (byDate.get(date) ?? 0) + s.quantity);
-    }
-    return Array.from(byDate.entries())
-      .map(([date, value]) => ({ date, value: Math.round(value) }))
-      .sort((a, b) => a.date.localeCompare(b.date));
+    const buckets = await HealthKit.queryStatisticsCollectionForQuantity(
+      'HKQuantityTypeIdentifierStepCount',
+      ['cumulativeSum'],
+      anchorDate,
+      { day: 1 },
+      { filter: { date: { startDate } }, unit: 'count' }
+    );
+    return toDailyMetrics(buckets);
   } catch {
     return [];
   }
+}
+
+/** Daily active-energy (kcal) totals for the last `days` days, oldest first.
+ * Empty if not connected or no data — same de-duplicated statistics query
+ * as getRecentSteps above (and the same iPhone+Watch double-count fix). */
+export async function getRecentActiveEnergy(days: number): Promise<DailyMetric[]> {
+  const HealthKit = await getModule();
+  if (!HealthKit || !(await hasConnectedHealthKit())) return [];
+  const { anchorDate, startDate } = dailyStatisticsWindow(days);
+  try {
+    const buckets = await HealthKit.queryStatisticsCollectionForQuantity(
+      'HKQuantityTypeIdentifierActiveEnergyBurned',
+      ['cumulativeSum'],
+      anchorDate,
+      { day: 1 },
+      { filter: { date: { startDate } }, unit: 'kcal' }
+    );
+    return toDailyMetrics(buckets);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * This week's real active-energy total (Monday through today, local
+ * calendar) — same week boundary session-history.ts's own
+ * getWeeklyCaloriesBurned uses, so a caller combining both sources is
+ * always comparing the same window. Returns null specifically when
+ * HealthKit isn't connected — distinct from a real, connected 0 — so a
+ * caller can tell "no real source, fall back to the on-device estimate"
+ * apart from "the real source genuinely says zero so far this week."
+ */
+export async function getWeeklyActiveEnergyKcal(): Promise<number | null> {
+  if (!(await hasConnectedHealthKit())) return null;
+  const daily = await getRecentActiveEnergy(7);
+  const now = new Date();
+  const todayIndex = now.getDay();
+  const mondayOffset = (todayIndex + 6) % 7;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - mondayOffset);
+  const mondayStr = localDateStr(monday);
+  const todayStr = localDateStr(now);
+  return daily.filter((d) => d.date >= mondayStr && d.date <= todayStr).reduce((sum, d) => sum + d.value, 0);
 }
 
 /**
@@ -251,18 +325,37 @@ const READINESS_MAX_REDUCTION = 0.15;
 /**
  * Both real readiness signals in one place, since getHealthReadinessModifier
  * and getHealthReadinessReasons both need them and neither should silently
- * drift from the other's idea of "what counts as elevated/short." Two
- * independent HealthKit reads either way (this doesn't cache across the two
- * exported calls below) — both are cheap local queries, not network calls,
- * so computing them twice on the rare occasion a caller wants both the
- * modifier and the reasons is a non-issue.
+ * drift from the other's idea of "what counts as elevated/short."
+ *
+ * Shared for READINESS_CACHE_MS. Every caller (Home, Train, check-in) asks
+ * for the modifier AND the reasons in parallel, on every focus — which used
+ * to mean four HealthKit queries (10 days of resting heart rate and sleep,
+ * twice each) per tab switch. Readiness only moves when new Health data
+ * lands, so one computation per half-minute serves every caller; connecting
+ * or disconnecting Health clears it immediately.
  */
+const READINESS_CACHE_MS = 30_000;
+let readinessCache: {
+  at: number;
+  trends: Promise<{ rhrTrend: RestingHeartRateTrend | null; sleepTrend: SleepDebtTrend | null }>;
+} | null = null;
+
+function invalidateReadinessCache(): void {
+  readinessCache = null;
+}
+
 async function getReadinessTrends(): Promise<{
   rhrTrend: RestingHeartRateTrend | null;
   sleepTrend: SleepDebtTrend | null;
 }> {
-  const [rhrTrend, sleepTrend] = await Promise.all([getRestingHeartRateTrend(), getSleepDebtTrend()]);
-  return { rhrTrend, sleepTrend };
+  const now = Date.now();
+  if (readinessCache && now - readinessCache.at < READINESS_CACHE_MS) return readinessCache.trends;
+  const trends = Promise.all([getRestingHeartRateTrend(), getSleepDebtTrend()]).then(([rhrTrend, sleepTrend]) => ({
+    rhrTrend,
+    sleepTrend,
+  }));
+  readinessCache = { at: now, trends };
+  return trends;
 }
 
 /**
@@ -304,17 +397,59 @@ export async function getHealthReadinessReasons(): Promise<HealthReadinessReason
   };
 }
 
+// A "sleep day" runs 6pm to 6pm: anything that ENDS after 6pm counts toward
+// the next day's night. So a night from 11pm to 7am lands entirely on the
+// day you woke up, an early bedtime (9pm) joins the rest of that night, and
+// an afternoon nap stays on the day it happened.
+const SLEEP_DAY_OFFSET_MS = 6 * 60 * 60 * 1000;
+
 /**
- * Total sleep hours per night for the last `days` days. HealthKit returns
+ * Pure core of getRecentSleepHours, exported for tests. Two real bugs this
+ * replaces:
+ *
+ * 1. Segments used to be bucketed by the date they STARTED — so the part of
+ *    "last night" before midnight landed on yesterday, and today's bucket
+ *    only held the hours after midnight. Anyone who falls asleep before
+ *    midnight always looked short against their baseline, and Plus users'
+ *    plans were trimmed for a "sleep deficit" after a normal night.
+ * 2. Overlapping segments were summed — an Apple Watch, the iPhone, and a
+ *    third-party sleep app can all record the same night — inflating totals.
+ *    Overlaps are merged into one continuous interval first.
+ */
+export function sleepHoursByNight(intervals: readonly { start: Date; end: Date }[]): DailyMetric[] {
+  const sorted = intervals
+    .map(({ start, end }) => [start.getTime(), end.getTime()] as [number, number])
+    .filter(([start, end]) => end > start)
+    .sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [];
+  for (const [start, end] of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && start <= last[1]) last[1] = Math.max(last[1], end);
+    else merged.push([start, end]);
+  }
+  const hoursByDate = new Map<string, number>();
+  for (const [start, end] of merged) {
+    const date = localDateStr(new Date(end + SLEEP_DAY_OFFSET_MS));
+    hoursByDate.set(date, (hoursByDate.get(date) ?? 0) + (end - start) / 3_600_000);
+  }
+  return Array.from(hoursByDate.entries())
+    .map(([date, value]) => ({ date, value: Math.round(value * 10) / 10 }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * Total sleep hours per night for the last `days` nights, oldest first —
+ * see sleepHoursByNight for how segments become nights. HealthKit returns
  * one row per sleep *segment* (a night can be several rows — asleep/awake/
- * core/deep/REM stages depending on the source device), so this sums
- * segment durations per calendar date rather than assuming one row = one
- * night.
+ * core/deep/REM stages depending on the source device).
  */
 export async function getRecentSleepHours(days: number): Promise<DailyMetric[]> {
   const HealthKit = await getModule();
   if (!HealthKit || !(await hasConnectedHealthKit())) return [];
-  const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  // An extra half day back so the oldest night's pre-midnight start is in
+  // the query too; the partial bucket that can create is trimmed below.
+  const startDate = new Date(Date.now() - (days * 24 + 12) * 60 * 60 * 1000);
+  const oldestDate = localDateStr(new Date(Date.now() - (days - 1) * 24 * 60 * 60 * 1000));
   try {
     const samples = await HealthKit.queryCategorySamples('HKCategoryTypeIdentifierSleepAnalysis', {
       filter: { date: { startDate } },
@@ -324,16 +459,10 @@ export async function getRecentSleepHours(days: number): Promise<DailyMetric[]> 
     // enum — inBed (0) and awake (2) segments are deliberately excluded,
     // only real asleep time counts.
     const asleepValues = new Set<number>([1, 3, 4, 5]);
-    const hoursByDate = new Map<string, number>();
-    for (const sample of samples) {
-      if (!asleepValues.has(sample.value as unknown as number)) continue;
-      const date = localDateStr(sample.startDate);
-      const hours = (sample.endDate.getTime() - sample.startDate.getTime()) / 3_600_000;
-      hoursByDate.set(date, (hoursByDate.get(date) ?? 0) + hours);
-    }
-    return Array.from(hoursByDate.entries())
-      .map(([date, value]) => ({ date, value: Math.round(value * 10) / 10 }))
-      .sort((a, b) => a.date.localeCompare(b.date));
+    const intervals = samples
+      .filter((sample) => asleepValues.has(sample.value as unknown as number))
+      .map((sample) => ({ start: sample.startDate, end: sample.endDate }));
+    return sleepHoursByNight(intervals).filter((night) => night.date >= oldestDate);
   } catch {
     return [];
   }

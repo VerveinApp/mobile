@@ -1,10 +1,39 @@
 import {
   bodyAreaPriorityScore,
+  compileTrainingState,
   getMostNeglectedBodyArea,
   tierOf,
+  type MinimalCheckIn,
+  type MinimalDecisionTrace,
   type TrainingState,
 } from '@/lib/engine/training-state';
 import type { BodyArea } from '@/lib/engine/types';
+
+// Real library exercises, one per body area, all with base_sets: 3 — picked
+// so arithmetic in the ledger/debt tests below stays simple and every
+// resolved body_area is unambiguous (compileTrainingState resolves ids
+// through the real exerciseLibrary singleton, not a mock).
+const LOWER_EX = 'ex_101'; // Barbell Back Squat, base_sets: 3
+const UPPER_EX = 'ex_105'; // Standing Barbell Overhead Press, base_sets: 3
+const CORE_EX = 'ex_127'; // Pallof Press (Cable), base_sets: 3
+const FULL_EX = 'ex_103'; // Conventional Deadlift (Barbell), base_sets: 3
+
+function checkIn(date: string, energyScore: number, skipped = false): MinimalCheckIn {
+  return { date, energyScore, skipped };
+}
+
+function trace(
+  date: string,
+  overrides: Partial<Omit<MinimalDecisionTrace, 'date'>> = {}
+): MinimalDecisionTrace {
+  return {
+    date,
+    fallbackFired: false,
+    gate1Exclusions: [],
+    output: { exercises: [] },
+    ...overrides,
+  };
+}
 
 function makeTrainingState(overrides: {
   debtTier?: 'insufficient' | 'provisional' | 'established';
@@ -140,5 +169,255 @@ describe('getMostNeglectedBodyArea', () => {
       recencyTier: 'insufficient',
     });
     expect(getMostNeglectedBodyArea(state)).toBe('lower');
+  });
+});
+
+function dateOffset(base: string, days: number): string {
+  const d = new Date(`${base}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+const REF = '2026-06-20';
+
+describe('compileTrainingState', () => {
+  it('returns safe, all-insufficient defaults with no history at all', () => {
+    const state = compileTrainingState({ checkIns: [], traces: [], referenceDate: REF });
+    expect(state.capacityTrend).toEqual({ value: 'stable', basis: 0, tier: 'insufficient' });
+    expect(state.rollingWindow.tier).toBe('insufficient');
+    expect(state.rollingWindow.value).toEqual({ days: [], yesterdayLowEnergy: false, consecutiveLowDays: 0 });
+    expect(state.decisionMemory).toEqual({ value: { runs: [], fallbackRate: 0 }, basis: 0, tier: 'insufficient' });
+    expect(state.stimulusLedger.tier).toBe('insufficient');
+    expect(state.stimulusDebt.tier).toBe('insufficient');
+    expect(state.recency.tier).toBe('insufficient');
+    for (const area of ['full', 'upper', 'lower', 'core'] as BodyArea[]) {
+      expect(state.stimulusDebt.value[area]).toEqual({ debtSets: 0, sessionsCounted: 0 });
+      expect(state.recency.value[area]).toEqual({ daysSinceTrained: null });
+    }
+  });
+
+  it('excludes a check-in dated on or after the reference date — only strictly-prior history counts', () => {
+    const checkIns = [checkIn(dateOffset(REF, -1), 4), checkIn(REF, 1), checkIn(dateOffset(REF, 1), 1)];
+    const state = compileTrainingState({ checkIns, traces: [], referenceDate: REF });
+    expect(state.rollingWindow.value.days).toHaveLength(1);
+    expect(state.rollingWindow.value.days[0].date).toBe(dateOffset(REF, -1));
+  });
+
+  it('capacityTrend stays insufficient below a 5-day window even once basis alone would clear the provisional threshold — REGRESSION GUARD: the trend VALUE only becomes a real computation at window.length >= 5, so reporting tierOf(basis) directly at basis=4 would claim a real trend off an untouched default', () => {
+    const checkIns = [1, 2, 3, 4].map((i) => checkIn(dateOffset(REF, -i), 3));
+    const state = compileTrainingState({ checkIns, traces: [], referenceDate: REF });
+    expect(state.capacityTrend.basis).toBe(4);
+    expect(state.capacityTrend.tier).toBe('insufficient');
+  });
+
+  it('capacityTrend reports a real tier once the window reaches 5 — provisional at exactly 5 (below the established threshold of 10)', () => {
+    const checkIns = [1, 2, 3, 4, 5].map((i) => checkIn(dateOffset(REF, -i), 3));
+    const state = compileTrainingState({ checkIns, traces: [], referenceDate: REF });
+    expect(state.capacityTrend.basis).toBe(5);
+    expect(state.capacityTrend.tier).toBe('provisional');
+  });
+
+  it('capacityTrend reports "improving" when the most recent 3 days average meaningfully higher than the prior days in the window', () => {
+    // Window (oldest->newest, 7 days): earlier 4 average 2, recent 3 average 4 -> delta 2, well past TREND_DELTA (0.5).
+    const energies = [2, 2, 2, 2, 4, 4, 4];
+    const checkIns = energies.map((e, i) => checkIn(dateOffset(REF, -(energies.length - i)), e));
+    const state = compileTrainingState({ checkIns, traces: [], referenceDate: REF });
+    expect(state.capacityTrend.value).toBe('improving');
+  });
+
+  it('capacityTrend reports "declining" when the most recent 3 days average meaningfully lower', () => {
+    const energies = [4, 4, 4, 4, 2, 2, 2];
+    const checkIns = energies.map((e, i) => checkIn(dateOffset(REF, -(energies.length - i)), e));
+    const state = compileTrainingState({ checkIns, traces: [], referenceDate: REF });
+    expect(state.capacityTrend.value).toBe('declining');
+  });
+
+  it('capacityTrend reports "stable" when the swing is within TREND_DELTA either way', () => {
+    const energies = [3, 3, 3, 3, 3, 3, 3];
+    const checkIns = energies.map((e, i) => checkIn(dateOffset(REF, -(energies.length - i)), e));
+    const state = compileTrainingState({ checkIns, traces: [], referenceDate: REF });
+    expect(state.capacityTrend.value).toBe('stable');
+  });
+
+  it('only folds the trailing ROLLING_WINDOW_N (7) days into the window, even with much longer real history', () => {
+    const checkIns = Array.from({ length: 20 }, (_, i) => checkIn(dateOffset(REF, -(20 - i)), 3));
+    const state = compileTrainingState({ checkIns, traces: [], referenceDate: REF });
+    expect(state.rollingWindow.value.days).toHaveLength(7);
+    expect(state.rollingWindow.value.days[0].date).toBe(dateOffset(REF, -7));
+    expect(state.rollingWindow.value.days[6].date).toBe(dateOffset(REF, -1));
+  });
+
+  // REAL BUG, found while closing plan-preview.ts's test-coverage gap — not a
+  // deliberate, disclosed vault gap like FD-3 or the isometric-rounding
+  // formula (see volume-scaling.ts's header comment for those). This one has
+  // no comment anywhere claiming it's intentional: capacityTrend's own tier
+  // is computed as `tierOf(window.length)` (see this function's real
+  // implementation above), and window.length can never exceed ROLLING_WINDOW_N
+  // (7) — but tierOf only reports 'established' at TIER_ESTABLISHED_MIN (10)
+  // or more. 7 < 10, unconditionally, for every possible call. The result:
+  // trainingState.capacityTrend.tier can NEVER be 'established', no matter
+  // how much real history exists — proven directly below with 90 days of
+  // strongly improving history, far more evidence than any other Tiered
+  // field in this module would need to call itself established.
+  //
+  // This is live, currently-shipping dead code, not just a hypothetical: the
+  // one real reader of an 'established' capacityTrend tier is
+  // plan-preview.ts's optional-finisher explanation (its own comment: "only
+  // once capacityTrend has genuinely established an improving direction") —
+  // that specific "you've been trending up, so there's real room for it"
+  // sentence can never actually display to a real user; every finisher
+  // acceptance falls through to the generic "Added a finisher set to each
+  // exercise" line instead, regardless of how consistent someone's real
+  // improvement has been.
+  //
+  // Not fixed here — same reasoning as this codebase's other real engine
+  // gaps: whether the fix is widening ROLLING_WINDOW_N's shared 7-day scope
+  // (which also governs the FE-12 rolling-window sentence's day count, a
+  // separate concern) or giving capacityTrend its own, smaller established
+  // threshold is exactly the kind of numeric engineering call this app's own
+  // Decision Constitution reserves for a real Founder Decision, not an
+  // invented number. Flagged here so it's visible and traceable instead of
+  // silently passing coverage forever.
+  it('capacityTrend.tier can never reach "established" — window.length is capped at ROLLING_WINDOW_N (7), strictly below TIER_ESTABLISHED_MIN (10)', () => {
+    const checkIns = Array.from({ length: 90 }, (_, i) =>
+      checkIn(dateOffset(REF, -(90 - i)), i < 87 ? 2 : 5)
+    );
+    const state = compileTrainingState({ checkIns, traces: [], referenceDate: REF });
+    expect(state.capacityTrend.value).toBe('improving');
+    expect(state.capacityTrend.basis).toBeLessThan(10);
+    expect(state.capacityTrend.tier).toBe('provisional');
+    expect(state.capacityTrend.tier).not.toBe('established');
+  });
+
+  it('yesterdayLowEnergy is true only when yesterday has a real logged entry at energy <= 2', () => {
+    const low = compileTrainingState({
+      checkIns: [checkIn(dateOffset(REF, -1), 2)],
+      traces: [],
+      referenceDate: REF,
+    });
+    expect(low.rollingWindow.value.yesterdayLowEnergy).toBe(true);
+
+    const notLow = compileTrainingState({
+      checkIns: [checkIn(dateOffset(REF, -1), 3)],
+      traces: [],
+      referenceDate: REF,
+    });
+    expect(notLow.rollingWindow.value.yesterdayLowEnergy).toBe(false);
+
+    const noEntry = compileTrainingState({
+      checkIns: [checkIn(dateOffset(REF, -2), 1)],
+      traces: [],
+      referenceDate: REF,
+    });
+    expect(noEntry.rollingWindow.value.yesterdayLowEnergy).toBe(false);
+  });
+
+  it('consecutiveLowDays counts backward from the most recent day in the window and stops at the first non-low day', () => {
+    // Oldest->newest: 1(low), 4(breaks streak), 2,1,2 (three consecutive low days at the end).
+    const energies = [1, 4, 2, 1, 2];
+    const checkIns = energies.map((e, i) => checkIn(dateOffset(REF, -(energies.length - i)), e));
+    const state = compileTrainingState({ checkIns, traces: [], referenceDate: REF });
+    expect(state.rollingWindow.value.consecutiveLowDays).toBe(3);
+  });
+
+  it('decisionMemory computes fallbackRate over the trailing DECISION_MEMORY_N (7) traces only', () => {
+    const traces = [
+      trace(dateOffset(REF, -10), { fallbackFired: true }), // outside the trailing-7 window
+      ...Array.from({ length: 6 }, (_, i) => trace(dateOffset(REF, -(6 - i)), { fallbackFired: false })),
+      trace(REF, { fallbackFired: true }),
+    ];
+    const state = compileTrainingState({ checkIns: [], traces, referenceDate: dateOffset(REF, 1) });
+    expect(state.decisionMemory.basis).toBe(7);
+    expect(state.decisionMemory.value.fallbackRate).toBeCloseTo(1 / 7, 10);
+  });
+
+  it('stimulusLedger sums adapted_sets per body area across non-fallback traces, and counts one session per area actually touched', () => {
+    const traces = [
+      trace(dateOffset(REF, -2), {
+        output: { exercises: [{ exerciseId: LOWER_EX, adapted_sets: 3 }, { exerciseId: UPPER_EX, adapted_sets: 2 }] },
+      }),
+      trace(dateOffset(REF, -1), {
+        output: { exercises: [{ exerciseId: LOWER_EX, adapted_sets: 2 }] },
+      }),
+      // A fallback-fired trace must never contribute to the ledger, even
+      // though its output carries real exercises.
+      trace(REF, { fallbackFired: true, output: { exercises: [{ exerciseId: LOWER_EX, adapted_sets: 5 }] } }),
+    ];
+    const state = compileTrainingState({ checkIns: [], traces, referenceDate: dateOffset(REF, 1) });
+    expect(state.stimulusLedger.value.lower).toEqual({ deliveredSets: 5, sessionsCounted: 2 });
+    expect(state.stimulusLedger.value.upper).toEqual({ deliveredSets: 2, sessionsCounted: 1 });
+    expect(state.stimulusLedger.value.core).toEqual({ deliveredSets: 0, sessionsCounted: 0 });
+    expect(state.stimulusLedger.basis).toBe(2);
+  });
+
+  it('stimulusDebt combines full base_sets for a Gate 1-excluded exercise with the real shortfall for a delivered-but-reduced one', () => {
+    const traces = [
+      trace(dateOffset(REF, -1), {
+        gate1Exclusions: [{ exerciseId: CORE_EX, excludedBy: 'intensity' }], // full 3 base_sets owed
+        output: { exercises: [{ exerciseId: LOWER_EX, adapted_sets: 1 }] }, // base_sets 3, adapted 1 -> 2 owed
+      }),
+    ];
+    const state = compileTrainingState({ checkIns: [], traces, referenceDate: REF });
+    expect(state.stimulusDebt.value.core).toEqual({ debtSets: 3, sessionsCounted: 1 });
+    expect(state.stimulusDebt.value.lower).toEqual({ debtSets: 2, sessionsCounted: 1 });
+  });
+
+  it('stimulusDebt never goes negative when a session delivers MORE sets than baseline (e.g. an accepted finisher)', () => {
+    const traces = [trace(dateOffset(REF, -1), { output: { exercises: [{ exerciseId: LOWER_EX, adapted_sets: 5 }] } })];
+    const state = compileTrainingState({ checkIns: [], traces, referenceDate: REF });
+    expect(state.stimulusDebt.value.lower.debtSets).toBe(0);
+  });
+
+  it('stimulusLedger/stimulusDebt only fold the trailing LEDGER_WINDOW_N (14) non-fallback traces', () => {
+    const traces = Array.from({ length: 20 }, (_, i) =>
+      trace(dateOffset(REF, -(20 - i)), { output: { exercises: [{ exerciseId: LOWER_EX, adapted_sets: 3 }] } })
+    );
+    const state = compileTrainingState({ checkIns: [], traces, referenceDate: dateOffset(REF, 1) });
+    expect(state.stimulusLedger.basis).toBe(14);
+    expect(state.stimulusDebt.basis).toBe(14);
+  });
+
+  it('recency reports the most recent occurrence across EVERY retained trace, not just the shorter ledger window', () => {
+    // 20 traces total, only the oldest one ever trains "upper" — outside the
+    // 14-trace ledger window, but recency must still find it.
+    const traces = [
+      trace(dateOffset(REF, -20), { output: { exercises: [{ exerciseId: UPPER_EX, adapted_sets: 3 }] } }),
+      ...Array.from({ length: 19 }, (_, i) =>
+        trace(dateOffset(REF, -(19 - i)), { output: { exercises: [{ exerciseId: LOWER_EX, adapted_sets: 3 }] } })
+      ),
+    ];
+    const state = compileTrainingState({ checkIns: [], traces, referenceDate: dateOffset(REF, 1) });
+    expect(state.recency.value.upper.daysSinceTrained).toBe(21);
+    expect(state.recency.basis).toBe(20);
+  });
+
+  it('recency takes the LAST (most recent) occurrence per area, not the first, given oldest->newest ordering', () => {
+    const traces = [
+      trace(dateOffset(REF, -10), { output: { exercises: [{ exerciseId: LOWER_EX, adapted_sets: 3 }] } }),
+      trace(dateOffset(REF, -3), { output: { exercises: [{ exerciseId: LOWER_EX, adapted_sets: 3 }] } }),
+    ];
+    const state = compileTrainingState({ checkIns: [], traces, referenceDate: REF });
+    expect(state.recency.value.lower.daysSinceTrained).toBe(3);
+  });
+
+  it('recency is null for a body area that has never appeared in any non-fallback trace', () => {
+    const traces = [trace(dateOffset(REF, -1), { output: { exercises: [{ exerciseId: LOWER_EX, adapted_sets: 3 }] } })];
+    const state = compileTrainingState({ checkIns: [], traces, referenceDate: REF });
+    expect(state.recency.value.upper.daysSinceTrained).toBeNull();
+    expect(state.recency.value.core.daysSinceTrained).toBeNull();
+    expect(state.recency.value.full.daysSinceTrained).toBeNull();
+  });
+
+  it('recency ignores a fallback-fired trace even if its output carries real exercises', () => {
+    const traces = [trace(dateOffset(REF, -1), { fallbackFired: true, output: { exercises: [{ exerciseId: FULL_EX, adapted_sets: 3 }] } })];
+    const state = compileTrainingState({ checkIns: [], traces, referenceDate: REF });
+    expect(state.recency.value.full.daysSinceTrained).toBeNull();
+    expect(state.recency.basis).toBe(0);
+  });
+
+  it('resolves ex.id as a fallback key when ex.exerciseId is absent — the safety-pair shape (Exercise, not ScaledExercise) uses id, not exerciseId', () => {
+    const traces = [trace(dateOffset(REF, -1), { output: { exercises: [{ id: FULL_EX, adapted_sets: 3 }] } })];
+    const state = compileTrainingState({ checkIns: [], traces, referenceDate: REF });
+    expect(state.stimulusLedger.value.full).toEqual({ deliveredSets: 3, sessionsCounted: 1 });
   });
 });

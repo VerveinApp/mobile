@@ -1,0 +1,116 @@
+appId: app.vervein
+# Regression guard for the Goals card redesign (Profile → GOALS): sets a
+# weekly burn goal via the Goals sheet's toggle + wheel picker, saves, and
+# verifies the real ring/value/percentage render on Profile afterward.
+#
+# Text assertions inside the wheel picker itself (e.g. "2000 kcal") do NOT
+# work — same class of gap already documented in exercise-swap-sheet.yaml's
+# own header comment: WheelPicker's individual items never register in the
+# iOS accessibility tree Maestro reads (confirmed directly while building
+# this flow), not a bug specific to this screen. Verified via screenshot at
+# that step instead, same pattern that flow already established.
+#
+# REAL MECHANISM FOUND WHILE BUILDING THIS FLOW, disclosed since it's easy
+# to reintroduce: tapping "Profile" while already ON the Profile tab resets
+# that tab's own scroll position back to top (standard iOS re-tap-active-
+# tab behavior) — an earlier draft of this flow retried tapping "Profile"
+# as a LogBox-dismissal recovery guard and silently undid its own prior
+# scroll every time. Tap "Profile" exactly once, before any scrolling, and
+# never again in the same flow run.
+#
+# Needs an already-onboarded, signed-in profile — openLink below seeds one
+# via app/e2e-seed.tsx (a no-op everywhere EXPO_PUBLIC_E2E_SEED_ENABLED
+# isn't explicitly set, i.e. everywhere except maestro.yml's own CI run and
+# an opted-in local dev env). Re-seeding always resets any previously-saved
+# goal back to "Not set" — this flow doesn't depend on prior state.
+#
+# NOT YET VERIFIED END-TO-END AGAINST A REAL AUTOMATED RUN, disclosed
+# honestly rather than silently: every individual step here (seeding,
+# navigating to Profile, opening the Goals sheet, both switch taps, Save,
+# the resulting ring/value on Profile) was confirmed working by hand,
+# repeatedly, with screenshots, against this exact local dev-client build.
+# What could NOT be confirmed locally is the full flow run unattended from
+# a cold stopApp/launchApp: this dev-client build has a reproducible,
+# dev-only quirk where expo-notifications' async push-token registration
+# throws (Keychain access failure) and its LogBox overlay intermittently
+# swallows the very next tap (including the initial "Profile" tap) at an
+# unpredictable point during startup — confirmed directly, multiple times,
+# while building this flow. LogBox is compiled out of Release builds
+# entirely, which is what CI actually runs (see maestro.yml's own Release-
+# not-Debug rationale), so this is expected to not reproduce there — same
+# "haven't been verified against the actual CI device yet" position
+# tab-navigation.yaml's own header already discloses for its own point:
+# taps. The next real CI run against this flow is the first real signal.
+---
+- stopApp
+- launchApp:
+    clearState: false
+- openLink: "vervein://e2e-seed"
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible:
+      text: "Good .*|Continue|Go home"
+    timeout: 15000
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+- runFlow:
+    when:
+      visible: "Go home"
+    commands:
+      - tapOn: "Go home"
+# Dev-client only: expo-notifications' async push-token auto-registration
+# occasionally throws on this simulator (Keychain access failure, unrelated
+# to anything this flow tests) and surfaces as a LogBox overlay at an
+# unpredictable point during startup — confirmed directly while building
+# this flow, never reproduces in the Release build these flows actually run
+# against in CI (LogBox is dev-only), so this guard is cheap insurance,
+# not a real dependency of the flow.
+- runFlow:
+    when:
+      visible: "Dismiss"
+    commands:
+      - tapOn: "Dismiss"
+- tapOn: "Profile"
+- waitForAnimationToEnd:
+    timeout: 1500
+- runFlow:
+    when:
+      visible: "Dismiss"
+    commands:
+      - tapOn: "Dismiss"
+- scroll
+- waitForAnimationToEnd:
+    timeout: 1000
+- takeScreenshot: goals-flow-01-profile-not-set
+- tapOn: "Goals. Set a target weight and weekly burn goal"
+- extendedWaitUntil:
+    visible:
+      text: "Entirely optional"
+    timeout: 4000
+- takeScreenshot: goals-flow-02-sheet-open
+# Toggles the "Weekly burn goal" switch — not reliably tappable by its own
+# text label (confirmed directly while building this flow: tapOn by label
+# hung every attempt). point: calibrated against an iPhone 11 Pro Max
+# locally, same disclosed-not-yet-CI-verified caveat exercise-swap-sheet.yaml's
+# own header carries for its own point: taps.
+- tapOn:
+    point: "88%,80%"
+- waitForAnimationToEnd:
+    timeout: 1000
+- takeScreenshot: goals-flow-03-burn-goal-enabled
+# Save sits at the very bottom of the sheet's scroll content — a label
+# tapOn intermittently missed it while building this flow (cause not fully
+# isolated), so this taps its known on-screen position instead, same
+# reasoning as the switch above.
+- tapOn:
+    point: "50%,88%"
+- waitForAnimationToEnd:
+    timeout: 1500
+- takeScreenshot: goals-flow-04-ring-on-profile

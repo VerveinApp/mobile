@@ -2,6 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { EnergyScore } from '@/components/home/energy-gauge';
 import { localDateStr } from '@/lib/local-date';
+import type { UnitSystem } from '@/lib/unit-preference';
+import type { BodyArea, PlanExercise } from '@/lib/plan-preview';
 
 const KEY = 'vervein.todaySession.v1';
 
@@ -33,7 +35,70 @@ export type TodaySession = {
    * away from 5, so a stored `true` alongside a non-5 energy should never
    * actually occur, but this stays optional rather than required regardless. */
   finisherAccepted?: boolean;
+  /** Vervein addition — an explicit body-area choice from check-in.tsx's
+   * rest-day "check in anyway" flow only (see that screen's own isRestDay
+   * gate), fed to plan-preview.ts's own preferredBodyArea param so Home/
+   * Train's own preview reads reflect the same choice check-in.tsx already
+   * resolved, not a history-blind re-guess. Undefined for every entry saved
+   * before this field existed, and for every normal (non-override) day. */
+  preferredBodyArea?: BodyArea;
+  /** Vervein addition — check-in.tsx's own "Where are you working out
+   * today?" answer, in the same onboarding-vocabulary keys the profile's
+   * standing `environment` field uses (see plan-preview.ts's own
+   * equipmentOverride param). Undefined means today's equipment matches the
+   * standing profile — the common case, and every entry saved before this
+   * field existed. */
+  equipmentOverride?: string;
+  /** BUG FIX (found in a later full-app audit): the actual weights typed
+   * for each exercise during a session used to live only in check-in.tsx's
+   * React state until Finish — exercise *completion* was already durably
+   * autosaved per-exercise (workout-log.ts), but the numbers themselves
+   * weren't, so an app kill mid-session (OS memory pressure, an incoming
+   * call, a force-quit) silently lost every typed weight even though the
+   * session still showed those exercises as completed on reopen. Debounced-
+   * autosaved during an active (resolved, not yet done) session only —
+   * cleared (passed as undefined, which JSON.stringify simply omits) once
+   * Finish actually records them via exercise-performance.ts, since at that
+   * point they're durably captured elsewhere and don't need to keep living
+   * here too. Keyed by exercise index, same as check-in.tsx's own
+   * loggedWeightsKg state this mirrors. */
+  loggedWeightsKg?: Record<number, string>;
+  /** Which unit the raw strings in loggedWeightsKg were typed in — despite
+   * the (persisted, so kept) field name, those are raw text in the user's
+   * display unit, not kg. Absent on sessions saved before units existed. */
+  loggedWeightsUnit?: UnitSystem;
+  /** Mid-workout exercise swaps, keyed by exercise index — the same
+   * index-keyed shape check-in.tsx's own swappedExercises state uses.
+   * BUG FIX: swaps used to live only in React state, so an app kill
+   * mid-session dropped them while typed weights (keyed by the same index)
+   * were restored — a weight entered for the swapped-in exercise got saved
+   * against the original one. */
+  swappedExercises?: Record<number, PlanExercise>;
+  /** The Apple Health readiness adjustment the session was STARTED with,
+   * frozen so reopening mid-session rebuilds the identical plan. Without
+   * this, new Health data arriving during the workout (or the Plus check
+   * resolving a moment later) re-planned the session under the user —
+   * exercise indexes shifted, and index-keyed weights/completion with them. */
+  planHealthReadiness?: {
+    modifier: number;
+    reasons?: { rhrElevated: boolean; sleepDeficit: boolean };
+  };
+  /** The equipment list (profile.equipment) the session was STARTED with —
+   * '' when there was none — frozen like planHealthReadiness, so taking an
+   * item off the list mid-workout ("Missing something?" on the swap sheet)
+   * changes future plans, never the session already underway. */
+  planEquipment?: string;
+  /** Which exercise the session was on, so a resumed session picks up
+   * there instead of back at the first exercise. */
+  currentExerciseIndex?: number;
+  /** When the session was started (ISO) — the Apple Health workout written
+   * at Finish needs a real start time, and a resumed session used to skip
+   * that write entirely for lack of one. */
+  startedAt?: string;
 };
+
+/** Everything but the date, which is always "today" when saving. */
+export type TodaySessionInput = Omit<TodaySession, 'date' | 'symptomTags'> & { symptomTags?: string[] };
 
 function today() {
   return localDateStr();
@@ -53,15 +118,14 @@ export async function getTodaySession(): Promise<TodaySession | null> {
   }
 }
 
-export async function saveTodaySession(
-  energy: EnergyScore,
-  completed: boolean,
-  symptomTags: string[] = [],
-  timeAvailableMin?: number,
-  finisherAccepted?: boolean
-) {
+/**
+ * Replaces today's record wholesale — an object, not the old positional
+ * list, which had grown to nine optional parameters where every caller had
+ * to re-pass every field in order or silently wipe it.
+ */
+export async function saveTodaySession(input: TodaySessionInput) {
   try {
-    const session: TodaySession = { date: today(), energy, completed, symptomTags, timeAvailableMin, finisherAccepted };
+    const session: TodaySession = { ...input, date: today(), symptomTags: input.symptomTags ?? [] };
     await AsyncStorage.setItem(KEY, JSON.stringify(session));
   } catch {
     // Worst case the app re-asks for a check-in it already had — same as a first check-in.

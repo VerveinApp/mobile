@@ -11,21 +11,21 @@
  * still surface a high-intensity exercise it should have excluded — the gap
  * plan-preview.ts closes by calling this before volume-scaling.ts.
  *
- * SCOPE NOTE, same as elsewhere in this port — standingSymptomTags and
- * conditions are always called with empty arrays (conditions is collected at
- * onboarding but deliberately never wired through pending a real Condition
- * Constraint Worksheet validation — see lib/conditions.ts's own header
- * comment; standingSymptomTags has no intake in this app at all), so those
- * two branches are dead code today, ported anyway for fidelity to the
- * governed source and to keep the function signature honest about what it
- * actually accepts. movementRestrictions is NOT in that category — it's
- * real, self-reported at onboarding, and does apply (onboarding-to-engine.ts
- * passes profile.movementRestrictions straight through, not an empty array).
+ * SCOPE NOTE, same as elsewhere in this port — conditions is always called
+ * with an empty array (collected but deliberately never wired through
+ * pending a real Condition Constraint Worksheet validation — see
+ * lib/conditions.ts's own header comment), so that branch is dead code
+ * today, ported anyway for fidelity to the governed source and to keep the
+ * function signature honest about what it actually accepts.
+ * movementRestrictions and standingSymptomTags are NOT in that category —
+ * both are real, self-reported in Settings, and do apply
+ * (onboarding-to-engine.ts passes them straight through).
  */
 
 import { IMPACT_RANK, INTENSITY_RANK } from '@/lib/engine/exercise-library';
 import { ENERGY_MODIFIER_TABLE } from '@/lib/engine/reference/energy-modifier-table';
 import { SYMPTOM_OVERRIDE_TABLE } from '@/lib/engine/reference/symptom-override-table';
+import type { SymptomTag } from '@/lib/symptom-tags';
 import type {
   BodyArea,
   ConstraintProfile,
@@ -55,7 +55,10 @@ export function computeEffectiveConstraints(
   standingSymptomTags: string[],
   movementRestrictions: string[],
   equipment: Equipment,
-  conditions: string[]
+  conditions: string[],
+  // Vervein addition — see EffectiveConstraintSet.ownedEquipment. Defaults
+  // to no item-level limit, byte-identical to every call without it.
+  ownedEquipment: readonly string[] | null = null
 ): EffectiveConstraintSet {
   const energyRow = ENERGY_MODIFIER_TABLE[checkIn.energyScore];
 
@@ -78,7 +81,9 @@ export function computeEffectiveConstraints(
 
   const activeTags = new Set<string>([...standingSymptomTags, ...checkIn.acuteSymptomTags]);
   for (const tag of activeTags) {
-    const row = SYMPTOM_OVERRIDE_TABLE[tag];
+    // Cast, not a type-level guarantee — see baseline-plan.ts's identical
+    // cast for why the runtime guard right below still does the real work.
+    const row = SYMPTOM_OVERRIDE_TABLE[tag as SymptomTag];
     if (!row) {
       throw new Error(`M5: unrecognized symptom tag "${tag}" — rejected at the Gate 1 boundary, never silently passed through.`);
     }
@@ -94,7 +99,8 @@ export function computeEffectiveConstraints(
   return {
     intensityCeiling,
     impactCeiling,
-    equipmentCeiling: equipment,
+    equipmentCeiling: ownedEquipment !== null ? 'full_gym' : equipment,
+    ownedEquipment,
     excludeBodyAreas: [...excludeBodyAreas],
     excludeMovementPatterns: [...excludeMovementPatterns],
     forceAddTypes: [...forceAddTypes],

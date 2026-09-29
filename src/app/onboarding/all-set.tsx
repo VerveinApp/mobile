@@ -1,11 +1,15 @@
 import { router } from 'expo-router';
 import { useMemo } from 'react';
-import { Animated, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+
+import { useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, { FadeIn } from 'react-native-reanimated';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticImpactLight } from '@/lib/haptics';
+import { MOTION_DURATION, ONBOARDING_REVEAL_DELAY_MS, ONBOARDING_REVEAL_STAGGER_MS } from '@/lib/motion';
 import { useFadeInEntering } from '@/lib/screen-transitions';
+import { AndroidRippleOnAccent, Type } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 import {
   ArrowUpIconGraphic,
@@ -24,8 +28,7 @@ const CHECK_SIZE = 132;
  * already consumed, there's nothing to return to.
  */
 export default function OnboardingAllSetScreen() {
-  const { width: windowWidth } = useWindowDimensions();
-  const scale = windowWidth / CANVAS_WIDTH;
+  const scale = useCanvasScale();
   const { colors, resolvedScheme } = useAppTheme();
   const hoverWashColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
   const styles = useMemo(() => createStyles(colors, hoverWashColor), [colors, hoverWashColor]);
@@ -57,20 +60,31 @@ export default function OnboardingAllSetScreen() {
           <SuccessCheckmark size={CHECK_SIZE} />
         </View>
 
-        <ReanimatedAnimated.Text entering={FadeIn.duration(350).delay(1000)} style={styles.title} maxFontSizeMultiplier={1.3}>
+        <ReanimatedAnimated.Text
+          entering={FadeIn.duration(MOTION_DURATION.slow).delay(ONBOARDING_REVEAL_DELAY_MS)}
+          style={styles.title}
+          maxFontSizeMultiplier={1.3}
+        >
           You&apos;re all set!
         </ReanimatedAnimated.Text>
-        <ReanimatedAnimated.Text entering={FadeIn.duration(350).delay(1180)} style={styles.subtitle} maxFontSizeMultiplier={1.4}>
+        <ReanimatedAnimated.Text
+          entering={FadeIn.duration(MOTION_DURATION.slow).delay(ONBOARDING_REVEAL_DELAY_MS + ONBOARDING_REVEAL_STAGGER_MS)}
+          style={styles.subtitle}
+          maxFontSizeMultiplier={1.4}
+        >
           Your plan is ready. Time to get moving.
         </ReanimatedAnimated.Text>
 
         <Pressable
           style={styles.primaryButtonHit}
+          // 38pt tall by design; the slop brings the tap target past 44pt.
+          hitSlop={{ top: 6, bottom: 6 }}
           onPress={handleContinue}
           onHoverIn={ctaHover.onHoverIn}
           onHoverOut={ctaHover.onHoverOut}
           onPressIn={ctaPress.onPressIn}
           onPressOut={ctaPress.onPressOut}
+          android_ripple={AndroidRippleOnAccent}
         >
           <Animated.View style={[styles.primaryButtonVisual, { transform: [{ scale: ctaPress.scale }] }]}>
             <Animated.View
@@ -160,7 +174,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       right: 0,
       top: 420,
       color: colors.textSecondary,
-      fontSize: 13,
+      fontSize: Type.body,
       textAlign: 'center',
       fontFamily: 'Geist-Medium',
     },
@@ -183,7 +197,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     primaryText: {
       color: '#ffffff',
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     buttonArrow: {

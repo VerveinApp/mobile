@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { clearStoredValue, readJsonList, readJsonValue, writeJsonValue } from '@/lib/storage/json-storage';
 
 const COUNT_KEY = 'vervein.lifetimeSessionCount.v1';
 const SHOWN_KEY = 'vervein.milestonesShown.v1';
@@ -28,45 +28,27 @@ const MILESTONES = [1, 10, 25, 50, 100, 250, 500];
  * mutates a counter, so it can only ever fire once, at the real moment).
  */
 export async function recordSessionForMilestones(): Promise<number | null> {
-  try {
-    const raw = await AsyncStorage.getItem(COUNT_KEY);
-    const next = (raw ? parseInt(raw, 10) : 0) + 1;
-    await AsyncStorage.setItem(COUNT_KEY, String(next));
-    if (!MILESTONES.includes(next)) return null;
+  const next = (await readJsonValue<number>(COUNT_KEY, 0)) + 1;
+  await writeJsonValue(COUNT_KEY, next);
+  if (!MILESTONES.includes(next)) return null;
 
-    const shownRaw = await AsyncStorage.getItem(SHOWN_KEY);
-    const shown: number[] = shownRaw ? JSON.parse(shownRaw) : [];
-    if (shown.includes(next)) return null;
-    await AsyncStorage.setItem(SHOWN_KEY, JSON.stringify([...shown, next]));
-    return next;
-  } catch {
-    // Worst case: no celebration this time, and the count itself may not
-    // have persisted — never a crash, and never a wrong/guessed number.
-    return null;
-  }
+  const shown = await readJsonList<number>(SHOWN_KEY);
+  if (shown.includes(next)) return null;
+  await writeJsonValue(SHOWN_KEY, [...shown, next]);
+  return next;
 }
 
 /** Raw read of the lifetime total — data-backup.ts's export path (and any
  * future "N sessions all-time" display) only; the live milestone-detection
  * flow above never needs this, since it tracks the increment itself. */
 export async function getLifetimeSessionCount(): Promise<number> {
-  try {
-    const raw = await AsyncStorage.getItem(COUNT_KEY);
-    return raw ? parseInt(raw, 10) : 0;
-  } catch {
-    return 0;
-  }
+  return readJsonValue<number>(COUNT_KEY, 0);
 }
 
 /** Raw read of which milestone numbers have already been celebrated —
  * data-backup.ts's export path only. */
 export async function getShownMilestones(): Promise<number[]> {
-  try {
-    const raw = await AsyncStorage.getItem(SHOWN_KEY);
-    return raw ? (JSON.parse(raw) as number[]) : [];
-  } catch {
-    return [];
-  }
+  return readJsonList<number>(SHOWN_KEY);
 }
 
 /** Overwrites both the counter and the shown-milestones list wholesale —
@@ -76,12 +58,8 @@ export async function getShownMilestones(): Promise<number[]> {
  * on the very next real session, re-celebrating something the user already
  * saw before their backup was taken. */
 export async function restoreMilestones(count: number, shown: number[]): Promise<void> {
-  try {
-    await AsyncStorage.setItem(COUNT_KEY, String(count));
-    await AsyncStorage.setItem(SHOWN_KEY, JSON.stringify(shown));
-  } catch {
-    // Worst case this one field doesn't restore — the rest of the backup still applies independently.
-  }
+  await writeJsonValue(COUNT_KEY, count);
+  await writeJsonValue(SHOWN_KEY, shown);
 }
 
 /** Wipes both the lifetime counter and the shown-milestones list —
@@ -89,10 +67,6 @@ export async function restoreMilestones(count: number, shown: number[]): Promise
  * gap as workout-log.ts's clearWorkoutLog: this store postdates
  * handleDeleteData's original clear-list. */
 export async function clearMilestones() {
-  try {
-    await AsyncStorage.removeItem(COUNT_KEY);
-    await AsyncStorage.removeItem(SHOWN_KEY);
-  } catch {
-    // Best-effort — same as never having logged a session.
-  }
+  await clearStoredValue(COUNT_KEY);
+  await clearStoredValue(SHOWN_KEY);
 }

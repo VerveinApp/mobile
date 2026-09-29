@@ -2,15 +2,23 @@
 // vault's src/reference/symptom-override-table.ts (traces to "Symptom Tags.md"'s
 // Symptom Override Table). Data only. All ten tags represented.
 //
-// Not yet exercised at runtime by this port: baseline-plan.ts only ever
-// calls generateBaselinePlan with an empty standingSymptomTags array (the
-// condition/symptom-gating modules — M2, M5 — haven't been ported, see
-// baseline-plan.ts's own doc comment), so the lookup loop that reads this
-// table never iterates. Ported anyway for fidelity — the type signature
-// baseline-plan.ts imports requires it to exist, and an empty/stubbed
-// version would silently drift from the governed source it traces to.
-
+// Live and exercised at runtime: constraint-resolution.ts's own
+// computeEffectiveConstraints (M5) reads this table for every real check-in
+// via plan-preview.ts, over whatever acute symptom tags the user actually
+// picked that day (see symptom-tags.ts's own SYMPTOM_TAGS) — this comment
+// used to say M5 hadn't been ported yet; it has been since.
+//
+// SYMPTOM_OVERRIDE_TABLE is keyed by the canonical SymptomTag union (not a
+// bare string) so that adding a new tag to symptom-tags.ts without a
+// matching row here is a compile error — computeEffectiveConstraints itself
+// still throws on an unrecognized tag at the Gate 1 boundary as its own
+// runtime safety net (never silently pass through unrecognized input,
+// same rule as movement restrictions get), but that throw should only ever
+// be reachable from truly malformed data, not from the two lists simply
+// drifting apart (found as a real, if latent, risk in a later full-app
+// audit — the two used to have no type-level link keeping them in sync).
 import type { Intensity, Impact, BodyArea } from '../types';
+import type { SymptomTag } from '@/lib/symptom-tags';
 
 export type SymptomOverrideRow = {
   intensityOverride?: Intensity;
@@ -24,7 +32,7 @@ export type SymptomOverrideRow = {
   durationMultiplier?: number;
 };
 
-export const SYMPTOM_OVERRIDE_TABLE: Record<string, SymptomOverrideRow> = {
+export const SYMPTOM_OVERRIDE_TABLE: Record<SymptomTag, SymptomOverrideRow> = {
   period: {
     conditionalIntensityOverride: { ifEnergyBelow: 3, then: 'low' }, // "→ low if energy < 3"
     impactOverride: 'low',

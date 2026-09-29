@@ -1,15 +1,27 @@
 import { BottomSheetBackdrop, type BottomSheetBackdropProps, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { SymbolView } from 'expo-symbols';
+import { forwardRef, useCallback, useMemo, useRef, useState } from 'react';
+import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SymbolView } from '@/components/ui/app-symbol';
 
-import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
+import { Type } from '@/constants/theme';
+import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { CommitmentDial } from '@/components/onboarding/commitment-dial';
 import { COMMITMENT_LEVELS } from '@/lib/commitment-levels';
 import { DURATION_LABELS, ENVIRONMENT_LABELS, EXPERIENCE_LABELS, GOAL_LABELS } from '@/lib/profile-labels';
 import { enableSessionReminders, isReminderEnabled } from '@/lib/session-reminders';
 import { useAppColors } from '@/lib/theme-context';
+import { usePreloadedSheet } from '@/components/settings/use-preloaded-sheet';
+import {
+  DEFAULT_OWNED_EQUIPMENT,
+  OWNED_EQUIPMENT,
+  OWNED_EQUIPMENT_LABELS,
+  asksForEquipment,
+  parseOwnedEquipment,
+  serializeOwnedEquipment,
+  type OwnedEquipment,
+} from '@/lib/owned-equipment';
 import { getProfile, updateProfile } from '@/lib/user-profile';
 
 // Same option ids as onboarding/step-2 (goal), step-3 (experience),
@@ -39,18 +51,19 @@ const DAY_OPTIONS: { id: string; label: string }[] = [
  * derive everything live from the saved profile.
  *
  * Presented as a bottom sheet (not a pushed route) from Settings — a real
- * `BottomSheetModal` stays mounted across opens, so data is (re)loaded on
- * `onChange` rather than a route-focus effect.
+ * `BottomSheetModal` stays mounted across opens, so data is (re)loaded each
+ * time it's presented (usePreloadedSheet) rather than a route-focus effect.
  */
-export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRef) => {
+export const AdjustPlanSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void }>(({ onDismiss }, forwardedRef) => {
   const sheetRef = useRef<BottomSheetModal>(null);
-  useImperativeHandle(forwardedRef, () => sheetRef.current as BottomSheetModal, []);
+  const insets = useSafeAreaInsets();
 
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [goal, setGoal] = useState('');
   const [experience, setExperience] = useState('');
   const [environment, setEnvironment] = useState('');
+  const [ownedEquipment, setOwnedEquipment] = useState<Set<OwnedEquipment>>(new Set());
   const [duration, setDuration] = useState('');
   const [days, setDays] = useState<string[]>([]);
   const [commitmentIndex, setCommitmentIndex] = useState<number | null>(null);
@@ -61,22 +74,34 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
     setGoal(profile?.goal ?? '');
     setExperience(profile?.experience ?? '');
     setEnvironment(profile?.environment ?? '');
+    // Their saved list, or — never answered — what the engine already
+    // assumes for their setup (a home gym's, if they're not on one yet, so
+    // switching to Home Gym here starts from something sensible).
+    const env = profile?.environment;
+    setOwnedEquipment(
+      new Set(parseOwnedEquipment(profile?.equipment) ?? DEFAULT_OWNED_EQUIPMENT[asksForEquipment(env) ? env : 'home-gym'])
+    );
     setDuration(profile?.duration ?? '');
     setDays(profile?.days ? profile.days.split(',').filter(Boolean) : []);
     const idx = profile?.commitmentLevel ? Number(profile.commitmentLevel) - 1 : null;
     setCommitmentIndex(idx !== null && idx >= 0 && idx < COMMITMENT_LEVELS.length ? idx : null);
   }, []);
 
-  const handleSheetChange = useCallback(
-    (index: number) => {
-      if (index >= 0) loadFromProfile();
-    },
-    [loadFromProfile]
-  );
+  usePreloadedSheet(forwardedRef, sheetRef, loadFromProfile);
 
   const closeHover = useHoverFade();
   const saveHover = useHoverFade();
   const savePress = useLiquidPress();
+
+  const toggleOwned = (item: OwnedEquipment) => {
+    hapticSelect();
+    setOwnedEquipment((prev) => {
+      const next = new Set(prev);
+      if (next.has(item)) next.delete(item);
+      else next.add(item);
+      return next;
+    });
+  };
 
   const toggleDay = (id: string) => {
     hapticSelect();
@@ -93,6 +118,9 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
       goal,
       experience,
       environment,
+      // Only a home gym or minimal setup has a list; switching to a full
+      // gym or bodyweight leaves the saved one alone for switching back.
+      ...(asksForEquipment(environment) ? { equipment: serializeOwnedEquipment(ownedEquipment) } : {}),
       duration,
       days: days.join(','),
       commitmentLevel: String((commitmentIndex as number) + 1),
@@ -123,10 +151,10 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
     <BottomSheetModal
       ref={sheetRef}
       snapPoints={['90%']}
-      onChange={handleSheetChange}
+      onDismiss={onDismiss}
       backdropComponent={renderBackdrop}
-      backgroundStyle={{ backgroundColor: colors.background }}
-      handleIndicatorStyle={{ backgroundColor: colors.surfaceBorder }}
+      backgroundStyle={Platform.OS === 'android' ? { backgroundColor: colors.background, borderTopLeftRadius: 28, borderTopRightRadius: 28 } : { backgroundColor: colors.background }}
+      handleIndicatorStyle={{ backgroundColor: Platform.OS === 'android' ? 'rgba(95,190,132,0.5)' : colors.surfaceBorder, width: Platform.OS === 'android' ? 36 : undefined }}
     >
       <View style={styles.headerRow}>
         <Text style={styles.headerTitle} maxFontSizeMultiplier={1.3}>Adjust My Plan</Text>
@@ -135,7 +163,7 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
           onHoverIn={closeHover.onHoverIn}
           onHoverOut={closeHover.onHoverOut}
           hitSlop={10}
-          style={styles.closeButton}
+          style={({ pressed }) => [styles.closeButton, pressed && PRESSED_DIM]}
           accessibilityRole="button"
           accessibilityLabel="Close"
         >
@@ -143,7 +171,10 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
         </Pressable>
       </View>
 
-      <BottomSheetScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <BottomSheetScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 + insets.bottom }]}
+        showsVerticalScrollIndicator={false}
+      >
         <PillGrid
           styles={styles}
           label="Goal"
@@ -168,7 +199,7 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
         />
         <PillGrid
           styles={styles}
-          label="Equipment"
+          label="Where You Train"
           options={ENVIRONMENT_OPTIONS}
           labels={ENVIRONMENT_LABELS}
           value={environment}
@@ -177,6 +208,35 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
             setEnvironment(id);
           }}
         />
+        {asksForEquipment(environment) ? (
+          <View style={styles.section}>
+            <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>What You Have</Text>
+            <View style={styles.pillGrid}>
+              {OWNED_EQUIPMENT.map((item) => {
+                const isSelected = ownedEquipment.has(item);
+                return (
+                  <Pressable
+                    key={item}
+                    style={({ pressed }) => [styles.gridPillHit, pressed && PRESSED_DIM]}
+                    onPress={() => toggleOwned(item)}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: isSelected }}
+                  >
+                    <View style={[styles.gridPillVisual, isSelected && styles.gridPillVisualSelected]}>
+                      <Text
+                        style={[styles.gridPillText, isSelected && styles.gridPillTextSelected]}
+                        numberOfLines={2}
+                        maxFontSizeMultiplier={1.2}
+                      >
+                        {OWNED_EQUIPMENT_LABELS[item]}
+                      </Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
         <PillGrid
           styles={styles}
           label="Session Length"
@@ -198,7 +258,7 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
               return (
                 <Pressable
                   key={day.id + index}
-                  style={[styles.dayCircle, isSelected && styles.dayCircleSelected]}
+                  style={({ pressed }) => [styles.dayCircle, isSelected && styles.dayCircleSelected, pressed && PRESSED_DIM]}
                   onPress={() => toggleDay(day.id)}
                   hitSlop={4}
                 >
@@ -240,6 +300,13 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
           disabled={!isValid || saving}
         >
           <View style={[styles.saveButton, (!isValid || saving) && styles.saveButtonDisabled]}>
+            {/* The press glow savePress already animates — wired to the
+                Pressable above but never drawn, so Save gave no visual
+                response to a tap. */}
+            <Animated.View
+              pointerEvents="none"
+              style={[StyleSheet.absoluteFill, styles.saveButtonGlow, { opacity: savePress.glow }]}
+            />
             <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>
               {saving ? 'Saving…' : 'Save Changes'}
             </Text>
@@ -277,7 +344,7 @@ function PillGrid({
           return (
             <Pressable
               key={id}
-              style={[styles.gridPillHit, columns === 4 && styles.gridPillHitFourAcross]}
+              style={({ pressed }) => [styles.gridPillHit, columns === 4 && styles.gridPillHitFourAcross, pressed && PRESSED_DIM]}
               onPress={() => onSelect(id)}
             >
               <View style={[styles.gridPillVisual, isSelected && styles.gridPillVisualSelected]}>
@@ -307,7 +374,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     headerTitle: {
       color: colors.text,
-      fontSize: 16,
+      fontSize: Type.subtitle,
       fontFamily: 'Geist-SemiBold',
     },
     closeButton: {
@@ -320,7 +387,8 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     scrollContent: {
       paddingHorizontal: 20,
-      paddingBottom: 40,
+      // paddingBottom set inline (40 + insets.bottom) — real safe-area
+      // clearance below the home indicator.
       gap: 24,
     },
     section: {
@@ -328,7 +396,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     fieldLabel: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
     },
     pillGrid: {
@@ -364,12 +432,12 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     gridPillText: {
       color: colors.textSecondary,
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
       textAlign: 'center',
     },
     gridPillTextSelected: {
-      color: '#5FBE84',
+      color: colors.accentText,
     },
     dayRow: {
       flexDirection: 'row',
@@ -391,11 +459,11 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     dayCircleText: {
       color: colors.textSecondary,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
     dayCircleTextSelected: {
-      color: '#5FBE84',
+      color: colors.accentText,
     },
     dialWrap: {
       alignItems: 'center',
@@ -404,7 +472,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     commitmentReadout: {
       textAlign: 'center',
       color: colors.text,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
     saveButton: {
@@ -414,12 +482,16 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       backgroundColor: '#438C63',
       alignItems: 'center',
     },
+    saveButtonGlow: {
+      borderRadius: 16,
+      backgroundColor: 'rgba(255,255,255,0.18)',
+    },
     saveButtonDisabled: {
       opacity: 0.4,
     },
     saveButtonText: {
       color: '#ffffff',
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-SemiBold',
     },
   });

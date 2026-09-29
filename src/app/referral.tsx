@@ -1,13 +1,17 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
-import { SymbolView } from 'expo-symbols';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import ReanimatedAnimated from 'react-native-reanimated';
+import { SymbolView } from '@/components/ui/app-symbol';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
+import { Type } from '@/constants/theme';
+import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight, hapticSuccess } from '@/lib/haptics';
 import { getOrCreateReferralCode, redeemReferralCode } from '@/lib/referral';
+import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
+import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 
 /**
  * Reached from Settings and from the post-session milestone moment (see
@@ -23,6 +27,12 @@ export default function ReferralScreen() {
   const backHover = useHoverFade();
   const sharePress = useLiquidPress();
   const redeemPress = useLiquidPress();
+  // Same shared fade used across onboarding, check-in, Home, Progress, and
+  // Train — this screen's own loading-to-real-content swap previously
+  // hard-cut with no transition (and had no skeleton at all, just a blank
+  // area under the header), the one motion-language gap against the rest
+  // of the app.
+  const entering = useFadeInEntering();
 
   const [loaded, setLoaded] = useState(false);
   const [myCode, setMyCode] = useState<string | null>(null);
@@ -97,14 +107,17 @@ export default function ReferralScreen() {
   };
 
   return (
-    <View style={styles.root}>
+    // BUG FIX (found in a later full-app audit): this screen has a
+    // TextInput (the referral-code field) with no keyboard-avoidance at
+    // all — same fix as settings/index.tsx already has.
+    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={[styles.headerRow, { paddingTop: insets.top + 8 }]}>
         <Pressable
           onPress={() => router.back()}
           onHoverIn={backHover.onHoverIn}
           onHoverOut={backHover.onHoverOut}
           hitSlop={10}
-          style={styles.backButton}
+          style={({ pressed }) => [styles.backButton, pressed && PRESSED_DIM]}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
@@ -116,7 +129,19 @@ export default function ReferralScreen() {
         <View style={styles.backButton} />
       </View>
 
-      {!loaded ? null : (
+      {!loaded ? (
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.section}>
+            <SkeletonBlock width={70} height={11} borderRadius={4} />
+            <SkeletonCard height={160} lines={2} />
+          </View>
+          <View style={styles.section}>
+            <SkeletonBlock width={90} height={11} borderRadius={4} />
+            <SkeletonCard height={54} lines={1} />
+          </View>
+        </ScrollView>
+      ) : (
+        <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
@@ -130,13 +155,24 @@ export default function ReferralScreen() {
                   Share your code. When a friend joins with it, you both get a free week of VerveIn Plus.
                 </Text>
                 <View style={styles.codeCard}>
-                  <Text style={styles.codeText} maxFontSizeMultiplier={1.2}>{myCode}</Text>
+                  {/* selectable: long-press → Copy, for typing the code into
+                      a message by hand (the share sheet has Copy too). Read
+                      out character by character, not as one made-up word. */}
+                  <Text
+                    style={styles.codeText}
+                    maxFontSizeMultiplier={1.2}
+                    selectable
+                    accessibilityLabel={`Your code: ${myCode.split('').join(' ')}`}
+                  >
+                    {myCode}
+                  </Text>
                 </View>
                 <Pressable
                   onPress={handleShare}
                   onPressIn={sharePress.onPressIn}
                   onPressOut={sharePress.onPressOut}
                   style={styles.shareButtonHit}
+                  accessibilityRole="button"
                 >
                   <View style={styles.shareButton}>
                     <Text style={styles.shareButtonText} maxFontSizeMultiplier={1.15}>Share your code</Text>
@@ -205,8 +241,9 @@ export default function ReferralScreen() {
             ) : null}
           </View>
         </ScrollView>
+        </ReanimatedAnimated.View>
       )}
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -215,6 +252,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     root: {
       flex: 1,
       backgroundColor: colors.background,
+    },
+    fadeLayer: {
+      flex: 1,
     },
     headerRow: {
       flexDirection: 'row',
@@ -232,8 +272,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     headerTitle: {
       color: colors.text,
-      fontSize: 16,
-      fontFamily: 'Geist-SemiBold',
+      fontSize: Type.headerTitle,
+      letterSpacing: -0.2,
+      fontFamily: 'Geist-Bold',
     },
     scrollContent: {
       paddingHorizontal: 20,
@@ -245,13 +286,13 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     sectionKicker: {
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       letterSpacing: 1,
       fontFamily: 'Geist-SemiBold',
     },
     introText: {
       color: colors.textSecondary,
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       lineHeight: 18,
       fontFamily: 'Geist-Regular',
     },
@@ -280,7 +321,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     shareButtonText: {
       color: '#ffffff',
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-SemiBold',
     },
     signedOutCard: {
@@ -292,7 +333,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     signedOutText: {
       color: colors.textSecondary,
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       lineHeight: 18,
       fontFamily: 'Geist-Regular',
     },
@@ -302,7 +343,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     retryText: {
       color: '#438C63',
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     redeemRow: {
@@ -318,7 +359,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       paddingHorizontal: 16,
       paddingVertical: 14,
       color: colors.text,
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-SemiBold',
       letterSpacing: 2,
     },
@@ -336,12 +377,12 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     redeemButtonText: {
       color: '#ffffff',
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
     redeemMessage: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       lineHeight: 17,
       fontFamily: 'Geist-Regular',
     },

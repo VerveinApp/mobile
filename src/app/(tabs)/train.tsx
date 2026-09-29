@@ -1,27 +1,31 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AppState, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppState, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import ReanimatedAnimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView } from '@/components/ui/app-symbol';
 
 import { TodaysTrainingCard } from '@/components/home/todays-training-card';
+import { AndroidCardElevation, Type } from '@/constants/theme';
+import { BODY_AREA_LABELS, BODY_AREA_ORDER } from '@/lib/body-area-labels';
 import { getCalibration } from '@/lib/calibration';
 import { DEFAULT_CALIBRATION } from '@/lib/engine/personal-calibration';
 import type { UserCalibration } from '@/lib/engine/types';
-import type { TrainingState } from '@/lib/engine/training-state';
+import { getMostNeglectedBodyArea, type TrainingState } from '@/lib/engine/training-state';
 import { getHealthReadinessModifier, getHealthReadinessReasons } from '@/lib/health-kit';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
 import { usePremiumEntitlement } from '@/lib/purchases';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
+import { DAY_ORDER, ENVIRONMENT_LABELS, SESSION_LABEL_BY_GOAL, WEEKDAY_NAMES } from '@/lib/profile-labels';
+import { getWeekActivity, type WeekDay } from '@/lib/session-history';
 import { getTodaySession, type TodaySession } from '@/lib/today-session';
-import { getTrainingState } from '@/lib/training-state';
+import { getTrainingState } from '@/lib/training-state-loader';
+import { unlessUnchanged } from '@/lib/stable-state';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 
-const WEEKDAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 const WEEKDAY_LABELS: Record<string, string> = {
   sunday: 'Sunday',
   monday: 'Monday',
@@ -32,12 +36,6 @@ const WEEKDAY_LABELS: Record<string, string> = {
   saturday: 'Saturday',
 };
 
-const SESSION_LABEL_BY_GOAL: Record<string, string> = {
-  'build-physique': 'Strength Session',
-  'get-leaner': 'Conditioning Session',
-  'get-stronger': 'Strength Session',
-  'move-better': 'Mobility Session',
-};
 
 /**
  * The training-launch destination — same "Today" card Summary previews,
@@ -64,6 +62,7 @@ export default function TrainScreen() {
     { rhrElevated: boolean; sleepDeficit: boolean } | undefined
   >(undefined);
   const [loaded, setLoaded] = useState(false);
+  const [weekDays, setWeekDays] = useState<WeekDay[] | null>(null);
   const isPremium = usePremiumEntitlement();
   // BUG FIX: the HealthKit-informed trim is a VerveIn Plus benefit —
   // check-in.tsx already gates it this exact way (its own
@@ -75,6 +74,13 @@ export default function TrainScreen() {
   // an unverified session should never silently get the paid trim.
   const effectiveHealthReadinessModifier = isPremium ? healthReadinessModifier : 1;
   const effectiveHealthReadinessReasons = isPremium ? healthReadinessReasons : undefined;
+  // Once today's session has started, its readiness adjustment is frozen
+  // (TodaySession.planHealthReadiness) — reading the same frozen value here
+  // keeps this card's counts identical to the session actually being done.
+  const planHealthReadinessModifier = todaySession?.planHealthReadiness?.modifier ?? effectiveHealthReadinessModifier;
+  const planHealthReadinessReasons = todaySession?.planHealthReadiness
+    ? todaySession.planHealthReadiness.reasons
+    : effectiveHealthReadinessReasons;
 
   // `today` below (WEEKDAY_NAMES[new Date().getDay()]) has no other reason
   // to re-run once this screen renders — useFocusEffect already refreshes
@@ -113,12 +119,17 @@ export default function TrainScreen() {
           getHealthReadinessModifier(),
           getHealthReadinessReasons(),
         ]);
-        setProfile(loadedProfile);
-        setTodaySession(loadedSession);
-        setCalibration(loadedCalibration);
-        setTrainingState(loadedTrainingState);
+        // unlessUnchanged: a focus that finds nothing new keeps every object
+        // as it was, so both plan-engine runs below are skipped and a plain
+        // tab switch doesn't re-render this screen.
+        setProfile(unlessUnchanged(loadedProfile));
+        setTodaySession(unlessUnchanged(loadedSession));
+        setCalibration(unlessUnchanged(loadedCalibration));
+        setTrainingState(unlessUnchanged(loadedTrainingState));
         setHealthReadinessModifier(loadedReadinessModifier);
-        setHealthReadinessReasons(loadedReadinessReasons);
+        setHealthReadinessReasons(unlessUnchanged(loadedReadinessReasons));
+        const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
+        setWeekDays(unlessUnchanged((await getWeekActivity(trainingDays)).days));
         setLoaded(true);
       })();
     }, [])
@@ -141,22 +152,26 @@ export default function TrainScreen() {
         calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
         todaySession?.symptomTags ?? [],
         trainingState ?? undefined,
-        effectiveHealthReadinessModifier,
+        planHealthReadinessModifier,
         undefined,
         todaySession?.timeAvailableMin,
         undefined,
         undefined,
-        effectiveHealthReadinessReasons
+        planHealthReadinessReasons,
+        todaySession?.preferredBodyArea,
+        todaySession?.equipmentOverride
       ),
     [
       profile,
       todaySession?.energy,
       todaySession?.symptomTags,
       todaySession?.timeAvailableMin,
+      todaySession?.preferredBodyArea,
+      todaySession?.equipmentOverride,
       calibration,
       trainingState,
-      effectiveHealthReadinessModifier,
-      effectiveHealthReadinessReasons,
+      planHealthReadinessModifier,
+      planHealthReadinessReasons,
     ]
   );
 
@@ -190,7 +205,7 @@ export default function TrainScreen() {
     return (
       <View style={styles.root}>
         <ScrollView
-          contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 40 }]}
+          contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 100 + insets.bottom }]}
           showsVerticalScrollIndicator={false}
         >
           <SkeletonBlock width={90} height={24} borderRadius={6} />
@@ -214,19 +229,48 @@ export default function TrainScreen() {
   const isRestDay = trainingDays !== null && !trainingDays.includes(today);
   const sessionLabel = SESSION_LABEL_BY_GOAL[profile?.goal ?? ''] ?? 'Training Session';
 
-  const orderedScheduledDays = WEEKDAY_NAMES.filter((d) => trainingDays?.includes(d));
+  // BUG FIX: this used to filter WEEKDAY_NAMES (Sunday-first, since that
+  // array only exists to index new Date().getDay()), so "This Week's Plan"
+  // listed a Sunday session before Monday's — inconsistent with the
+  // Monday-first calendar order used everywhere else a day list is shown
+  // (the onboarding day picker, the adjust-plan sheet, profile-labels.ts's
+  // own formatDays). DAY_ORDER is that same shared Monday-first order.
+  const orderedScheduledDays = DAY_ORDER.filter((d) => trainingDays?.includes(d));
+
+  // A standing signal, not tied to today's check-in — the same real
+  // priority score plan-preview.ts's own body-area reorder already computes
+  // (training-state.ts's getMostNeglectedBodyArea), shown here as its own
+  // readiness read rather than duplicating Home's identical Today card.
+  //
+  // Framed as readiness, deliberately not as a deficit: a body area with a
+  // long real recency gap is well-rested, not "neglected" or "behind" — see
+  // plan-preview.ts's own matching fix for the fuller reasoning (same
+  // signal, same reframe, both landed together). Observation only, never a
+  // command to go train it — today's real capacity, not a ledger, decides
+  // what happens at check-in.
+  const readyArea = getMostNeglectedBodyArea(trainingState ?? undefined);
+  const readyAreaDays =
+    readyArea && trainingState && trainingState.recency.tier !== 'insufficient'
+      ? trainingState.recency.value[readyArea].daysSinceTrained
+      : null;
+  const readinessLine = readyArea
+    ? readyAreaDays !== null && readyAreaDays >= 1
+      ? `${BODY_AREA_LABELS[readyArea]} — well-rested, ${readyAreaDays} day${readyAreaDays === 1 ? '' : 's'} recovered.`
+      : `${BODY_AREA_LABELS[readyArea]} is ready whenever you want it.`
+    : null;
 
   return (
     <View style={styles.root}>
       <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
       <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 40 }]}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 100 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.screenTitle} maxFontSizeMultiplier={1.3}>Train</Text>
 
+        {/* No separate TODAY kicker — the card already carries its own, and
+            the two stacked read as a duplicated label. */}
         <View style={styles.section}>
-          <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TODAY</Text>
           <TodaysTrainingCard
             isRestDay={isRestDay}
             todaySession={todaySession}
@@ -235,7 +279,42 @@ export default function TrainScreen() {
             durationMin={preview.durationMin}
             explanation={preview.explanation}
           />
+          {/* Only shown when today's check-in actually picked an override —
+              real data (check-in.tsx's own "Where are you working out
+              today?") that was otherwise invisible on this screen. Absent
+              means today matches the standing profile, the default/expected
+              case, which doesn't need calling out. */}
+          {todaySession?.equipmentOverride ? (
+            <View style={styles.locationRow}>
+              <SymbolView name="mappin.and.ellipse" size={12} tintColor={colors.textTertiary} />
+              <Text style={styles.locationText} maxFontSizeMultiplier={1.2}>
+                Training at {ENVIRONMENT_LABELS[todaySession.equipmentOverride] ?? todaySession.equipmentOverride}
+              </Text>
+            </View>
+          ) : null}
         </View>
+
+        {readyArea && readinessLine ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>READINESS</Text>
+            <View style={[styles.card, styles.readinessCardPadding]}>
+              <View style={styles.readinessDotsRow}>
+                {BODY_AREA_ORDER.map((area) => (
+                  <View key={area} style={styles.readinessDotCol}>
+                    <View style={[styles.readinessDot, area === readyArea && styles.readinessDotActive]} />
+                    <Text
+                      style={[styles.readinessDotLabel, area === readyArea && styles.readinessDotLabelActive]}
+                      maxFontSizeMultiplier={1.1}
+                    >
+                      {BODY_AREA_LABELS[area]}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+              <Text style={styles.readinessLine} maxFontSizeMultiplier={1.3}>{readinessLine}</Text>
+            </View>
+          </View>
+        ) : null}
 
         {orderedScheduledDays.length > 0 ? (
           <View style={styles.section}>
@@ -249,10 +328,23 @@ export default function TrainScreen() {
                 // comment for why these must differ.
                 const rowExerciseCount = isToday ? preview.exerciseCount : baselinePreview.exerciseCount;
                 const rowDurationMin = isToday ? preview.durationMin : baselinePreview.durationMin;
+                // Days already behind us this week show what happened, not
+                // an estimate for a session that can no longer occur.
+                const weekDay = weekDays?.find((d) => d.weekday === day);
+                const isPast = !!weekDay && !weekDay.isFuture && !weekDay.isToday;
+                // BUG FIX: this used to be past days only, so after today's
+                // session was finished the Today card above said "Done for
+                // today" while today's row here still offered an estimate
+                // for the session just completed.
+                const isDone = !!weekDay && !weekDay.isFuture && weekDay.completed === true;
                 return (
                   <View
                     key={day}
-                    style={[styles.planRow, index < orderedScheduledDays.length - 1 && styles.rowDivider]}
+                    style={[
+                      styles.planRow,
+                      index < orderedScheduledDays.length - 1 && styles.rowDivider,
+                      isPast && !isDone && styles.planRowPast,
+                    ]}
                   >
                     <View>
                       <Text style={[styles.planRowDay, isToday && styles.planRowDayToday]} maxFontSizeMultiplier={1.2}>
@@ -261,9 +353,18 @@ export default function TrainScreen() {
                       </Text>
                       <Text style={styles.planRowLabel} maxFontSizeMultiplier={1.3}>{sessionLabel}</Text>
                     </View>
-                    <Text style={styles.planRowMeta} maxFontSizeMultiplier={1.3}>
-                      Est. {rowExerciseCount} · {rowDurationMin} min
-                    </Text>
+                    {isDone ? (
+                      <View style={styles.planRowDone}>
+                        <SymbolView name="checkmark.circle.fill" size={13} tintColor="#5FBE84" />
+                        <Text style={styles.planRowMeta} maxFontSizeMultiplier={1.3}>Done</Text>
+                      </View>
+                    ) : isPast ? (
+                      <Text style={styles.planRowMeta} maxFontSizeMultiplier={1.3}>—</Text>
+                    ) : (
+                      <Text style={styles.planRowMeta} maxFontSizeMultiplier={1.3}>
+                        Est. {rowExerciseCount} exercises · {rowDurationMin} min
+                      </Text>
+                    )}
                   </View>
                 );
               })}
@@ -301,7 +402,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     screenTitle: {
       color: colors.text,
-      fontSize: 24,
+      fontSize: Type.display,
       letterSpacing: -0.3,
       fontFamily: 'Geist-Bold',
     },
@@ -310,31 +411,84 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     sectionKicker: {
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       letterSpacing: 1,
       fontFamily: 'Geist-SemiBold',
     },
-    card: {
-      borderRadius: 16,
+    locationRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 5,
+    },
+    locationText: {
+      color: colors.textTertiary,
+      fontSize: Type.caption,
+      fontFamily: 'Geist-Medium',
+    },
+    readinessCardPadding: {
+      paddingVertical: 16,
+    },
+    readinessDotsRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+    },
+    readinessDotCol: {
+      alignItems: 'center',
+      gap: 6,
+    },
+    readinessDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      backgroundColor: colors.pillBg,
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
+      borderColor: colors.pillBorder,
+    },
+    readinessDotActive: {
+      backgroundColor: '#5FBE84',
+      borderColor: '#5FBE84',
+    },
+    readinessDotLabel: {
+      color: colors.textTertiary,
+      fontSize: Type.micro,
+      fontFamily: 'Geist-Medium',
+    },
+    readinessDotLabelActive: {
+      color: colors.text,
+      fontFamily: 'Geist-SemiBold',
+    },
+    readinessLine: {
+      marginTop: 14,
+      color: colors.textSecondary,
+      fontSize: Type.secondary,
+      lineHeight: 18,
+      fontFamily: 'Geist-Medium',
+      textAlign: 'center',
+    },
+    card: {
+      borderRadius: Platform.OS === 'android' ? 20 : 16,
       backgroundColor: colors.surface,
       paddingHorizontal: 16,
+      ...(Platform.OS === 'android'
+        ? AndroidCardElevation
+        : { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.surfaceBorder }),
     },
     emptyCard: {
-      borderRadius: 16,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
+      borderRadius: Platform.OS === 'android' ? 20 : 16,
       backgroundColor: colors.surface,
       padding: 20,
       alignItems: 'center',
+      ...(Platform.OS === 'android'
+        ? AndroidCardElevation
+        : { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.surfaceBorder }),
     },
     emptyIcon: {
       marginBottom: 10,
     },
     emptyText: {
       color: colors.textTertiary,
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
       lineHeight: 18,
       textAlign: 'center',
@@ -351,22 +505,32 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     planRowDay: {
       color: colors.text,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
     planRowDayToday: {
-      color: '#5FBE84',
+      color: colors.accentText,
     },
     planRowLabel: {
       marginTop: 2,
       color: colors.textTertiary,
-      fontSize: 11.5,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
     },
     planRowMeta: {
       color: colors.textSecondary,
-      fontSize: 11.5,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
+    },
+    planRowDone: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+    },
+    // A scheduled day that's already passed without a logged session —
+    // quieted, not flagged: nothing to act on, no ledger to keep.
+    planRowPast: {
+      opacity: 0.5,
     },
   });
 }

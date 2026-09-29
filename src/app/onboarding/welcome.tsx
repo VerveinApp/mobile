@@ -1,11 +1,14 @@
 import { router } from 'expo-router';
 import { useMemo } from 'react';
-import { Animated, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+
+import { useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated from 'react-native-reanimated';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticImpactLight } from '@/lib/haptics';
 import { useFadeInEntering } from '@/lib/screen-transitions';
+import { AndroidRipple, AndroidRippleOnAccent, Type } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 import {
   ArrowUpIconGraphic,
@@ -25,8 +28,7 @@ const CANVAS_HEIGHT = 812;
  * bookends the whole experience rather than only showing up at signup.
  */
 export default function OnboardingWelcomeScreen() {
-  const { width: windowWidth } = useWindowDimensions();
-  const scale = windowWidth / CANVAS_WIDTH;
+  const scale = useCanvasScale();
   const { colors, resolvedScheme } = useAppTheme();
   const hoverWashColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
   const styles = useMemo(() => createStyles(colors, hoverWashColor), [colors, hoverWashColor]);
@@ -87,11 +89,14 @@ export default function OnboardingWelcomeScreen() {
 
         <Pressable
           style={styles.primaryButtonHit}
+          // 38pt tall by design; the slop brings the tap target past 44pt.
+          hitSlop={{ top: 6, bottom: 6 }}
           onPress={handleGetStarted}
           onHoverIn={ctaHover.onHoverIn}
           onHoverOut={ctaHover.onHoverOut}
           onPressIn={ctaPress.onPressIn}
           onPressOut={ctaPress.onPressOut}
+          android_ripple={AndroidRippleOnAccent}
         >
           <Animated.View
             style={[styles.primaryButtonVisual, { transform: [{ scale: ctaPress.scale }] }]}
@@ -119,7 +124,7 @@ export default function OnboardingWelcomeScreen() {
           </Animated.View>
         </Pressable>
 
-        <Pressable style={styles.signInHit} onPress={handleSignIn} hitSlop={8}>
+        <Pressable style={styles.signInHit} onPress={handleSignIn} hitSlop={8} android_ripple={AndroidRipple}>
           <Text style={styles.signInText} maxFontSizeMultiplier={1.3}>
             {'Already have an account? '}
             <Text style={styles.signInTextBold}>Sign in</Text>
@@ -227,8 +232,13 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       textAlign: 'center',
       fontFamily: 'Geist-Bold',
     },
+    // BUG FIX: was #2f6647, a dark green that computes to only ~3.11:1
+    // contrast against this screen's pure-black dark-mode background —
+    // fails the 4.5:1 text threshold, only barely clears the large-text
+    // minimum. #438C63 (the app's actual brand green, already used for
+    // termsLink in create-account.tsx) computes to ~5.17:1 here instead.
     titleAccent: {
-      color: '#2f6647',
+      color: '#438C63',
     },
     subtitle: {
       position: 'absolute',
@@ -237,7 +247,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       top: 432,
       paddingHorizontal: 56,
       color: colors.textSecondary,
-      fontSize: 13,
+      fontSize: Type.body,
       lineHeight: 19,
       textAlign: 'center',
       fontFamily: 'Geist-Regular',
@@ -270,7 +280,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     signInText: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
     },
     signInTextBold: {
@@ -290,7 +300,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     primaryText: {
       color: '#ffffff',
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     buttonArrow: {

@@ -12,14 +12,15 @@ export type DeleteAccountResult =
  * this can't be a direct client-SDK call: it needs the service-role key,
  * which must never ship inside the app bundle).
  *
- * DISCLOSED: the function is written but not yet deployed (see its own
- * DEPLOY comment) — until `supabase functions deploy delete-account` has
- * actually been run, every real call here will fail, because there's
- * nothing at that endpoint yet. Supabase's edge relay reports an unknown
- * function slug as a 404 with an `x-relay-error` header, which the SDK
- * surfaces as a `FunctionsRelayError` — this function checks for exactly
- * that shape and reports it as `notDeployed: true` with an honest message,
- * rather than a generic "something went wrong" the user can't act on.
+ * Deployed 2026-09-13 (`supabase functions deploy delete-account`) — live
+ * and verified (returns 401 without a session, not 404). The `notDeployed`
+ * path below is kept as a defensive fallback, not dead code: Supabase's edge
+ * relay reports an unknown function slug as a 404 with an `x-relay-error`
+ * header, which the SDK surfaces as a `FunctionsRelayError` — this function
+ * checks for exactly that shape and reports it as `notDeployed: true` with
+ * an honest message, rather than a generic "something went wrong" the user
+ * can't act on, in case the function is ever removed or redeployed under a
+ * different slug.
  * `FunctionsHttpError` (the function DID run, and returned a non-2xx —
  * e.g. an expired session) is a distinct, real failure and is reported
  * with whatever message the function itself sent back.

@@ -1,10 +1,20 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AppState, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
-import ReanimatedAnimated from 'react-native-reanimated';
+import { AppState, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import ReanimatedAnimated, {
+  Easing,
+  FadeOut,
+  LinearTransition,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withDelay,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
+import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
+import { AndroidCardElevation, AndroidRipple, TabularNums, Type } from '@/constants/theme';
 import { getCalibration } from '@/lib/calibration';
 import { getDeloadNudge } from '@/lib/deload';
 import { DEFAULT_CALIBRATION } from '@/lib/engine/personal-calibration';
@@ -21,40 +31,87 @@ import {
 } from '@/lib/health-kit';
 import { getImprovedExercises } from '@/lib/exercise-performance';
 import { getShareableWeeklyRecapText, getWeeklyRecap } from '@/lib/momentum';
+import { getUnitSystem } from '@/lib/unit-preference';
 import { hasCompletedOnboarding, loadOnboardingDraft, ONBOARDING_STEP_ROUTES } from '@/lib/onboarding-draft';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
+import { SESSION_LABEL_BY_GOAL, WEEKDAY_NAMES } from '@/lib/profile-labels';
 import { usePremiumEntitlement } from '@/lib/purchases';
+import { PremiumGate } from '@/components/premium-gate';
 import { getWeekActivity, type WeekDay } from '@/lib/session-history';
+import { MOTION_DURATION, MOTION_EASING } from '@/lib/motion';
 import { useFadeInEntering } from '@/lib/screen-transitions';
+import { unlessUnchanged } from '@/lib/stable-state';
 import { useAppColors } from '@/lib/theme-context';
 import { getTodaySession, type TodaySession } from '@/lib/today-session';
-import { getTrainingState } from '@/lib/training-state';
+import { getTrainingState } from '@/lib/training-state-loader';
 import { tierOf, type TrainingState } from '@/lib/engine/training-state';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
+import { dismissEquipmentPrompt, shouldAskForEquipment } from '@/lib/equipment-prompt';
 import { TodaysTrainingCard } from '@/components/home/todays-training-card';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView } from '@/components/ui/app-symbol';
 
-const WEEKDAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 const WEEKDAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']; // Monday-start, matches session-history.ts
 
-const SESSION_LABEL_BY_GOAL: Record<string, string> = {
-  'build-physique': 'Strength Session',
-  'get-leaner': 'Conditioning Session',
-  'get-stronger': 'Strength Session',
-  'move-better': 'Mobility Session',
-};
+// Same light→dark green ramp energy-gauge.tsx's own MOOD_COLORS already
+// uses for its "Good"/"Great" levels (#8FBF5C, #5FBE84) plus this app's
+// established darker/pressed-state brand green (#438C63) for the third
+// stop — deliberately NOT a red/yellow/green scale. Training Load isn't a
+// pass/fail signal the way WHOOP's Recovery is: a heavier day reflects
+// real effort, not a warning. A single-hue intensity ramp reads as
+// "more," not "worse." Used per-day below (not per-tier anymore since the
+// chart moved from one commitment-level meter to a real day-by-day
+// breakdown) — each bar's own real caloriesBurned, relative to the
+// heaviest real day this week, picks its stop on the ramp.
+const LOAD_METER_COLORS = ['#8FBF5C', '#5FBE84', '#438C63'];
 
 function getGreeting(): string {
   const hour = new Date().getHours();
+  if (hour < 5) return 'Welcome back';
   if (hour < 12) return 'Good morning';
-  if (hour < 18) return 'Good afternoon';
-  return 'Good evening';
+  if (hour < 17) return 'Good afternoon';
+  if (hour < 21) return 'Good evening';
+  return 'Welcome back';
 }
 
 function formatToday(): string {
   return new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+}
+
+// Everything Home shows, read in one place for the first load, every focus
+// and pull-to-refresh. This list used to be written out three times, and a
+// store added to one copy but not the others would quietly go stale.
+async function loadHomeData(isPremium: boolean | null) {
+  const [
+    profile,
+    todaySession,
+    calibration,
+    deloadNudge,
+    healthReadinessModifier,
+    healthReadinessReasons,
+    trainingState,
+  ] = await Promise.all([
+    getProfile(),
+    getTodaySession(),
+    getCalibration(),
+    getDeloadNudge(isPremium),
+    getHealthReadinessModifier(),
+    getHealthReadinessReasons(),
+    getTrainingState(),
+  ]);
+  const trainingDays = profile?.days ? profile.days.split(',') : null;
+  const weekActivity = await getWeekActivity(trainingDays);
+  return {
+    profile,
+    todaySession,
+    calibration,
+    deloadNudge,
+    healthReadinessModifier,
+    healthReadinessReasons,
+    trainingState,
+    weekActivity,
+  };
 }
 
 /**
@@ -78,6 +135,9 @@ export default function SummaryScreen() {
   // previously hard-cut with no transition at all, the one clear motion-
   // language gap against the rest of the app.
   const entering = useFadeInEntering();
+  const reducedMotion = useReducedMotion();
+  const bannerExiting = reducedMotion ? undefined : FadeOut.duration(MOTION_DURATION.fast).easing(MOTION_EASING.standard);
+  const contentLayout = reducedMotion ? undefined : LinearTransition.springify(280).dampingRatio(0.8);
   const [status, setStatus] = useState<'checking' | 'ready'>('checking');
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [todaySession, setTodaySession] = useState<TodaySession | null>(null);
@@ -95,7 +155,31 @@ export default function SummaryScreen() {
   const [trainingState, setTrainingState] = useState<TrainingState | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showHealthKitBanner, setShowHealthKitBanner] = useState(false);
+  const [showEquipmentPrompt, setShowEquipmentPrompt] = useState(false);
   const isPremium = usePremiumEntitlement();
+  // BUG FIX (found in a later full-app audit): `today`/`isRestDay` below are
+  // plain consts recomputed from `new Date()` on every SummaryScreen render
+  // — correct as far as it goes, but nothing here was ever forcing a render
+  // on its own. Header's own clockTick (see below) only re-renders Header
+  // itself, not this parent, so leaving Home mounted across a real midnight
+  // boundary (typically: backgrounded overnight, then resumed) left the
+  // Rest-Day/training-day determination frozen on yesterday even though
+  // Header's own greeting/date text — refreshed by its own, separate
+  // mechanism — correctly showed today. Same interval+AppState pattern,
+  // lifted here so the one tick drives both this screen's own day logic and
+  // (via the normal prop re-render, Header isn't memoized) Header's text,
+  // instead of two independent, easy-to-desync copies of the same fix.
+  const [, setClockTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => setClockTick((t) => t + 1), 60 * 1000);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') setClockTick((t) => t + 1);
+    });
+    return () => {
+      clearInterval(interval);
+      subscription.remove();
+    };
+  }, []);
   // BUG FIX: the HealthKit-informed trim is a VerveIn Plus benefit —
   // check-in.tsx already gates it this exact way (its own
   // effectiveHealthReadinessModifier), but this screen was applying the raw,
@@ -105,6 +189,13 @@ export default function SummaryScreen() {
   // too — an unverified session should never silently get the paid trim.
   const effectiveHealthReadinessModifier = isPremium ? healthReadinessModifier : 1;
   const effectiveHealthReadinessReasons = isPremium ? healthReadinessReasons : undefined;
+  // Once today's session has started, its readiness adjustment is frozen
+  // (TodaySession.planHealthReadiness) — reading the same frozen value here
+  // keeps this card's counts identical to the session actually being done.
+  const planHealthReadinessModifier = todaySession?.planHealthReadiness?.modifier ?? effectiveHealthReadinessModifier;
+  const planHealthReadinessReasons = todaySession?.planHealthReadiness
+    ? todaySession.planHealthReadiness.reasons
+    : effectiveHealthReadinessReasons;
 
   // Memoized — this now runs the real engine's filtering over the full
   // exercise library (see plan-preview.ts), not a cheap lookup, so it
@@ -120,24 +211,42 @@ export default function SummaryScreen() {
         calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
         todaySession?.symptomTags ?? [],
         trainingState ?? undefined,
-        effectiveHealthReadinessModifier,
+        planHealthReadinessModifier,
         undefined,
         todaySession?.timeAvailableMin,
         undefined,
         undefined,
-        effectiveHealthReadinessReasons
+        planHealthReadinessReasons,
+        todaySession?.preferredBodyArea,
+        todaySession?.equipmentOverride
       ),
     [
       profile,
       todaySession?.energy,
       todaySession?.symptomTags,
       todaySession?.timeAvailableMin,
+      todaySession?.preferredBodyArea,
+      todaySession?.equipmentOverride,
       calibration,
       trainingState,
-      effectiveHealthReadinessModifier,
-      effectiveHealthReadinessReasons,
+      planHealthReadinessModifier,
+      planHealthReadinessReasons,
     ]
   );
+
+  // unlessUnchanged: a focus that finds nothing new keeps every object as
+  // it was, so the plan engine above doesn't re-run and the screen doesn't
+  // re-render on a plain tab switch.
+  const applyHomeData = useCallback((data: Awaited<ReturnType<typeof loadHomeData>>) => {
+    setProfile(unlessUnchanged(data.profile));
+    setTodaySession(unlessUnchanged(data.todaySession));
+    setCalibration(unlessUnchanged(data.calibration));
+    setDeloadNudge(unlessUnchanged(data.deloadNudge));
+    setHealthReadinessModifier(data.healthReadinessModifier);
+    setHealthReadinessReasons(unlessUnchanged(data.healthReadinessReasons));
+    setTrainingState(unlessUnchanged(data.trainingState));
+    setWeekActivity(unlessUnchanged(data.weekActivity));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,48 +264,19 @@ export default function SummaryScreen() {
         return;
       }
 
-      const [
-        loadedProfile,
-        loadedSession,
-        loadedCalibration,
-        loadedDeloadNudge,
-        loadedReadinessModifier,
-        loadedReadinessReasons,
-        loadedTrainingState,
-      ] = await Promise.all([
-        getProfile(),
-        getTodaySession(),
-        getCalibration(),
-        getDeloadNudge(isPremium),
-        getHealthReadinessModifier(),
-        getHealthReadinessReasons(),
-        getTrainingState(),
-      ]);
-      if (cancelled) return;
-      setProfile(loadedProfile);
-      setTodaySession(loadedSession);
-      setCalibration(loadedCalibration);
-      setDeloadNudge(loadedDeloadNudge);
-      setHealthReadinessModifier(loadedReadinessModifier);
-      setHealthReadinessReasons(loadedReadinessReasons);
-      setTrainingState(loadedTrainingState);
-
-      const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
-      const activity = await getWeekActivity(trainingDays);
-      if (cancelled) return;
-      setWeekActivity(activity);
-      setStatus('ready');
-
-      // Own effect below would also work, but this keeps the check
-      // alongside the same "only after onboarding is confirmed complete"
-      // gate as everything else this screen loads.
-      const [available, connected, dismissed] = await Promise.all([
+      // The banner check resolves BEFORE status flips to ready — it used to
+      // run after, so the banner popped in above Today's card a beat after
+      // the screen had already appeared, shoving everything below it down.
+      const [data, available, connected, dismissed] = await Promise.all([
+        loadHomeData(isPremium),
         isHealthKitAvailable(),
         hasConnectedHealthKit(),
         isHealthKitBannerDismissed(),
       ]);
       if (cancelled) return;
+      applyHomeData(data);
       setShowHealthKitBanner(available && !connected && !dismissed);
+      setStatus('ready');
     })();
     return () => {
       cancelled = true;
@@ -220,71 +300,21 @@ export default function SummaryScreen() {
     useCallback(() => {
       if (status !== 'ready') return;
       (async () => {
-        const [
-          loadedProfile,
-          loadedSession,
-          loadedCalibration,
-          loadedDeloadNudge,
-          loadedReadinessModifier,
-          loadedReadinessReasons,
-          loadedTrainingState,
-        ] = await Promise.all([
-          getProfile(),
-          getTodaySession(),
-          getCalibration(),
-          getDeloadNudge(isPremium),
-          getHealthReadinessModifier(),
-          getHealthReadinessReasons(),
-          getTrainingState(),
-        ]);
-        setProfile(loadedProfile);
-        setTodaySession(loadedSession);
-        setCalibration(loadedCalibration);
-        setDeloadNudge(loadedDeloadNudge);
-        setHealthReadinessModifier(loadedReadinessModifier);
-        setHealthReadinessReasons(loadedReadinessReasons);
-        setTrainingState(loadedTrainingState);
-        const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
-        setWeekActivity(await getWeekActivity(trainingDays));
+        applyHomeData(await loadHomeData(isPremium));
       })();
       // isPremium added alongside the getDeloadNudge/effectiveHealthReadinessModifier
       // gating fix — without it, this callback (and the isPremium value it
       // closes over when calling getDeloadNudge) would stay frozen at
       // whatever isPremium was the one time `status` flipped to 'ready',
       // never picking up entitlement resolving moments later.
-    }, [status, isPremium])
+    }, [status, isPremium, applyHomeData])
   );
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    const [
-      loadedProfile,
-      loadedSession,
-      loadedCalibration,
-      loadedDeloadNudge,
-      loadedReadinessModifier,
-      loadedReadinessReasons,
-      loadedTrainingState,
-    ] = await Promise.all([
-      getProfile(),
-      getTodaySession(),
-      getCalibration(),
-      getDeloadNudge(isPremium),
-      getHealthReadinessModifier(),
-      getHealthReadinessReasons(),
-      getTrainingState(),
-    ]);
-    setProfile(loadedProfile);
-    setTodaySession(loadedSession);
-    setCalibration(loadedCalibration);
-    setDeloadNudge(loadedDeloadNudge);
-    setHealthReadinessModifier(loadedReadinessModifier);
-    setHealthReadinessReasons(loadedReadinessReasons);
-    setTrainingState(loadedTrainingState);
-    const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
-    setWeekActivity(await getWeekActivity(trainingDays));
+    applyHomeData(await loadHomeData(isPremium));
     setRefreshing(false);
-  }, [isPremium]);
+  }, [isPremium, applyHomeData]);
 
   const handleConnectHealthKit = useCallback(async () => {
     hapticImpactLight();
@@ -302,6 +332,34 @@ export default function SummaryScreen() {
       setHealthReadinessModifier(modifier);
       setHealthReadinessReasons(reasons);
     }
+  }, []);
+
+  // Re-read on every focus (and profile change), so answering on the
+  // equipment screen and coming back clears it straight away.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      shouldAskForEquipment(profile).then((ask) => {
+        if (!cancelled) setShowEquipmentPrompt(ask);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [profile])
+  );
+
+  const handleSetEquipment = useCallback(() => {
+    hapticImpactLight();
+    router.push({
+      pathname: '/onboarding/equipment',
+      params: { mode: 'edit', environment: profile?.environment ?? '' },
+    } as never);
+  }, [profile?.environment]);
+
+  const handleDismissEquipmentPrompt = useCallback(async () => {
+    hapticSelect();
+    setShowEquipmentPrompt(false);
+    await dismissEquipmentPrompt();
   }, []);
 
   const handleDismissHealthKitBanner = useCallback(async () => {
@@ -325,6 +383,7 @@ export default function SummaryScreen() {
     const recentImprovement = improved
       .filter((e) => Date.parse(`${e.performance.date}T00:00:00`) >= cutoffMs)
       .sort((a, b) => b.performance.date.localeCompare(a.performance.date))[0];
+    const unit = await getUnitSystem();
     const message = getShareableWeeklyRecapText(
       weekActivity,
       recentImprovement
@@ -332,7 +391,8 @@ export default function SummaryScreen() {
             exerciseName: recentImprovement.exerciseName,
             estimatedOneRepMaxKg: recentImprovement.performance.estimatedOneRepMax,
           }
-        : null
+        : null,
+      unit
     );
     if (!message) return;
     try {
@@ -347,7 +407,7 @@ export default function SummaryScreen() {
     return (
       <View style={styles.root}>
         <ScrollView
-          contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 32 }]}
+          contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 100 + insets.bottom }]}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.header}>
@@ -399,7 +459,7 @@ export default function SummaryScreen() {
     <View style={styles.root}>
       <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
       <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 32 }]}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 100 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.textSecondary} />
@@ -408,12 +468,14 @@ export default function SummaryScreen() {
         <Header styles={styles} firstName={firstName} weeklyRecap={weeklyRecap} />
 
         {deloadNudge?.triggered && deloadNudge.message ? (
+          <ReanimatedAnimated.View exiting={bannerExiting}>
           <Pressable
-            style={styles.deloadBanner}
+            style={({ pressed }) => [styles.deloadBanner, pressed && PRESSED_DIM]}
             onPress={() => {
               hapticSelect();
               router.push('/home/check-in' as never);
             }}
+            android_ripple={AndroidRipple}
           >
             <View style={styles.deloadBannerRow}>
               <SymbolView name="moon.zzz.fill" size={15} tintColor={colors.textSecondary} />
@@ -423,31 +485,82 @@ export default function SummaryScreen() {
               Check in →
             </Text>
           </Pressable>
+          </ReanimatedAnimated.View>
         ) : null}
 
-        {showHealthKitBanner ? (
-          <View style={styles.healthKitBanner}>
+        {/* Plans for a home setup that never said what it has use a default
+            kit — worth one ask. Shown instead of the Apple Health card, not
+            stacked with it; that one waits until this is answered. */}
+        {showEquipmentPrompt ? (
+          <ReanimatedAnimated.View exiting={bannerExiting} style={styles.healthKitBanner}>
             <View style={styles.healthKitBannerRow}>
-              <SymbolView name="heart.fill" size={15} tintColor="#5FBE84" />
+              <SymbolView name="dumbbell.fill" size={15} tintColor="#5FBE84" />
               <Text style={styles.healthKitBannerText} maxFontSizeMultiplier={1.4}>
-                See your plan alongside real activity, sleep, and heart rate from Apple Health.
+                What equipment do you have? Your plans use a basic home kit until you say.
               </Text>
             </View>
             <View style={styles.healthKitBannerActions}>
-              <Pressable style={styles.healthKitBannerDismiss} onPress={handleDismissHealthKitBanner} hitSlop={8}>
+              <Pressable
+                style={({ pressed }) => [styles.healthKitBannerDismiss, pressed && PRESSED_DIM]}
+                onPress={handleDismissEquipmentPrompt}
+                hitSlop={8}
+                accessibilityRole="button"
+              >
                 <Text style={styles.healthKitBannerDismissText} maxFontSizeMultiplier={1.2}>
                   Not now
                 </Text>
               </Pressable>
-              <Pressable style={styles.healthKitBannerConnect} onPress={handleConnectHealthKit} hitSlop={8}>
+              <Pressable
+                style={({ pressed }) => [styles.healthKitBannerConnect, pressed && PRESSED_DIM]}
+                onPress={handleSetEquipment}
+                hitSlop={8}
+                accessibilityRole="button"
+              >
+                <Text style={styles.healthKitBannerConnectText} maxFontSizeMultiplier={1.2}>
+                  Set equipment
+                </Text>
+              </Pressable>
+            </View>
+          </ReanimatedAnimated.View>
+        ) : null}
+
+        {/* Fades out when dismissed or connected, and everything below
+            glides up into its space (contentLayout) — it used to vanish
+            and let the whole screen jump. */}
+        {showHealthKitBanner && !showEquipmentPrompt ? (
+          <ReanimatedAnimated.View exiting={bannerExiting} style={styles.healthKitBanner}>
+            <View style={styles.healthKitBannerRow}>
+              <SymbolView name="heart.fill" size={15} tintColor="#5FBE84" />
+              <Text style={styles.healthKitBannerText} maxFontSizeMultiplier={1.4}>
+                See your plan alongside real activity, calories burned, sleep, and heart rate from Apple Health.
+              </Text>
+            </View>
+            <View style={styles.healthKitBannerActions}>
+              <Pressable
+                style={({ pressed }) => [styles.healthKitBannerDismiss, pressed && PRESSED_DIM]}
+                onPress={handleDismissHealthKitBanner}
+                hitSlop={8}
+                accessibilityRole="button"
+              >
+                <Text style={styles.healthKitBannerDismissText} maxFontSizeMultiplier={1.2}>
+                  Not now
+                </Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.healthKitBannerConnect, pressed && PRESSED_DIM]}
+                onPress={handleConnectHealthKit}
+                hitSlop={8}
+                accessibilityRole="button"
+              >
                 <Text style={styles.healthKitBannerConnectText} maxFontSizeMultiplier={1.2}>
                   Connect
                 </Text>
               </Pressable>
             </View>
-          </View>
+          </ReanimatedAnimated.View>
         ) : null}
 
+        <ReanimatedAnimated.View layout={contentLayout} style={styles.contentStack}>
         <TodaysTrainingCard
           isRestDay={isRestDay}
           todaySession={todaySession}
@@ -465,7 +578,9 @@ export default function SummaryScreen() {
           todaySession={todaySession}
           weekActivity={weekActivity}
           calibration={calibration}
+          isPremium={isPremium}
         />
+        </ReanimatedAnimated.View>
       </ScrollView>
       </ReanimatedAnimated.View>
     </View>
@@ -485,26 +600,13 @@ function Header({
   const press = useLiquidPress();
   const initial = firstName ? firstName[0].toUpperCase() : '·';
 
-  // Neither getGreeting() nor formatToday() below have any other reason to
-  // re-run once this component mounts — without this, leaving Home open
-  // across an hour (or day) boundary freezes both at whatever they were on
-  // the last render, e.g. still "Good morning" well into the afternoon.
-  // Re-ticking every minute keeps them live; the AppState listener catches
-  // the larger jump from being backgrounded for a while immediately rather
-  // than waiting up to a minute for the interval to fire (JS timers don't
-  // run in the background on iOS, so the interval alone only catches up
-  // once the app resumes anyway).
-  const [, setClockTick] = useState(0);
-  useEffect(() => {
-    const interval = setInterval(() => setClockTick((t) => t + 1), 60 * 1000);
-    const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') setClockTick((t) => t + 1);
-    });
-    return () => {
-      clearInterval(interval);
-      subscription.remove();
-    };
-  }, []);
+  // getGreeting()/formatToday() below stay fresh via SummaryScreen's own
+  // clock-tick (see there) — Header isn't memoized, so every re-render its
+  // parent gets, this gets too. Used to have its own separate copy of the
+  // same interval+AppState mechanism, but that only ever re-rendered this
+  // component, not the parent's own today/isRestDay logic, which could
+  // still go stale across a real midnight boundary even while this text
+  // looked fine. One shared tick instead of two independent ones.
 
   return (
     <View style={styles.header}>
@@ -527,6 +629,9 @@ function Header({
         onHoverOut={hover.onHoverOut}
         onPressIn={press.onPressIn}
         onPressOut={press.onPressOut}
+        android_ripple={{ ...AndroidRipple, borderless: true }}
+        accessibilityRole="button"
+        accessibilityLabel="Open profile"
       >
         <View style={styles.avatarVisual}>
           <Text style={styles.avatarText} maxFontSizeMultiplier={1.15}>{initial}</Text>
@@ -553,6 +658,7 @@ function WeeklyActivity({
   // week with nothing real to report yet (blameless silence, not a lesser/
   // empty version of the button).
   const canShare = weekActivity.completedCount > 0;
+
   return (
     <View style={styles.section}>
       <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>THIS WEEK</Text>
@@ -563,7 +669,11 @@ function WeeklyActivity({
             <View
               style={[
                 styles.weekDot,
-                !day.isScheduled && styles.weekDotUnscheduled,
+                // A rest day is a small quiet dot, not the same ring as a
+                // training day with a slightly fainter border — the two
+                // used to be all but indistinguishable. Today keeps its
+                // full ring either way so it's always findable.
+                !day.isScheduled && !day.isToday && styles.weekDotRest,
                 day.isScheduled && day.completed === true && styles.weekDotCompleted,
                 // Fixed bug: previously `day.completed === false` only — a
                 // past day with zero recorded entry (completed: null, not
@@ -594,6 +704,9 @@ function WeeklyActivity({
             onHoverOut={shareHover.onHoverOut}
             onPressIn={sharePress.onPressIn}
             onPressOut={sharePress.onPressOut}
+            android_ripple={AndroidRipple}
+            accessibilityRole="button"
+            accessibilityLabel="Share this week's activity"
           >
             <SymbolView name="square.and.arrow.up" size={13} tintColor={colors.textSecondary} />
             <Text style={styles.weekShareText} maxFontSizeMultiplier={1.2}>
@@ -612,12 +725,14 @@ function YourFitness({
   todaySession,
   weekActivity,
   calibration,
+  isPremium,
 }: {
   styles: ReturnType<typeof createStyles>;
   profile: UserProfile | null;
   todaySession: TodaySession | null;
-  weekActivity: { completedCount: number; scheduledCount: number };
+  weekActivity: { days: WeekDay[]; completedCount: number; scheduledCount: number };
   calibration: UserCalibration | null;
+  isPremium: boolean | null;
 }) {
   const commitment = Number(profile?.commitmentLevel) || 4;
   const loadLabel = commitment <= 3 ? 'Light' : commitment <= 6 ? 'Moderate' : 'High';
@@ -668,15 +783,65 @@ function YourFitness({
   // shown by default.
   const isQuietWeek = weekActivity.scheduledCount > 0 && ratio < 0.25;
 
+  // Real per-day intensity, not a redraw of loadLevel's own commitment-tier
+  // meter — the same caloriesBurned estimate getWeeklyCaloriesBurned sums
+  // for the week, read per day instead. A day with no real estimate (rest,
+  // future, unscheduled, or an old entry logged before caloriesBurned
+  // existed) draws as an empty track rather than a fabricated bar, per this
+  // app's own no-synthetic-data rule for trend visuals.
+  const maxDailyKcal = Math.max(1, ...weekActivity.days.map((day) => day.caloriesBurned ?? 0));
+  // An all-empty chart was seven flat stubs under 40pt of blank space — a
+  // plain line saying what will appear there reads better until real data does.
+  const hasAnyLoadData = weekActivity.days.some((day) => (day.caloriesBurned ?? 0) > 0);
+
   return (
     <View style={styles.section}>
       <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>YOUR FITNESS</Text>
 
+      {/* POLICY CHANGE (explicit product decision, not a bug fix): Home's
+          own Training Load and Consistency cards are now Plus-gated too,
+          same PremiumGate teaser as Progress tab's Training Balance and
+          consistency calendar — those two are a deeper, per-exercise/
+          per-day breakdown of the same underlying signal this quick
+          glanceable summary shows, so this closes the last free preview of
+          it rather than leaving the headline number reachable for free
+          while its detail view costs Plus. */}
+      <PremiumGate isPremium={isPremium} label="Training Load">
       <View style={styles.fitnessCard}>
         <View style={styles.fitnessCardHeader}>
           <Text style={styles.fitnessCardLabel} maxFontSizeMultiplier={1.3}>Training Load</Text>
-          <Text style={styles.fitnessCardValue} maxFontSizeMultiplier={1.2}>{loadLabel}</Text>
+          {/* The PLANNED load (from the commitment level chosen at setup),
+              not a measurement — labeled as such, since it sat above an
+              empty chart for anyone who hadn't logged a session yet and
+              read as a claim about training that hadn't happened. */}
+          <Text style={styles.fitnessCardValue} maxFontSizeMultiplier={1.2}>
+            {loadLabel}
+            <Text style={styles.fitnessCardTier}> plan</Text>
+          </Text>
         </View>
+        {hasAnyLoadData ? (
+        <View style={styles.loadChart} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          {weekActivity.days.map((day) => {
+            const kcal = day.caloriesBurned ?? 0;
+            const hasData = kcal > 0;
+            const ratio = hasData ? kcal / maxDailyKcal : 0;
+            const barColor = ratio > 0.66 ? LOAD_METER_COLORS[2] : ratio > 0.33 ? LOAD_METER_COLORS[1] : LOAD_METER_COLORS[0];
+            return (
+              <View key={day.date} style={styles.loadChartTrack}>
+                {hasData ? (
+                  <LoadChartBar styles={styles} heightPct={Math.max(ratio, 0.12) * 100} color={barColor} />
+                ) : (
+                  <View style={[styles.loadChartBar, styles.loadChartBarEmpty]} />
+                )}
+              </View>
+            );
+          })}
+        </View>
+        ) : (
+          <Text style={styles.loadChartEmptyText} maxFontSizeMultiplier={1.3}>
+            Bars fill in as you log sessions this week.
+          </Text>
+        )}
         <Text style={styles.fitnessCardNote} maxFontSizeMultiplier={1.4}>{readinessNote}</Text>
         {calibrationNote ? (
           <Text style={styles.fitnessCardCalibrationNote} maxFontSizeMultiplier={1.4}>
@@ -684,7 +849,9 @@ function YourFitness({
           </Text>
         ) : null}
       </View>
+      </PremiumGate>
 
+      <PremiumGate isPremium={isPremium} label="Consistency">
       <View style={styles.fitnessCard}>
         <View style={styles.fitnessCardHeader}>
           <Text style={styles.fitnessCardLabel} maxFontSizeMultiplier={1.3}>Consistency</Text>
@@ -700,7 +867,40 @@ function YourFitness({
           </Text>
         ) : null}
       </View>
+      </PremiumGate>
     </View>
+  );
+}
+
+/**
+ * One day's bar in Training Load — grows up from its baseline the first
+ * time it appears, on the same curve as the app's other charts (Sparkline,
+ * ProgressRing, RadarChart), rather than appearing fully drawn. Instant
+ * under Reduce Motion.
+ */
+function LoadChartBar({
+  styles,
+  heightPct,
+  color,
+}: {
+  styles: ReturnType<typeof createStyles>;
+  heightPct: number;
+  color: string;
+}) {
+  const reducedMotion = useReducedMotion();
+  const grow = useSharedValue(reducedMotion ? 1 : 0);
+  useEffect(() => {
+    if (reducedMotion) {
+      grow.value = 1;
+      return;
+    }
+    grow.value = withDelay(150, withTiming(1, { duration: 700, easing: Easing.out(Easing.cubic) }));
+  }, [grow, reducedMotion]);
+  const growStyle = useAnimatedStyle(() => ({ transform: [{ scaleY: grow.value }] }));
+  return (
+    <ReanimatedAnimated.View
+      style={[styles.loadChartBar, { height: `${heightPct}%`, backgroundColor: color, transformOrigin: 'bottom' }, growStyle]}
+    />
   );
 }
 
@@ -717,6 +917,11 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       paddingHorizontal: 20,
       gap: 28,
     },
+    // Same spacing as scrollContent's own gap — the cards below the banners
+    // are grouped only so they can move together when a banner leaves.
+    contentStack: {
+      gap: 28,
+    },
     header: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -724,14 +929,14 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     greeting: {
       color: colors.text,
-      fontSize: 22,
+      fontSize: Type.heading,
       letterSpacing: -0.3,
       fontFamily: 'Geist-Bold',
     },
     dateText: {
       marginTop: 4,
       color: colors.textSecondary,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
     },
     momentumRow: {
@@ -756,7 +961,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     deloadBannerText: {
       flex: 1,
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       lineHeight: 16,
       fontFamily: 'Geist-Medium',
     },
@@ -767,8 +972,8 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     // real signal, never act on it invisibly.
     deloadBannerAction: {
       alignSelf: 'flex-end',
-      color: '#5FBE84',
-      fontSize: 12,
+      color: colors.accentText,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     healthKitBanner: {
@@ -788,7 +993,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     healthKitBannerText: {
       flex: 1,
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       lineHeight: 16,
       fontFamily: 'Geist-Medium',
     },
@@ -803,7 +1008,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     healthKitBannerDismissText: {
       color: colors.textTertiary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     healthKitBannerConnect: {
@@ -811,8 +1016,8 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       paddingHorizontal: 4,
     },
     healthKitBannerConnectText: {
-      color: '#5FBE84',
-      fontSize: 12,
+      color: colors.accentText,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     // Neutral, not a celebratory accent — this is an observation ("3
@@ -820,7 +1025,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     // other plain fact on the screen rather than drawing extra attention.
     momentumText: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
     },
     avatarHit: {
@@ -838,8 +1043,8 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       justifyContent: 'center',
     },
     avatarText: {
-      color: '#5FBE84',
-      fontSize: 15,
+      color: colors.accentText,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-Bold',
     },
     section: {
@@ -847,7 +1052,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     sectionKicker: {
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       letterSpacing: 1,
       fontFamily: 'Geist-SemiBold',
     },
@@ -862,7 +1067,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     weekDayLetter: {
       color: colors.textSecondary,
-      fontSize: 11,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
     },
     weekDot: {
@@ -870,18 +1075,27 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       height: 22,
       borderRadius: 11,
       borderWidth: 1.5,
-      borderColor: colors.surfaceBorder,
+      borderColor: colors.textQuaternary,
       backgroundColor: 'transparent',
     },
-    weekDotUnscheduled: {
-      borderColor: colors.badgeBg,
+    // Same 22pt footprint as a ring (margins), so the row never shifts.
+    weekDotRest: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      borderWidth: 0,
+      marginVertical: 8,
+      backgroundColor: colors.surfaceBorder,
     },
     weekDotCompleted: {
       borderColor: '#5FBE84',
       backgroundColor: '#5FBE84',
     },
+    // A scheduled day that's gone by without a session is just quieter than
+    // one still ahead — never red. A skipped day isn't a debt this app
+    // holds against anyone; the body was resting either way.
     weekDotMissed: {
-      borderColor: 'rgba(229,72,77,0.5)',
+      opacity: 0.45,
     },
     weekDotToday: {
       borderColor: colors.text,
@@ -893,8 +1107,9 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     weekSummary: {
       color: colors.textSecondary,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
+      ...TabularNums,
     },
     weekShareButton: {
       flexDirection: 'row',
@@ -903,15 +1118,16 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     weekShareText: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
     },
     fitnessCard: {
       padding: 16,
-      borderRadius: 16,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
+      borderRadius: Platform.OS === 'android' ? 20 : 16,
       backgroundColor: colors.surface,
+      ...(Platform.OS === 'android'
+        ? AndroidCardElevation
+        : { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.surfaceBorder }),
     },
     fitnessCardHeader: {
       flexDirection: 'row',
@@ -920,30 +1136,57 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     fitnessCardLabel: {
       color: colors.text,
-      fontSize: 13.5,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
     fitnessCardValue: {
       color: colors.text,
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-Bold',
+      ...TabularNums,
     },
     fitnessCardTier: {
       color: colors.textTertiary,
-      fontSize: 12,
+      fontSize: Type.secondary,
+      fontFamily: 'Geist-Medium',
+    },
+    loadChart: {
+      marginTop: 10,
+      height: 40,
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      gap: 4,
+    },
+    loadChartTrack: {
+      flex: 1,
+      height: '100%',
+      justifyContent: 'flex-end',
+    },
+    loadChartBar: {
+      width: '100%',
+      borderRadius: 2,
+    },
+    loadChartBarEmpty: {
+      height: '12%',
+      backgroundColor: colors.badgeBg,
+    },
+    loadChartEmptyText: {
+      marginTop: 10,
+      color: colors.textTertiary,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
     },
     fitnessCardNote: {
       marginTop: 6,
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       lineHeight: 17,
       fontFamily: 'Geist-Regular',
     },
     fitnessCardCalibrationNote: {
       marginTop: 4,
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       lineHeight: 15,
       fontFamily: 'Geist-Regular',
     },

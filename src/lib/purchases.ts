@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import Purchases, {
+  INTRO_ELIGIBILITY_STATUS,
   LOG_LEVEL,
   PURCHASES_ERROR_CODE,
   type CustomerInfo,
@@ -8,15 +10,21 @@ import Purchases, {
   type PurchasesPackage,
 } from 'react-native-purchases';
 
-import { getDevPremiumOverride } from '@/lib/dev-premium-override';
 import { supabase } from '@/lib/supabase';
 
 // iOS-only for now, same scoping as health-kit.ts — this app doesn't ship
-// Android yet. The Test Store key below is sandbox-only (no real store
-// connected in RevenueCat yet); swap for the real Apple key once RevenueCat's
-// iOS app configuration + real App Store Connect subscription products exist.
-// See .env.local's own comment on this key.
-const API_KEY = process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_IOS;
+// Android yet. EXPO_PUBLIC_REVENUECAT_API_KEY_IOS is the real key, wired to
+// the real App Store Connect app (see .env.local's own comment) — that
+// never resolves real offerings/pricing in the Simulator, since Simulator
+// can't talk to real StoreKit. __DEV__ builds use the separate Test Store
+// key instead: a RevenueCat-hosted mock app with its own fake products, so
+// pricing/purchases work in Simulator (and on device) without ever touching
+// the real store. Falls back to the real key if the Test Store one isn't
+// set, so an unconfigured dev env fails the same honest way it always did
+// rather than silently picking undefined.
+const API_KEY = __DEV__
+  ? process.env.EXPO_PUBLIC_REVENUECAT_TEST_STORE_KEY_IOS || process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_IOS
+  : process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_IOS;
 
 // Matches the entitlement identifier configured in the RevenueCat dashboard
 // exactly (including the space) — VerveIn Plus, not a slug. RevenueCat
@@ -25,6 +33,33 @@ const API_KEY = process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_IOS;
 export const PREMIUM_ENTITLEMENT_ID = 'VerveIn Plus';
 
 let configured = false;
+
+// ---------------------------------------------------------------------------
+// One shared, live view of the entitlement — see usePremiumEntitlement.
+// ---------------------------------------------------------------------------
+
+function isEntitled(info: CustomerInfo): boolean {
+  return info.entitlements.active[PREMIUM_ENTITLEMENT_ID]?.isActive === true;
+}
+
+/** The last real answer any check produced, so a screen mounting later
+ * starts from it instead of from "unknown" (and its locked-teaser pop-in). */
+let lastKnownEntitlement: boolean | null = null;
+const entitlementListeners = new Set<(value: boolean) => void>();
+
+function publishEntitlement(value: boolean): void {
+  lastKnownEntitlement = value;
+  entitlementListeners.forEach((listener) => listener(value));
+}
+
+// Resolves once RevenueCat has been told who the signed-in user is (or that
+// nobody is). BUG FIX: logIn used to be fire-and-forget, so the first
+// entitlement check on a cold launch could read the ANONYMOUS RevenueCat
+// user — a paying subscriber saw every Plus section locked until they
+// switched screens. Checks now wait for identity first (bounded, so a hung
+// network call can't block them forever).
+let identityReady: Promise<void> = Promise.resolve();
+const IDENTITY_WAIT_MAX_MS = 5000;
 
 /**
  * Call once at app startup (see _layout.tsx). Safe to call more than once —
@@ -42,6 +77,10 @@ export async function initPurchases(): Promise<void> {
     Purchases.configure({ apiKey: API_KEY });
     configured = true;
     syncIdentityWithSupabaseAuth();
+    // Purchases, restores, renewals and expirations all arrive here — every
+    // mounted screen's gate updates the moment it happens, not on its next
+    // focus.
+    Purchases.addCustomerInfoUpdateListener((info) => publishEntitlement(isEntitled(info)));
   } catch {
     // Worst case Premium features stay locked this session — never a crash,
     // same "under-triggering is the safe failure mode" rule health-kit.ts
@@ -64,11 +103,23 @@ export async function initPurchases(): Promise<void> {
  * broken app right now.
  */
 function syncIdentityWithSupabaseAuth(): void {
+  let markIdentityReady: () => void = () => {};
+  identityReady = new Promise<void>((resolve) => {
+    markIdentityReady = resolve;
+    setTimeout(resolve, IDENTITY_WAIT_MAX_MS);
+  });
   supabase.auth.onAuthStateChange((event, session) => {
     if ((event === 'INITIAL_SESSION' || event === 'SIGNED_IN') && session?.user.id) {
-      Purchases.logIn(session.user.id).catch(() => {});
+      Purchases.logIn(session.user.id)
+        .then(({ customerInfo }) => publishEntitlement(isEntitled(customerInfo)))
+        .catch(() => {})
+        .finally(markIdentityReady);
+    } else if (event === 'INITIAL_SESSION') {
+      markIdentityReady();
     } else if (event === 'SIGNED_OUT') {
-      Purchases.logOut().catch(() => {});
+      Purchases.logOut()
+        .then((customerInfo) => publishEntitlement(isEntitled(customerInfo)))
+        .catch(() => {});
     }
   });
 }
@@ -90,6 +141,29 @@ export async function getCurrentOffering(): Promise<PurchasesOffering | null> {
 }
 
 /**
+ * Which products this Apple ID can still get an intro offer (free trial) on.
+ * Apple only grants one intro offer per subscription group, so someone who
+ * already used a trial must never see "Start Free Trial" — tapping it would
+ * charge them immediately. Anything other than a definite ELIGIBLE (including
+ * UNKNOWN, which RevenueCat's own docs say to treat as "show regular
+ * pricing") comes back false, as does any failure: under-promising a trial
+ * is the safe failure mode, advertising one that won't happen is not.
+ */
+export async function getIntroOfferEligibility(productIdentifiers: string[]): Promise<Record<string, boolean>> {
+  if (!configured || productIdentifiers.length === 0) return {};
+  try {
+    const result = await Purchases.checkTrialOrIntroductoryPriceEligibility(productIdentifiers);
+    const eligibility: Record<string, boolean> = {};
+    for (const id of productIdentifiers) {
+      eligibility[id] = result[id]?.status === INTRO_ELIGIBILITY_STATUS.INTRO_ELIGIBILITY_STATUS_ELIGIBLE;
+    }
+    return eligibility;
+  } catch {
+    return {};
+  }
+}
+
+/**
  * Real, live entitlement check — never cached separately from what the SDK
  * itself already caches, so this can't drift from the actual purchase state
  * the way a second AsyncStorage-backed copy could after an expiration or a
@@ -97,20 +171,32 @@ export async function getCurrentOffering(): Promise<PurchasesOffering | null> {
  * wouldn't. False (not an error) when not configured — an unconfigured
  * (e.g. non-iOS) build should read as "no Premium," not crash every gated
  * screen.
- *
- * ⚠️ TEMPORARY: checks dev-premium-override.ts's local, client-side-only
- * override FIRST — see that file's own header comment for what this is and
- * why it must be removed before the real App Store submission. Never
- * touches RevenueCat itself, so it can't fake or grant a real purchase.
  */
 export async function hasPremiumEntitlement(): Promise<boolean> {
-  if (await getDevPremiumOverride()) return true;
   if (!configured) return false;
+  await identityReady;
   try {
-    const info = await Purchases.getCustomerInfo();
-    return info.entitlements.active[PREMIUM_ENTITLEMENT_ID]?.isActive === true;
+    return isEntitled(await Purchases.getCustomerInfo());
   } catch {
     return false;
+  }
+}
+
+/**
+ * The store's own subscription-management page (App Store or Play Store,
+ * whichever the active subscription is actually on) — RevenueCat's
+ * `CustomerInfo.managementURL` already resolves to the right one, so this
+ * doesn't need its own platform branch. Null whenever there's nothing real
+ * to manage: not configured, or RevenueCat itself reports no management URL
+ * (e.g. no active subscription).
+ */
+export async function getSubscriptionManagementUrl(): Promise<string | null> {
+  if (!configured) return null;
+  try {
+    const info = await Purchases.getCustomerInfo();
+    return info.managementURL;
+  } catch {
+    return null;
   }
 }
 
@@ -119,23 +205,41 @@ export async function hasPremiumEntitlement(): Promise<boolean> {
  * initial check is in flight, distinct from `false` — lets a caller show a
  * neutral loading state instead of flashing the locked teaser for a moment
  * on every screen focus before the real (often already-true) answer lands.
- * Re-checks on every mount rather than caching across the app's lifetime —
- * cheap (the SDK's own CustomerInfo cache backs this), and correct the
- * instant a purchase completes in the very same session (the paywall
- * screen's own success path calls router.back(), remounting whatever gated
- * section sent the user there).
+ *
+ * BUG FIX: this used to re-check only on mount (a plain useEffect with an
+ * empty dependency array), not on every focus. That's correct for a screen
+ * that's genuinely remounted after a purchase (the paywall's own success
+ * path calls router.back(), remounting whatever gated section sent the user
+ * there) — but a tab screen stays mounted in the background when you switch
+ * tabs, so returning to an already-visited tab never re-ran this check; it
+ * kept showing whatever answer it got the first time that tab was ever
+ * opened, even though RevenueCat state can change between visits (a purchase
+ * completing, a subscription expiring) — useFocusEffect re-checks on mount
+ * AND on every return to focus.
  */
 export function usePremiumEntitlement(): boolean | null {
-  const [isPremium, setIsPremium] = useState<boolean | null>(null);
+  // Starts from the last real answer (see lastKnownEntitlement) — only the
+  // very first check of an app launch is ever "unknown" now.
+  const [isPremium, setIsPremium] = useState<boolean | null>(lastKnownEntitlement);
   useEffect(() => {
-    let cancelled = false;
-    hasPremiumEntitlement().then((value) => {
-      if (!cancelled) setIsPremium(value);
-    });
+    entitlementListeners.add(setIsPremium);
     return () => {
-      cancelled = true;
+      entitlementListeners.delete(setIsPremium);
     };
   }, []);
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      hasPremiumEntitlement().then((value) => {
+        if (cancelled) return;
+        lastKnownEntitlement = value;
+        setIsPremium(value);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [])
+  );
   return isPremium;
 }
 
@@ -184,7 +288,8 @@ export type RestoreOutcome =
 export async function restorePurchases(): Promise<RestoreOutcome> {
   try {
     const info = await Purchases.restorePurchases();
-    const isActive = info.entitlements.active[PREMIUM_ENTITLEMENT_ID]?.isActive === true;
+    const isActive = isEntitled(info);
+    publishEntitlement(isActive);
     return isActive ? { kind: 'restored' } : { kind: 'none' };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Couldn't restore purchases right now.";

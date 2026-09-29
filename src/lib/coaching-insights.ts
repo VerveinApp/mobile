@@ -114,15 +114,34 @@ export async function getCoachingInsightNote(entries: SessionHistoryEntry[]): Pr
       "You've said “just right” for a while now — if that's genuinely true, the plan's doing its job. If tapping through feels automatic, it can only adjust to what you actually tell it.";
   }
   if (!note) return null;
+  // BUG FIX (found in a later full-app audit): this used to stamp
+  // LAST_SHOWN_KEY right here, coupling "compute the note" with "mark it
+  // shown" — but check-in.tsx calls this from two places (reopening an
+  // already-completed session, and a real finish), and reopening isn't a
+  // genuinely new showing. That meant simply reopening a finished session
+  // could burn the 14-day cooldown for a note nobody was newly shown.
+  // Read-only now — callers that actually display the note call
+  // markCoachingInsightShown() below themselves, at the one real showing.
   try {
     const lastShown = await AsyncStorage.getItem(LAST_SHOWN_KEY);
     if (lastShown) {
       const daysSince = Math.floor((Date.now() - new Date(lastShown).getTime()) / 86400000);
       if (daysSince < COOLDOWN_DAYS) return null;
     }
-    await AsyncStorage.setItem(LAST_SHOWN_KEY, localDateStr());
   } catch {
     return null;
   }
   return note;
+}
+
+/** Stamps today as the last time a coaching insight was actually shown —
+ * call this only at the one real showing (check-in.tsx's finish-session
+ * path), never from a path that merely recomputes/reopens one. See
+ * getCoachingInsightNote's own doc comment for why these were split. */
+export async function markCoachingInsightShown(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(LAST_SHOWN_KEY, localDateStr());
+  } catch {
+    // Worst case the cooldown doesn't start counting from today — not a crash.
+  }
 }

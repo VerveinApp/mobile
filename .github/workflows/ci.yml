@@ -27,3 +27,13 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      # BUG FIX (found in a later full-app audit): typecheck/test/lint never
+      # actually bundle the app, so a Metro bundling failure (this exact
+      # session hit one, a stale-cache false alarm, mid-session) could pass
+      # CI clean while still being broken. No real env vars needed — expo
+      # export only transforms/bundles source, it doesn't execute app code,
+      # so lib/supabase.ts's own "throw if misconfigured" guard (a runtime
+      # check) never fires during this step either way.
+      - name: Build (bundle check)
+        run: npx expo export --platform ios --output-dir /tmp/expo-export-check

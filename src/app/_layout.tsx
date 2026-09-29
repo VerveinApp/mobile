@@ -1,7 +1,9 @@
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
+import * as Sentry from '@sentry/react-native';
 import { useFonts } from 'expo-font';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
+import { StatusBar } from 'expo-status-bar';
 import { AppState, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
@@ -11,13 +13,21 @@ import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { OfflineBanner } from '@/components/offline-banner';
 import { AppLockGate } from '@/components/security/app-lock-gate';
+import { claimLocalDataIfUnowned } from '@/lib/account-switch';
+import { initErrorMonitoring } from '@/lib/error-monitoring';
 import { initPurchases } from '@/lib/purchases';
+import { registerForRemotePushNotifications } from '@/lib/push-notifications';
 import { refreshSessionReminders } from '@/lib/session-reminders';
+import { supabase } from '@/lib/supabase';
 import { AppThemeProvider, useAppTheme } from '@/lib/theme-context';
 
 SplashScreen.preventAutoHideAsync();
+// Module scope, not inside a useEffect — this needs to be active before
+// React's very first render pass, not after it, so a crash during that
+// first render is still caught rather than happening before Sentry exists.
+initErrorMonitoring();
 
-export default function RootLayout() {
+function RootLayout() {
   // Geist app-wide (every text style, not just buttons) — the logo is a
   // vector graphic, not a font glyph, so it's unaffected. Gating on this
   // keeps the native splash up (already held by preventAutoHideAsync above)
@@ -38,6 +48,35 @@ export default function RootLayout() {
   // the API key or platform isn't right, per its own doc comment.
   useEffect(() => {
     initPurchases();
+  }, []);
+
+  // Re-registers on every cold launch, not just once ever — an Expo push
+  // token can legitimately change (reinstall, OS-level reset), and Expo's
+  // own guidance is to treat registration as idempotent and safe to repeat
+  // rather than a one-time setup step. No-ops entirely for a signed-out
+  // user or one who hasn't granted the permission yet — see
+  // push-notifications.ts's own doc comment for the full list of safe
+  // no-op cases.
+  useEffect(() => {
+    registerForRemotePushNotifications();
+  }, []);
+
+  // Someone who was already signed in when they updated from a version
+  // without account switching has no recorded data owner until their next
+  // sign-in, which may never come. Recording the restored session's account
+  // here keeps their data from being handed to a different account that
+  // signs in on this phone later (see claimLocalDataIfUnowned).
+  useEffect(() => {
+    (async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session) await claimLocalDataIfUnowned(session.user.id);
+      } catch {
+        // Retried on the next launch.
+      }
+    })();
   }, []);
 
   // Smart-reminder foreground refresh (Vervein addition — see session-
@@ -83,6 +122,11 @@ function RootNavigator() {
 
   return (
     <ThemeProvider value={resolvedScheme === 'dark' ? DarkTheme : DefaultTheme}>
+      {/* Explicit, not 'auto' — the status bar's text must follow the
+          in-app theme choice, which can differ from the device's. Screens
+          with their own <StatusBar> (create-account.tsx) still override
+          this while mounted. */}
+      <StatusBar style={resolvedScheme === 'dark' ? 'light' : 'dark'} />
       <AnimatedSplashOverlay />
       <View style={{ flex: 1 }}>
         {/* The (tabs) group owns the bottom tab bar (Home/Explore). Auth screens like
@@ -106,6 +150,7 @@ function RootNavigator() {
           <Stack.Screen name="onboarding/step-2" />
           <Stack.Screen name="onboarding/step-3" />
           <Stack.Screen name="onboarding/step-4" />
+          <Stack.Screen name="onboarding/equipment" />
           <Stack.Screen name="onboarding/step-5" />
           <Stack.Screen name="onboarding/step-6" />
           <Stack.Screen name="onboarding/step-7" />
@@ -117,11 +162,14 @@ function RootNavigator() {
           <Stack.Screen name="settings/index" />
           <Stack.Screen name="settings/progress-history" />
           <Stack.Screen name="settings/weight-history" />
+          <Stack.Screen name="settings/sleep-history" />
+          <Stack.Screen name="settings/nutrition-history" />
           <Stack.Screen name="settings/body-measurements" />
           <Stack.Screen name="settings/condition-log" />
           <Stack.Screen name="settings/progress-photos" />
           <Stack.Screen name="log" />
           <Stack.Screen name="notes/index" />
+          <Stack.Screen name="notes/archive" />
           <Stack.Screen name="notes/[id]" />
           <Stack.Screen name="referral" />
           <Stack.Screen name="legal/terms" />
@@ -139,3 +187,9 @@ function RootNavigator() {
     </ThemeProvider>
   );
 }
+
+// Sentry.wrap (not a plain export) — enables the SDK's native crash capture
+// and automatic navigation/performance tracing, which a bare Sentry.init()
+// call above doesn't turn on by itself. No-ops cleanly if EXPO_PUBLIC_
+// SENTRY_DSN is unset, same as initErrorMonitoring itself.
+export default Sentry.wrap(RootLayout);

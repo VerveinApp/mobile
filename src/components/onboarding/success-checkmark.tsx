@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 import Svg, { Circle, Defs, LinearGradient, Path, Stop } from 'react-native-svg';
 import ReanimatedAnimated, {
   Easing,
-  runOnJS,
   useAnimatedProps,
   useAnimatedStyle,
   useReducedMotion,
@@ -11,6 +10,7 @@ import ReanimatedAnimated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 
 import { hapticSuccess } from '@/lib/haptics';
 import { useAppColors } from '@/lib/theme-context';
@@ -73,7 +73,7 @@ export function SuccessCheckmark({ size = 120 }: SuccessCheckmarkProps) {
     checkProgress.value = withDelay(
       750,
       withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) }, (finished) => {
-        if (finished) runOnJS(hapticSuccess)();
+        if (finished) scheduleOnRN(hapticSuccess);
       })
     );
     // Grows in alongside the ring, holds flat through the checkmark draw,

@@ -1,7 +1,6 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
 import type { EnergyScore } from '@/components/home/energy-gauge';
 import { localDateStr } from '@/lib/local-date';
+import { clearStoredValue, readJsonValue, writeJsonValue } from '@/lib/storage/json-storage';
 
 const HISTORY_KEY = 'vervein.lastCheckIn.v1';
 
@@ -17,29 +16,16 @@ export type CheckInRecord = {
 };
 
 export async function getLastCheckIn(): Promise<CheckInRecord | null> {
-  try {
-    const raw = await AsyncStorage.getItem(HISTORY_KEY);
-    return raw ? (JSON.parse(raw) as CheckInRecord) : null;
-  } catch {
-    return null;
-  }
+  return readJsonValue<CheckInRecord | null>(HISTORY_KEY, null);
 }
 
 export async function recordCheckIn(energy: EnergyScore) {
-  try {
-    const record: CheckInRecord = { date: localDateStr(), energy };
-    await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(record));
-  } catch {
-    // Worst case the next check-in just has no "last time" to compare against.
-  }
+  const record: CheckInRecord = { date: localDateStr(), energy };
+  await writeJsonValue(HISTORY_KEY, record);
 }
 
 export async function clearCheckInHistory() {
-  try {
-    await AsyncStorage.removeItem(HISTORY_KEY);
-  } catch {
-    // Best-effort — same as never having checked in.
-  }
+  await clearStoredValue(HISTORY_KEY);
 }
 
 /** Overwrites the single stored record wholesale — data-backup.ts's restore
@@ -48,10 +34,6 @@ export async function clearCheckInHistory() {
  * so this deliberately doesn't re-stamp today's date the way recordCheckIn
  * always does. */
 export async function restoreLastCheckIn(record: CheckInRecord | null): Promise<void> {
-  try {
-    if (record === null) await AsyncStorage.removeItem(HISTORY_KEY);
-    else await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(record));
-  } catch {
-    // Worst case this one field doesn't restore — the rest of the backup still applies independently.
-  }
+  if (record === null) await clearStoredValue(HISTORY_KEY);
+  else await writeJsonValue(HISTORY_KEY, record);
 }

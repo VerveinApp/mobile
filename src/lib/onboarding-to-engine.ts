@@ -15,12 +15,19 @@
  *   body area to prioritize (unlike the vault's own Screen 3), so the only
  *   honest choice is "train everything," not fabricating a per-goal split
  *   the user was never actually asked about.
- * - conditions / standingSymptomTags are always []. The condition-gating
- *   modules (M2, M5's symptom half) haven't been ported — two Chief
- *   Architect Audit findings (unvalidated hard-safety filters, missing
- *   consent-schema representation) are still open against that part of the
- *   vault's design, so this app doesn't collect or apply that data yet.
- *   See baseline-plan.ts's own doc comment for the same scope boundary.
+ * - conditions is always []. The condition-gating half of M2 hasn't been
+ *   ported — two Chief Architect Audit findings (unvalidated hard-safety
+ *   filters, missing consent-schema representation) are still open against
+ *   that part of the vault's design, so this app collects conditions but
+ *   doesn't apply them. See baseline-plan.ts's own doc comment for the same
+ *   scope boundary.
+ * - standingSymptomTags IS real (Settings > Ongoing Symptoms). Unlike a
+ *   diagnosis-derived contraindication, a symptom override only ever
+ *   tightens a plan (see symptom-tags.ts's STANDING_SYMPTOM_TAGS) — the
+ *   same self-reported, low-risk footing as movementRestrictions below.
+ *   Anything outside the standing set (stale or hand-edited data) is
+ *   dropped here rather than reaching the engine, which throws on an
+ *   unrecognized tag.
  * - movementRestrictions IS real and DOES apply — unlike conditions, this
  *   is self-reported capability ("my body doesn't do this"), not a
  *   diagnosis-derived exclusion, so it doesn't carry the same
@@ -32,6 +39,8 @@
 
 import type { ConstraintProfile, Equipment, FocusArea, Intensity, SessionDay } from '@/lib/engine/types';
 import type { OnboardingContext } from '@/lib/engine/baseline-plan';
+import { ownedEquipmentFor } from '@/lib/owned-equipment';
+import { isStandingSymptomTag } from '@/lib/symptom-tags';
 import type { UserProfile } from '@/lib/user-profile';
 
 // There's no account system in this app (local-only, no backend) — every
@@ -39,7 +48,11 @@ import type { UserProfile } from '@/lib/user-profile';
 // fixed label is honest; it's not standing in for a real multi-user id.
 export const LOCAL_USER_ID = 'local-user';
 
-const EQUIPMENT_BY_ENVIRONMENT: Record<string, Equipment> = {
+// Exported (Vervein addition) so check-in.tsx's own "Where are you working
+// out today?" override can map its onboarding-vocabulary answer to the same
+// Equipment ceiling this file already uses, rather than a second, driftable
+// copy of the same four cases.
+export const EQUIPMENT_BY_ENVIRONMENT: Record<string, Equipment> = {
   'full-gym': 'full_gym',
   // A home gym in this app's onboarding copy means "some equipment, not a
   // commercial rack" — the engine's middle tier, not its top one.
@@ -70,12 +83,26 @@ const BIAS_SIMPLE_BY_EXPERIENCE: Record<string, boolean> = {
   'years-experience': false,
 };
 
-// Same values plan-preview.ts's BASE_DURATION_MIN_BY_BUCKET already uses.
-const SESSION_MIN_BY_DURATION: Record<string, number> = {
+// Exported so anything estimating a real session length from the onboarding
+// duration bucket (calorie-estimate.ts's weekly-burn-goal suggestion, so
+// far) uses this exact mapping rather than inventing its own numbers.
+export const SESSION_MIN_BY_DURATION: Record<string, number> = {
   'under-30': 25,
   '30-45': 38,
   '45-60': 52,
   '60-plus': 65,
+};
+
+/**
+ * The top of each onboarding session-length range, used as the plan's
+ * default time ceiling on days no time is picked at check-in — the answer
+ * used to be collected and never read, so a "30–45 min" person could be
+ * shown an hour. 60+ has no top, so no ceiling.
+ */
+export const SESSION_CEILING_BY_DURATION: Record<string, number> = {
+  'under-30': 30,
+  '30-45': 45,
+  '45-60': 60,
 };
 
 const DAY_NAME_TO_SESSION_DAY: Record<string, SessionDay> = {
@@ -134,8 +161,9 @@ export function profileToOnboardingContext(profile: UserProfile): OnboardingCont
     sessionDays,
     conditionProfile: constraintProfileFor(profile),
     conditions: [],
-    standingSymptomTags: [],
+    standingSymptomTags: [...new Set(profile.standingSymptoms ?? [])].filter(isStandingSymptomTag),
     movementRestrictions: profile.movementRestrictions ?? [],
+    ownedEquipment: ownedEquipmentFor(profile.environment, profile.equipment),
     biasSimpleExercises: BIAS_SIMPLE_BY_EXPERIENCE[profile.experience ?? ''] ?? false,
   };
 }

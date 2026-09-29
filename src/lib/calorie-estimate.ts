@@ -49,3 +49,4 @@ export function estimateCaloriesBurned(
   }
   return Math.round(totalKcal);
 }
+

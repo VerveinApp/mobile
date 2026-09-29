@@ -1,7 +1,9 @@
 import { router } from 'expo-router';
 import { useEffect } from 'react';
 
+import { recordPerformance } from '@/lib/exercise-performance';
 import { markOnboardingComplete } from '@/lib/onboarding-draft';
+import { WEEKDAY_NAMES } from '@/lib/profile-labels';
 import { saveProfile, withHealthConsent } from '@/lib/user-profile';
 
 /**
@@ -34,7 +36,6 @@ import { saveProfile, withHealthConsent } from '@/lib/user-profile';
 // today by 1/2/3 (mod 7), which by construction can never include today
 // itself, so "today is a rest day" is true every real calendar day this
 // ever runs, not just some of them.
-const WEEKDAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 function trainingDaysExcludingToday(): string {
   const todayIndex = new Date().getDay();
   return [1, 2, 3].map((offset) => WEEKDAY_NAMES[(todayIndex + offset) % 7]).join(',');
@@ -61,6 +62,10 @@ export default function E2ESeedScreen() {
         // would hit HealthConsentGate instead of the real screen content.
         ...withHealthConsent('true'),
       });
+      // Real logged history for a Target Lift goal — goals-sheet.tsx only
+      // ever offers exercises with actual history to target, so a flow
+      // reaching that section needs at least one to pick from.
+      await recordPerformance('Bench Press', 60, 5);
       await markOnboardingComplete();
       router.replace('/(tabs)');
     })();

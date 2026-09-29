@@ -1,12 +1,15 @@
 import { BottomSheetBackdrop, type BottomSheetBackdropProps, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { SymbolView } from 'expo-symbols';
+import { forwardRef, useCallback, useMemo, useRef, useState } from 'react';
+import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SymbolView } from '@/components/ui/app-symbol';
 
-import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
+import { Type } from '@/constants/theme';
+import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
 import { CONDITION_LABELS, CONDITIONS, type Condition } from '@/lib/conditions';
 import { hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { useAppColors } from '@/lib/theme-context';
+import { usePreloadedSheet } from '@/components/settings/use-preloaded-sheet';
 import { getProfile, updateProfile } from '@/lib/user-profile';
 
 /**
@@ -18,7 +21,7 @@ import { getProfile, updateProfile } from '@/lib/user-profile';
  */
 export const ConditionsSheet = forwardRef<BottomSheetModal>((_props, forwardedRef) => {
   const sheetRef = useRef<BottomSheetModal>(null);
-  useImperativeHandle(forwardedRef, () => sheetRef.current as BottomSheetModal, []);
+  const insets = useSafeAreaInsets();
 
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -31,12 +34,7 @@ export const ConditionsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
     setSelected(new Set(stored));
   }, []);
 
-  const handleSheetChange = useCallback(
-    (index: number) => {
-      if (index >= 0) loadFromProfile();
-    },
-    [loadFromProfile]
-  );
+  usePreloadedSheet(forwardedRef, sheetRef, loadFromProfile);
 
   const closeHover = useHoverFade();
   const saveHover = useHoverFade();
@@ -72,10 +70,9 @@ export const ConditionsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
     <BottomSheetModal
       ref={sheetRef}
       snapPoints={['75%']}
-      onChange={handleSheetChange}
       backdropComponent={renderBackdrop}
-      backgroundStyle={{ backgroundColor: colors.background }}
-      handleIndicatorStyle={{ backgroundColor: colors.surfaceBorder }}
+      backgroundStyle={Platform.OS === 'android' ? { backgroundColor: colors.background, borderTopLeftRadius: 28, borderTopRightRadius: 28 } : { backgroundColor: colors.background }}
+      handleIndicatorStyle={{ backgroundColor: Platform.OS === 'android' ? 'rgba(95,190,132,0.5)' : colors.surfaceBorder, width: Platform.OS === 'android' ? 36 : undefined }}
     >
       <View style={styles.headerRow}>
         <Text style={styles.headerTitle} maxFontSizeMultiplier={1.3}>Health Conditions</Text>
@@ -84,7 +81,7 @@ export const ConditionsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
           onHoverIn={closeHover.onHoverIn}
           onHoverOut={closeHover.onHoverOut}
           hitSlop={10}
-          style={styles.closeButton}
+          style={({ pressed }) => [styles.closeButton, pressed && PRESSED_DIM]}
           accessibilityRole="button"
           accessibilityLabel="Close"
         >
@@ -92,7 +89,10 @@ export const ConditionsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
         </Pressable>
       </View>
 
-      <BottomSheetScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <BottomSheetScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 + insets.bottom }]}
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={styles.hint} maxFontSizeMultiplier={1.4}>
           Optional, and not used to change your plan yet — this app doesn&apos;t have a validated way to safely adjust
           exercise selection for these conditions, so nothing here changes what you&apos;re shown. It&apos;s saved for
@@ -105,7 +105,7 @@ export const ConditionsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
             return (
               <Pressable
                 key={condition}
-                style={[styles.row, index < CONDITIONS.length - 1 && styles.rowDivider]}
+                style={({ pressed }) => [styles.row, index < CONDITIONS.length - 1 && styles.rowDivider, pressed && PRESSED_DIM]}
                 onPress={() => toggleCondition(condition)}
               >
                 <Text style={styles.rowLabel} maxFontSizeMultiplier={1.3}>{CONDITION_LABELS[condition]}</Text>
@@ -126,6 +126,13 @@ export const ConditionsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
           disabled={saving}
         >
           <View style={[styles.saveButton, saving && styles.saveButtonDisabled]}>
+            {/* The press glow savePress already animates — wired to the
+                Pressable above but never drawn, so Save gave no visual
+                response to a tap. */}
+            <Animated.View
+              pointerEvents="none"
+              style={[StyleSheet.absoluteFill, styles.saveButtonGlow, { opacity: savePress.glow }]}
+            />
             <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>
               {saving ? 'Saving…' : 'Save'}
             </Text>
@@ -148,7 +155,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     headerTitle: {
       color: colors.text,
-      fontSize: 16,
+      fontSize: Type.subtitle,
       fontFamily: 'Geist-SemiBold',
     },
     closeButton: {
@@ -161,12 +168,13 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     scrollContent: {
       paddingHorizontal: 20,
-      paddingBottom: 40,
+      // paddingBottom set inline (40 + insets.bottom) — real safe-area
+      // clearance below the home indicator.
       gap: 20,
     },
     hint: {
       color: colors.textTertiary,
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       lineHeight: 18,
       fontFamily: 'Geist-Medium',
     },
@@ -189,7 +197,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     rowLabel: {
       color: colors.text,
-      fontSize: 13.5,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
     },
     checkbox: {
@@ -212,12 +220,16 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       backgroundColor: '#438C63',
       alignItems: 'center',
     },
+    saveButtonGlow: {
+      borderRadius: 16,
+      backgroundColor: 'rgba(255,255,255,0.18)',
+    },
     saveButtonDisabled: {
       opacity: 0.5,
     },
     saveButtonText: {
       color: '#ffffff',
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-SemiBold',
     },
   });

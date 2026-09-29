@@ -27,8 +27,9 @@
 //    loud, never a silently smaller session.
 //
 // DISCLOSED DIVERGENCE (Vervein addition, not in the vault): gap-fill
-// candidates are ordered by bySelectionOrder(biasSimpleFirst) instead of
-// raw library order. For beginners (profile.experience === 'just-starting'),
+// candidates are ordered by bySelectionOrder(biasSimpleFirst, owned
+// equipment) instead of raw library order — its training-value ranking
+// (exercise-library.ts) plus, below, same-area replacement. For beginners (profile.experience === 'just-starting'),
 // this sorts `complexity:'simple'` candidates ahead of `moderate` ones —
 // numeric ID stays the tiebreak. It's a preference over which *legal*
 // candidate fills a slot first, never a new exclusion: a `moderate`
@@ -49,6 +50,7 @@
 
 import type { BaselinePlan, EffectiveConstraintSet, Exercise, FilteredExerciseList } from './types';
 import { exerciseLibrary, INTENSITY_RANK, IMPACT_RANK, EQUIPMENT_RANK, bySelectionOrder } from './exercise-library';
+import { hasEquipmentFor } from './equipment-requirements';
 import { isTrainableExercise } from '../non-trainable-exercises';
 
 function bodyAreaExcluded(ex: Exercise, c: EffectiveConstraintSet): boolean {
@@ -68,7 +70,8 @@ function contraindicated(ex: Exercise, c: EffectiveConstraintSet): boolean {
 export function passesConstraints(ex: Exercise, c: EffectiveConstraintSet): boolean {
   const intensityOk = ex.intensity === null || INTENSITY_RANK[ex.intensity] <= INTENSITY_RANK[c.intensityCeiling];
   const impactOk = IMPACT_RANK[ex.impact] <= IMPACT_RANK[c.impactCeiling];
-  const equipmentOk = EQUIPMENT_RANK[ex.equipment] <= EQUIPMENT_RANK[c.equipmentCeiling];
+  const equipmentOk =
+    EQUIPMENT_RANK[ex.equipment] <= EQUIPMENT_RANK[c.equipmentCeiling] && hasEquipmentFor(ex, c.ownedEquipment);
   const patternOk = !ex.movement_patterns.some((p) => c.excludeMovementPatterns.includes(p));
   return intensityOk && impactOk && equipmentOk && !bodyAreaExcluded(ex, c) && patternOk && !contraindicated(ex, c);
 }
@@ -84,7 +87,9 @@ function exclusionReason(
   if (contraindicated(ex, c)) return 'contraindication';
   if (ex.intensity !== null && INTENSITY_RANK[ex.intensity] > INTENSITY_RANK[c.intensityCeiling]) return 'intensity';
   if (IMPACT_RANK[ex.impact] > IMPACT_RANK[c.impactCeiling]) return 'impact';
-  if (EQUIPMENT_RANK[ex.equipment] > EQUIPMENT_RANK[c.equipmentCeiling]) return 'equipment';
+  if (EQUIPMENT_RANK[ex.equipment] > EQUIPMENT_RANK[c.equipmentCeiling] || !hasEquipmentFor(ex, c.ownedEquipment)) {
+    return 'equipment';
+  }
   if (bodyAreaExcluded(ex, c)) return 'body-area';
   if (!isTrainableExercise(ex.id)) return 'non-trainable';
   return 'restriction'; // the only remaining dimension — movement patterns
@@ -141,7 +146,7 @@ export function filterAndSubstitute(
       .all()
       .filter((e) => e.active && !survivorIds.has(e.id) && !baselinePlan.exerciseIds.includes(e.id))
       .filter((e) => passesConstraints(e, constraints) && isTrainableExercise(e.id))
-      .sort(bySelectionOrder(biasSimpleFirst));
+      .sort(bySelectionOrder(biasSimpleFirst, constraints.ownedEquipment));
 
     // Force-add first (H1): at least one candidate per forced type, in the
     // deterministic order M5 emitted them, within the removed-slot budget.
@@ -158,10 +163,32 @@ export function filterAndSubstitute(
       // fabricated; the shortfall accounting below stays honest.
     }
 
-    for (const candidate of candidates) {
+    // SAME-AREA REPLACEMENT (Vervein addition, not in the vault): the
+    // vault fills every open slot from the top of one shared list, so a
+    // low-energy day that dropped an upper and a lower exercise could come
+    // back as three squat variants and no upper body at all. Each removed
+    // exercise is replaced from its own body area first, preferring a
+    // movement pattern the session doesn't already have; only if its area
+    // has nothing legal left (a sore-legs day excludes lower entirely) does
+    // it fall back to the shared list, which is where Symptom Tags'
+    // substitute areas come from anyway. Same slot budget, same shortfall
+    // accounting.
+    const removed = baselineExercises.filter((ex) => !survivors.includes(ex));
+    const open = (c: Exercise) => !survivors.includes(c);
+    const newPattern = (c: Exercise) => {
+      const pattern = c.movement_patterns[0];
+      return !pattern || !survivors.some((s) => s.movement_patterns[0] === pattern);
+    };
+    for (const gone of removed) {
       if (filled >= removedCount) break;
-      if (survivors.includes(candidate)) continue;
-      survivors.push(candidate);
+      const sameArea = (c: Exercise) => c.body_area === gone.body_area;
+      const pick =
+        candidates.find((c) => open(c) && sameArea(c) && newPattern(c)) ??
+        candidates.find((c) => open(c) && sameArea(c)) ??
+        candidates.find((c) => open(c) && newPattern(c)) ??
+        candidates.find(open);
+      if (!pick) break;
+      survivors.push(pick);
       filled++;
     }
   }

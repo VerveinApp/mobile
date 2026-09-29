@@ -1,12 +1,15 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
 import { exerciseLibrary } from '@/lib/engine/exercise-library';
 import type { MovementPattern } from '@/lib/engine/types';
 import { localDateStr } from '@/lib/local-date';
 import type { BodyArea } from '@/lib/plan-preview';
+import { HISTORY_RETENTION_ENTRIES, trimToNewestByDate } from '@/lib/rolling-window';
+import { clearStoredValue, readJsonList, writeJsonValue } from '@/lib/storage/json-storage';
 
 const KEY = 'vervein.workoutLog.v1';
-const MAX_ENTRIES = 30; // matches session-history.ts's rolling window
+// BUG FIX (found in a later full-app audit): this used to be its own local
+// `30`, matching session-history.ts's by convention/comment only — nothing
+// enforced it. Single-sourced now; see rolling-window.ts's own doc comment.
+const MAX_ENTRIES = HISTORY_RETENTION_ENTRIES;
 
 /**
  * Per-exercise completion for a finished session — session-history.ts only
@@ -55,26 +58,12 @@ export function getCompletionStatus(exercises: WorkoutLogExercise[]): Completion
   return 'partial';
 }
 
-async function readAll(): Promise<WorkoutLogEntry[]> {
-  try {
-    const raw = await AsyncStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as WorkoutLogEntry[]) : [];
-  } catch {
-    return [];
-  }
-}
-
 /** Records (or updates) today's exercise-level completion — safe to call more than once per day. */
 export async function saveWorkoutLog(date: string, exercises: WorkoutLogExercise[]) {
-  try {
-    const entries = await readAll();
-    const withoutToday = entries.filter((e) => e.date !== date);
-    const next = [...withoutToday, { date, exercises }].slice(-MAX_ENTRIES);
-    await AsyncStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    // Worst case the exercise-level detail just doesn't stick — the
-    // session-level completed/missed record in session-history.ts still does.
-  }
+  const entries = await readJsonList<WorkoutLogEntry>(KEY);
+  const withoutToday = entries.filter((e) => e.date !== date);
+  const next = trimToNewestByDate([...withoutToday, { date, exercises }], MAX_ENTRIES);
+  await writeJsonValue(KEY, next);
 }
 
 /**
@@ -89,35 +78,26 @@ export async function saveWorkoutLog(date: string, exercises: WorkoutLogExercise
  * per its own doc comment), so this doesn't need any new handling there.
  */
 export async function saveRetroactiveWorkoutLog(date: string, exercises: WorkoutLogExercise[]) {
-  try {
-    const entries = await readAll();
-    const withoutDate = entries.filter((e) => e.date !== date);
-    const next = [...withoutDate, { date, exercises, retroactive: true }].slice(-MAX_ENTRIES);
-    await AsyncStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    // Worst case the exercise-level detail just doesn't stick — the
-    // session-level completed/missed record in session-history.ts still does.
-  }
+  const entries = await readJsonList<WorkoutLogEntry>(KEY);
+  const withoutDate = entries.filter((e) => e.date !== date);
+  const next = trimToNewestByDate([...withoutDate, { date, exercises, retroactive: true }], MAX_ENTRIES);
+  await writeJsonValue(KEY, next);
 }
 
 export async function getWorkoutLog(date: string): Promise<WorkoutLogEntry | null> {
-  const entries = await readAll();
+  const entries = await readJsonList<WorkoutLogEntry>(KEY);
   return entries.find((e) => e.date === date) ?? null;
 }
 
 /** Every stored entry, most recent first — same shape as session-history.ts's getSessionHistory, for screens showing the full log rather than a single date. */
 export async function getAllWorkoutLogs(): Promise<WorkoutLogEntry[]> {
-  const entries = await readAll();
+  const entries = await readJsonList<WorkoutLogEntry>(KEY);
   return [...entries].sort((a, b) => (a.date < b.date ? 1 : -1));
 }
 
 export async function deleteWorkoutLog(date: string) {
-  try {
-    const entries = await readAll();
-    await AsyncStorage.setItem(KEY, JSON.stringify(entries.filter((e) => e.date !== date)));
-  } catch {
-    // Worst case the entry reappears next load — never a crash.
-  }
+  const entries = await readJsonList<WorkoutLogEntry>(KEY);
+  await writeJsonValue(KEY, entries.filter((e) => e.date !== date));
 }
 
 /** Wipes the whole log — Settings' "Delete My Data"/"Delete Account" flows
@@ -125,22 +105,14 @@ export async function deleteWorkoutLog(date: string) {
  * written, and nothing added it to that clear-list afterward — a real gap
  * (per-exercise history survived a supposed full wipe), not a design choice. */
 export async function clearWorkoutLog() {
-  try {
-    await AsyncStorage.removeItem(KEY);
-  } catch {
-    // Best-effort — same as never having logged anything.
-  }
+  await clearStoredValue(KEY);
 }
 
 /** Overwrites the whole log wholesale — data-backup.ts's restore path only.
  * Re-applies the same MAX_ENTRIES trim saveWorkoutLog always does. */
 export async function restoreWorkoutLog(entries: WorkoutLogEntry[]): Promise<void> {
-  try {
-    const trimmed = [...entries].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-MAX_ENTRIES);
-    await AsyncStorage.setItem(KEY, JSON.stringify(trimmed));
-  } catch {
-    // Worst case this one field doesn't restore — the rest of the backup still applies independently.
-  }
+  const trimmed = [...entries].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-MAX_ENTRIES);
+  await writeJsonValue(KEY, trimmed);
 }
 
 /**
@@ -162,7 +134,7 @@ export async function restoreWorkoutLog(entries: WorkoutLogEntry[]): Promise<voi
  * contract as getBodyAreaBreakdown.
  */
 export async function getLoggedSessionCount(sinceDays?: number): Promise<number> {
-  const entries = await readAll();
+  const entries = await readJsonList<WorkoutLogEntry>(KEY);
   const cutoff = sinceDays !== undefined ? sinceDateStr(sinceDays) : null;
   return entries.filter((e) => (cutoff === null || e.date >= cutoff) && e.exercises.some((ex) => ex.completed)).length;
 }
@@ -201,7 +173,7 @@ function sinceDateStr(days: number): string {
  * trailing cutoff, never a calendar reset.
  */
 export async function getBodyAreaBreakdown(sinceDays?: number): Promise<BodyAreaBreakdown> {
-  const entries = await readAll();
+  const entries = await readJsonList<WorkoutLogEntry>(KEY);
   const cutoff = sinceDays !== undefined ? sinceDateStr(sinceDays) : null;
   const breakdown: BodyAreaBreakdown = {
     upper: { ...EMPTY_BREAKDOWN.upper },
@@ -236,7 +208,7 @@ export type MovementPatternBreakdown = Partial<Record<MovementPattern, { complet
  * Same `sinceDays` rolling-window contract as getBodyAreaBreakdown.
  */
 export async function getMovementPatternBreakdown(sinceDays?: number): Promise<MovementPatternBreakdown> {
-  const entries = await readAll();
+  const entries = await readJsonList<WorkoutLogEntry>(KEY);
   const cutoff = sinceDays !== undefined ? sinceDateStr(sinceDays) : null;
   const breakdown: MovementPatternBreakdown = {};
   for (const entry of entries) {

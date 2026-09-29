@@ -21,6 +21,12 @@ export type UserProfile = {
   goal?: string;
   experience?: string;
   environment?: string;
+  /** What's on hand for a home gym or minimal setup — owned-equipment.ts's
+   * ids, comma-separated like `days`. undefined = never answered (the
+   * setup's default list applies); 'none' = answered "none of these". Read by
+   * the engine via onboarding-to-engine.ts. Synced with the rest of the
+   * profile (profiles.equipment — see profile-sync.ts). */
+  equipment?: string;
   duration?: string;
   commitmentLevel?: string;
   /** Comma-separated lowercase weekday names, e.g. "tuesday,friday,sunday". */
@@ -38,10 +44,40 @@ export type UserProfile = {
   sex?: string;
   heightCm?: string;
   weightKg?: string;
+  /** Same health-consent-gated, optional-at-onboarding-or-later convention
+   * as sex/heightCm/weightKg above — added specifically to make an honest
+   * Mifflin-St Jeor maintenance-calorie estimate possible (calorie-estimate.ts's
+   * estimateMaintenanceCalories), which needs age and can't substitute
+   * anything else for it. Never collected before this; undefined for every
+   * existing profile until filled in, same as any other optional field. */
+  age?: string;
   /** Self-reported, from lib/conditions.ts's fixed list — collected only, per the Chief Architect Audit's C3 finding. Nothing in plan-preview.ts or onboarding-to-engine.ts reads this field; it exists for the user's own record and for a future validation process, not to gate exercise selection today. */
   conditions?: string[];
   /** Self-reported, from lib/movement-restrictions.ts's fixed list — unlike `conditions`, this one IS read (onboarding-to-engine.ts passes it straight through to the engine's real, already-wired movementRestrictions exclusion). `undefined` = never answered; `[]` = explicitly answered "none of these." */
   movementRestrictions?: string[];
+  /** Self-reported from Settings' Ongoing Symptoms sheet, from
+   * symptom-tags.ts's STANDING_SYMPTOM_TAGS — IS read: onboarding-to-engine.ts
+   * passes it to the engine as standingSymptomTags, applied every day at
+   * every energy level. Device-only on purpose, never synced (profile-sync.ts
+   * leaves it out): the Privacy Policy promises symptom tags stay on the
+   * device. `undefined` and `[]` both mean none. */
+  standingSymptoms?: string[];
+  /** Self-reported from Settings' Goals sheet — never derived. This app
+   * deliberately doesn't model BMR/TDEE or calorie intake (see
+   * calorie-estimate.ts's own doc comment), so there's no honest way to
+   * compute "what your target should be." Asking directly avoids fabricating
+   * a number from data (height/age/intake) this app doesn't have — undefined
+   * = no goal set, same "optional, never assumed" contract as weightKg. */
+  targetWeightKg?: string;
+  /** Self-reported target for one exercise, from Settings' Goals sheet —
+   * compared against exercise-performance.ts's own real logged
+   * estimatedOneRepMax history for that exercise, never a projection or a
+   * fabricated formula result. Replaces an earlier weekly calorie-burn goal
+   * (removed: it mostly just re-measured session completion, dressed up in
+   * kcal, and didn't fit a strength-programming app's own identity). Set
+   * together or not at all — undefined = no goal set. */
+  targetLiftExercise?: string;
+  targetLiftWeightKg?: string;
 };
 
 export async function saveProfile(profile: UserProfile) {
@@ -76,6 +112,29 @@ export async function updateProfile(partial: UserProfile): Promise<UserProfile> 
 }
 
 /**
+ * Withdraws health-data consent: clears every health field consent covered
+ * — sex, height, weight, age, health conditions, movement restrictions —
+ * and the consent itself. Because saveProfile mirrors to the server, the
+ * synced copy is cleared too (those columns go back to null). The Privacy
+ * Policy promises consent can be withdrawn at any time; before this there
+ * was no way to do it short of deleting everything. On-device logs aren't
+ * touched — they never leave the device, and Delete My Data removes them.
+ */
+export async function withdrawHealthConsent(): Promise<UserProfile> {
+  return updateProfile({
+    healthConsent: 'false',
+    healthConsentedAt: undefined,
+    sex: undefined,
+    heightCm: undefined,
+    weightKg: undefined,
+    age: undefined,
+    conditions: undefined,
+    movementRestrictions: undefined,
+    standingSymptoms: undefined,
+  });
+}
+
+/**
  * The one place healthConsent gets set — stamps healthConsentedAt with the
  * real moment consent was given whenever it's 'true'. Never call
  * saveProfile/updateProfile with a bare `healthConsent: 'true'` directly;
@@ -98,7 +157,18 @@ export function withHealthConsent(consent: 'true' | 'false'): Pick<UserProfile, 
 export async function finishOnboarding(
   answers: Pick<
     UserProfile,
-    'name' | 'goal' | 'experience' | 'environment' | 'duration' | 'commitmentLevel' | 'days' | 'sex' | 'heightCm' | 'weightKg'
+    | 'name'
+    | 'goal'
+    | 'experience'
+    | 'environment'
+    | 'equipment'
+    | 'duration'
+    | 'commitmentLevel'
+    | 'days'
+    | 'sex'
+    | 'heightCm'
+    | 'weightKg'
+    | 'age'
   > & { healthConsent?: string },
   email: string
 ) {
@@ -108,6 +178,9 @@ export async function finishOnboarding(
     goal: answers.goal,
     experience: answers.experience,
     environment: answers.environment,
+    // '' is a route param that never carried a list — not asked (a full
+    // gym or bodyweight setup). An answered-empty list arrives as 'none'.
+    equipment: answers.equipment || undefined,
     duration: answers.duration,
     commitmentLevel: answers.commitmentLevel,
     days: answers.days,
@@ -115,6 +188,7 @@ export async function finishOnboarding(
     sex: answers.sex,
     heightCm: answers.heightCm,
     weightKg: answers.weightKg,
+    age: answers.age,
   });
   await markOnboardingComplete();
 }

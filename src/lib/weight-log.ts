@@ -1,4 +1,5 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { clearStoredValue, readJsonList, writeJsonValue } from '@/lib/storage/json-storage';
+import { trimToNewestByDate } from '@/lib/rolling-window';
 
 const KEY = 'vervein.weightLog.v1';
 const MAX_ENTRIES = 365; // roughly a year of daily entries — generous, not unbounded
@@ -9,61 +10,51 @@ export type WeightLogEntry = {
   weightKg: number;
 };
 
-async function readAll(): Promise<WeightLogEntry[]> {
-  try {
-    const raw = await AsyncStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as WeightLogEntry[]) : [];
-  } catch {
-    return [];
-  }
-}
-
 /** Records (or overwrites) one date's entry — one weigh-in per day, same
  * "safe to call more than once" contract as workout-log.ts's saveWorkoutLog. */
 export async function saveWeightEntry(date: string, weightKg: number) {
-  try {
-    const entries = await readAll();
-    const withoutDate = entries.filter((e) => e.date !== date);
-    const next = [...withoutDate, { date, weightKg }].slice(-MAX_ENTRIES);
-    await AsyncStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    // Worst case this entry doesn't stick — never a crash.
-  }
+  const entries = await readJsonList<WeightLogEntry>(KEY);
+  const withoutDate = entries.filter((e) => e.date !== date);
+  const next = trimToNewestByDate([...withoutDate, { date, weightKg }], MAX_ENTRIES);
+  await writeJsonValue(KEY, next);
 }
 
 /** Every stored entry, most recent first. */
 export async function getWeightLog(): Promise<WeightLogEntry[]> {
-  const entries = await readAll();
+  const entries = await readJsonList<WeightLogEntry>(KEY);
   return [...entries].sort((a, b) => (a.date < b.date ? 1 : -1));
 }
 
+/**
+ * The real "current weight" — the latest logged entry if one exists, else
+ * the standing profile value. Centralized here after a later full-app audit
+ * found profile.tsx and goals-sheet.tsx each resolving this differently
+ * (one preferred the weight log, the other read profile.weightKg directly)
+ * — updating weight via Biometrics without also logging a new weight-log
+ * entry could make the two screens show two different numbers for the same
+ * metric, a tap apart. Pure (no I/O of its own) so it composes into
+ * whichever Promise.all a caller already has going — pass in whatever
+ * getWeightLog()/getProfile() already returned.
+ */
+export function resolveCurrentWeightKg(weightLog: WeightLogEntry[], profileWeightKg: string | undefined): number | null {
+  return weightLog[0]?.weightKg ?? (profileWeightKg ? Number(profileWeightKg) : null);
+}
+
 export async function deleteWeightEntry(date: string) {
-  try {
-    const entries = await readAll();
-    await AsyncStorage.setItem(KEY, JSON.stringify(entries.filter((e) => e.date !== date)));
-  } catch {
-    // Worst case the entry reappears next load — never a crash.
-  }
+  const entries = await readJsonList<WeightLogEntry>(KEY);
+  await writeJsonValue(KEY, entries.filter((e) => e.date !== date));
 }
 
 /** Wipes the whole log — Settings' "Delete My Data"/"Delete Account" flows
  * only. Same disclosed gap as workout-log.ts's clearWorkoutLog: this store
  * postdates handleDeleteData's original clear-list. */
 export async function clearWeightLog() {
-  try {
-    await AsyncStorage.removeItem(KEY);
-  } catch {
-    // Best-effort — same as never having logged anything.
-  }
+  await clearStoredValue(KEY);
 }
 
 /** Overwrites the whole log wholesale — data-backup.ts's restore path only.
  * Re-applies the same MAX_ENTRIES trim saveWeightEntry always does. */
 export async function restoreWeightLog(entries: WeightLogEntry[]): Promise<void> {
-  try {
-    const trimmed = [...entries].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-MAX_ENTRIES);
-    await AsyncStorage.setItem(KEY, JSON.stringify(trimmed));
-  } catch {
-    // Worst case this one field doesn't restore — the rest of the backup still applies independently.
-  }
+  const trimmed = [...entries].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-MAX_ENTRIES);
+  await writeJsonValue(KEY, trimmed);
 }

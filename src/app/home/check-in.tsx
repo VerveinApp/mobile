@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
@@ -11,13 +11,15 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  useWindowDimensions,
   View,
 } from 'react-native';
+
+import { useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, {
   Easing,
   FadeIn,
   FadeOut,
+  LayoutAnimationConfig,
   LinearTransition,
   useAnimatedStyle,
   useReducedMotion,
@@ -25,13 +27,15 @@ import ReanimatedAnimated, {
   withDelay,
   withSequence,
   withTiming,
+  ZoomIn,
 } from 'react-native-reanimated';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView } from '@/components/ui/app-symbol';
 import { openBrowserAsync } from 'expo-web-browser';
 import { postAccessibilityScreenChanged } from 'expo-accessibility-rescan';
 
-import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
+import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
 import { getCalibration, submitSessionFeedback } from '@/lib/calibration';
+import { TabularNums, Type, sheenGradient } from '@/constants/theme';
 import { getLastCheckIn, recordCheckIn, type CheckInRecord } from '@/lib/check-in-history';
 import { getDecisionTraceLog, recordDecisionTrace } from '@/lib/decision-trace-log';
 import { TAG_LINES } from '@/lib/engine/explanation-string';
@@ -40,20 +44,39 @@ import type { Exercise, FeedbackResponse, UserCalibration } from '@/lib/engine/t
 import { getCueFor, type ExerciseCue } from '@/lib/exercise-form-cues';
 import { formatTimerClock, getExerciseIntervals } from '@/lib/exercise-timer';
 import { buildSwapReplacement, getSwapCandidates } from '@/lib/exercise-swap';
+import { equipmentRequirementsFor, hasEquipmentFor } from '@/lib/engine/equipment-requirements';
+import {
+  isOwnedEquipment,
+  OWNED_EQUIPMENT_LABELS,
+  ownedEquipmentFor,
+  serializeOwnedEquipment,
+  type OwnedEquipment,
+} from '@/lib/owned-equipment';
 import { hapticImpactLight, hapticSelect, hapticSuccess, hapticWarning } from '@/lib/haptics';
-import { getCoachingInsightNote } from '@/lib/coaching-insights';
+import { getCoachingInsightNote, markCoachingInsightShown } from '@/lib/coaching-insights';
 import { getPlanFitNote } from '@/lib/plan-fit';
 import { recordCheckInAndShouldShowPaywall } from '@/lib/paywall-trigger';
 import { getLoadImprovementNote, getPacingTrendNote, getPostSessionNote } from '@/lib/momentum';
-import { getLastPerformance, recordPerformance, type ExercisePerformance } from '@/lib/exercise-performance';
-import { calculatePlates, formatKg, formatPlateBreakdown } from '@/lib/plate-calculator';
+import { getLastPerformance, recordPerformanceBatch, type ExercisePerformance } from '@/lib/exercise-performance';
+import { schedulePrCelebration } from '@/lib/pr-celebration';
+import { PLATE_SETUP_BY_UNIT, calculatePlates, formatPlateBreakdown } from '@/lib/plate-calculator';
+import { registerForRemotePushNotifications } from '@/lib/push-notifications';
+import { ROLLING_WINDOW_DAYS } from '@/lib/rolling-window';
 import { recordSessionForMilestones } from '@/lib/session-milestones';
+import {
+  cancelTodaysReminder,
+  enableSessionReminders,
+  markReminderPromptOffered,
+  shouldOfferReminderPrompt,
+} from '@/lib/session-reminders';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { estimateCaloriesBurned } from '@/lib/calorie-estimate';
 import { getHealthReadinessModifier, getHealthReadinessReasons, saveCompletedWorkout } from '@/lib/health-kit';
 import { usePremiumEntitlement } from '@/lib/purchases';
-import { computePlanPreview, type PlanExercise } from '@/lib/plan-preview';
-import { getTrainingState } from '@/lib/training-state';
+import { BODY_AREA_LABELS, BODY_AREA_ORDER } from '@/lib/body-area-labels';
+import { computePlanPreview, type BodyArea, type PlanExercise } from '@/lib/plan-preview';
+import { ENVIRONMENT_LABELS, ENVIRONMENT_ORDER, WEEKDAY_NAMES } from '@/lib/profile-labels';
+import { getTrainingState } from '@/lib/training-state-loader';
 import type { TrainingState } from '@/lib/engine/training-state';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { exerciseLibrary } from '@/lib/engine/exercise-library';
@@ -65,18 +88,29 @@ import {
   saveSessionFeedback,
   saveSessionNote,
 } from '@/lib/session-history';
-import { SYMPTOM_TAG_LABELS, SYMPTOM_TAGS } from '@/lib/symptom-tags';
+import { SYMPTOM_TAG_LABELS, SYMPTOM_TAGS, type SymptomTag } from '@/lib/symptom-tags';
 import { TIME_AVAILABLE_LABELS, TIME_AVAILABLE_OPTIONS } from '@/lib/time-available';
-import { getTodaySession, saveTodaySession } from '@/lib/today-session';
-import { getProfile, type UserProfile } from '@/lib/user-profile';
+import { getTodaySession, saveTodaySession, type TodaySession, type TodaySessionInput } from '@/lib/today-session';
+import { getUnitSystem, type UnitSystem } from '@/lib/unit-preference';
+import { useCountTo } from '@/lib/use-count-to';
+import { getProfile, updateProfile, type UserProfile } from '@/lib/user-profile';
+import {
+  displayWeightToKg,
+  formatWeight,
+  kgToDisplayWeight,
+  parseDecimalInput,
+  weightUnitLabel,
+} from '@/lib/weight-units';
 import {
   getBodyAreaBreakdown,
   getCompletionStatus,
+  getWorkoutLog,
   saveWorkoutLog,
   type BodyAreaBreakdown,
   type WorkoutLogExercise,
 } from '@/lib/workout-log';
 import { localDateStr } from '@/lib/local-date';
+import { MOTION_DURATION, MOTION_EASING } from '@/lib/motion';
 import {
   ArrowUpIconGraphic,
   LogoMarkAccentGraphic,
@@ -89,13 +123,16 @@ import { useAppTheme } from '@/lib/theme-context';
 
 const CANVAS_WIDTH = 375;
 const CANVAS_HEIGHT = 812;
-const CROSS_FADE_MS = 180;
+// The rest-day block (logo, "Rest day", its line, "Check in anyway") sat in
+// the top 40% of the screen with the bottom 60% empty — it read as a
+// half-loaded screen. Shifted as one group so it sits at the screen's
+// optical center (a little above true center) without changing its own
+// internal spacing.
+const REST_DAY_OFFSET = 140;
 // Matches resolvedExerciseCard/timerSection's own fixed width, so the
 // progress bar reads as part of the same column instead of a mismatched
 // element with its own sizing logic.
 const PROGRESS_TRACK_WIDTH = 325;
-
-const WEEKDAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
 // The only calibration signal this app collects (M14-lite) — confirms what
 // actually happened, since the multiplier itself only shows up in a future
@@ -153,10 +190,12 @@ const FALLBACK_TRIGGER_TEXT: Record<string, string> = {
   'p5-stacking-transition': "A transition case in how today's plan stacks up — here's a safe fallback for now.",
 };
 
-// Same labels as Progress's own BODY_AREA_LABELS (src/app/(tabs)/progress.tsx)
-// — kept as a separate copy rather than a shared import since this is a
-// route file, not a lib, and the two screens' label needs may diverge.
-const BODY_AREA_LABELS: Record<keyof BodyAreaBreakdown, string> = {
+// Deliberately its own, sentence-case copy — not the shared title-case
+// BODY_AREA_LABELS (body-area-labels.ts, used a few hundred lines down for
+// the rest-day preference pills) — this one only ever gets embedded
+// mid-sentence in getBodyAreaInsight's own lowercase-flowing copy below, a
+// genuinely different display need, not an accidental drift.
+const BODY_AREA_INSIGHT_LABELS: Record<keyof BodyAreaBreakdown, string> = {
   upper: 'Upper body',
   lower: 'Legs',
   core: 'Core',
@@ -181,7 +220,7 @@ async function getBodyAreaInsight(): Promise<string | null> {
     .sort((a, b) => b.completed - a.completed);
   if (entries.length === 0) return null;
   if (entries.length > 1 && entries[1].completed === entries[0].completed) return null;
-  return `${BODY_AREA_LABELS[entries[0].area]} has gotten the most work so far.`;
+  return `${BODY_AREA_INSIGHT_LABELS[entries[0].area]} has gotten the most work so far.`;
 }
 
 /** Groups today's real gate-1 exclusions by reason, resolving real exercise
@@ -210,8 +249,7 @@ function summarizeExclusions(
  * the resolved or done state instead of re-asking, via today-session.ts.
  */
 export default function EnergyCheckInScreen() {
-  const { width: windowWidth } = useWindowDimensions();
-  const scale = windowWidth / CANVAS_WIDTH;
+  const scale = useCanvasScale();
   const { colors, resolvedScheme } = useAppTheme();
   const hoverWashColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
   const styles = useMemo(() => createStyles(colors, hoverWashColor), [colors, hoverWashColor]);
@@ -230,13 +268,36 @@ export default function EnergyCheckInScreen() {
   // "prevent the malformed state instead of validating around it" discipline
   // as the symptom-tag reset just below it.
   const [finisherAccepted, setFinisherAccepted] = useState(false);
+  // Vervein addition — an explicit body-area choice, only ever offered on
+  // the rest-day "check in anyway" path (see isRestDay/showRestDay below).
+  // Tapping the same area again clears it back to "let the engine decide" —
+  // see plan-preview.ts's own preferredBodyArea param for how this overrides
+  // the computed neglected-area signal specifically here.
+  const [preferredBodyArea, setPreferredBodyArea] = useState<BodyArea | null>(null);
+  // Vervein addition — "Where are you working out today?" (optional, shown
+  // every day, not just the rest-day override path). Stores the same
+  // onboarding-vocabulary environment key the standing profile answer uses
+  // (see plan-preview.ts's own equipmentOverride param) rather than the
+  // engine's own 3-value Equipment type, so ENVIRONMENT_LABELS/the pill UI
+  // stay byte-identical to onboarding's own environment question.
+  const [equipmentOverride, setEquipmentOverride] = useState<string | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [lastCheckIn, setLastCheckIn] = useState<CheckInRecord | null>(null);
   const [sessionState, setSessionState] = useState<'checkin' | 'resolved' | 'done'>('checkin');
+  // BUG FIX: sessionState starts as 'checkin' and profile as null, so until
+  // the load below resolved, every open painted the energy check-in form —
+  // visible sliding in with the push — and then cross-faded it away into
+  // the rest day, the session in progress or the done screen. Nothing
+  // renders until the state that decides the screen is known; the right one
+  // then fades in once, with its checks and answers already in place.
+  const [hydrated, setHydrated] = useState(false);
   // A rest day is real (driven by the days the user actually picked during
   // onboarding, not a fake toggle) — but always overridable, since recovery
-  // is a default, not a lockout.
-  const [showAnyway, setShowAnyway] = useState(false);
+  // is a default, not a lockout. Arriving from the Today card's own "Check
+  // in anyway" (?anyway=1) means that choice was already made — asking it a
+  // second time here, behind a second identical link, was a dead step.
+  const { anyway } = useLocalSearchParams<{ anyway?: string }>();
+  const [showAnyway, setShowAnyway] = useState(anyway === '1');
   // Which exercises the user actually checked off — real, honest per-exercise
   // completion, not the all-or-nothing boolean session-history.ts records.
   // Local-only until Finish Session persists it via workout-log.ts; not
@@ -271,6 +332,15 @@ export default function EnergyCheckInScreen() {
   // an unverified session should never silently get the paid trim.
   const effectiveHealthReadinessModifier = isPremium ? healthReadinessModifier : 1;
   const effectiveHealthReadinessReasons = isPremium ? healthReadinessReasons : undefined;
+  // Frozen the moment a session starts (see TodaySession.planHealthReadiness)
+  // so the plan is rebuilt identically for the rest of the day — new Health
+  // data or the Plus check resolving late can't re-plan a session mid-way.
+  const [frozenReadiness, setFrozenReadiness] = useState<TodaySession['planHealthReadiness'] | null>(null);
+  // See TodaySession.planEquipment. undefined = no session started yet, so
+  // the live profile's list applies.
+  const [frozenEquipment, setFrozenEquipment] = useState<string | undefined>(undefined);
+  const planHealthReadinessModifier = frozenReadiness?.modifier ?? effectiveHealthReadinessModifier;
+  const planHealthReadinessReasons = frozenReadiness ? frozenReadiness.reasons : effectiveHealthReadinessReasons;
   // The one post-session question (M14-lite) — null until the user taps one
   // of the three buttons, then locked to whatever they picked (real feedback
   // isn't editable after the fact any more than the session itself is).
@@ -294,6 +364,13 @@ export default function EnergyCheckInScreen() {
   // completedExercises already use), raw string from the input so an
   // in-progress "12" vs "120" keystroke never gets coerced mid-typing.
   const [loggedWeightsKg, setLoggedWeightsKg] = useState<Record<number, string>>({});
+  // The unit the weight field is typed in — the user's own unit preference,
+  // or, when resuming a session, whichever unit its already-typed weights
+  // were entered in (so a raw "135" keeps meaning what it meant). Storage
+  // stays kg regardless; see weight-units.ts.
+  const [weightUnit, setWeightUnit] = useState<UnitSystem>('imperial');
+  // (The mid-session autosave for these weights lives below, after
+  // currentExerciseIndex — it also persists swaps and position now.)
   const [loadImprovementNote, setLoadImprovementNote] = useState<string | null>(null);
   // Keyed by exercise NAME (matching exercise-performance.ts's own store),
   // not index — a swap mid-session shouldn't carry the old exercise's last
@@ -343,6 +420,13 @@ export default function EnergyCheckInScreen() {
   // recordSessionForMilestones' own doc comment) — only ever set the one
   // time handleFinishSession itself just reached a new milestone.
   const [milestoneReached, setMilestoneReached] = useState<number | null>(null);
+  // The one-time, in-context notification ask (replacing the old cold-launch
+  // permission prompt — see push-notifications.ts). Ephemeral like
+  // milestoneReached: shown only on the finish that first qualifies, never
+  // restored on a same-day reopen. 'pending' = offer visible, 'on' = the user
+  // turned reminders on from it, 'declined' = the OS prompt was refused.
+  const [reminderOffer, setReminderOffer] = useState<'pending' | 'on' | 'declined' | null>(null);
+  const trainingDaysList = profile?.days ? profile.days.split(',').filter(Boolean) : [];
   // Re-entrancy guard for handleFinishSession — that handler spans several
   // awaited AsyncStorage writes before setSessionState('done') unmounts the
   // button, and currentExerciseTimerDone (the button's only other disabled
@@ -363,24 +447,29 @@ export default function EnergyCheckInScreen() {
   // so a double-tap landing before the first call's awaits resolve would
   // count one real session start as two toward the 3-check-in paywall
   // trigger — silently pulling the paywall a session earlier than intended.
+  //
+  // BUG FIX: the state twin this comment already promised was never actually
+  // added — only the ref existed, so the Start button itself stayed visually
+  // enabled the whole time through this handler's two awaited saves, with no
+  // feedback that a tap had already registered. The ref alone made a second
+  // tap a safe no-op, just an invisible one.
   const isStartingSessionRef = useRef(false);
+  const [isStartingSession, setIsStartingSession] = useState(false);
   // Real wall-clock start time for the HealthKit workout write at Finish —
-  // see saveCompletedWorkout's own doc comment. Not persisted (same
-  // simplification as currentExerciseIndex above not surviving an app
-  // kill) — a resumed 'resolved' session just won't get a HealthKit entry,
-  // which is an acceptable gap for a nice-to-have sync.
+  // see saveCompletedWorkout's own doc comment. Persisted with today's
+  // session (TodaySession.startedAt), so a session resumed after an app
+  // kill still gets its Health entry.
   const sessionStartedAtRef = useRef<Date | null>(null);
   // Guided per-exercise timer — exercises are worked one at a time, in
   // order; the next one only unlocks once the current one's timer reaches
   // 0 (the countdown itself lives in the ExerciseTimer subcomponent below,
   // keyed by this index so switching exercises remounts it with a fresh
-  // timer rather than needing an effect to reset one). Doesn't persist
-  // across an app kill mid-session (today-session.ts only remembers energy/
-  // symptoms/completion, not workout progress) — reopening mid-'resolved'
-  // restarts at exercise 0. A real, deliberate simplification, not an
-  // oversight.
+  // timer rather than needing an effect to reset one). Persisted with
+  // today's session (TodaySession.currentExerciseIndex), so reopening
+  // mid-session picks up where it left off; the timer itself restarts.
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
   const [showReasoning, setShowReasoning] = useState(false);
+
 
   const toggleSymptomTag = (tag: string) => {
     hapticSelect();
@@ -417,72 +506,113 @@ export default function EnergyCheckInScreen() {
     setTimeAvailableMin((prev) => (prev === value ? null : value));
   };
 
+  const handleBodyAreaChange = (area: BodyArea) => {
+    hapticSelect();
+    setPreferredBodyArea((prev) => (prev === area ? null : area));
+  };
+
+  const handleEquipmentOverrideChange = (environment: string) => {
+    hapticSelect();
+    setEquipmentOverride((prev) => (prev === environment ? null : environment));
+  };
+
   useEffect(() => {
     (async () => {
-      const [
-        loadedProfile,
-        loadedLastCheckIn,
-        loadedTodaySession,
-        loadedCalibration,
-        loadedTrainingState,
-        loadedReadinessModifier,
-        loadedReadinessReasons,
-      ] = await Promise.all([
-        getProfile(),
-        getLastCheckIn(),
-        getTodaySession(),
-        getCalibration(),
-        getTrainingState(),
-        getHealthReadinessModifier(),
-        getHealthReadinessReasons(),
-      ]);
-      setProfile(loadedProfile);
-      setLastCheckIn(loadedLastCheckIn);
-      setCalibration(loadedCalibration);
-      setTrainingState(loadedTrainingState);
-      setHealthReadinessModifier(loadedReadinessModifier);
-      setHealthReadinessReasons(loadedReadinessReasons);
-      if (loadedTodaySession) {
-        setEnergy(loadedTodaySession.energy);
-        setTimeAvailableMin(loadedTodaySession.timeAvailableMin ?? null);
-        // Same guard as handleEnergyChange's own reset — a stored `true`
-        // alongside a non-5 energy (e.g. from before this reset existed)
-        // should never load straight into computePlanPreview as accepted.
-        setFinisherAccepted(loadedTodaySession.energy === 5 && (loadedTodaySession.finisherAccepted ?? false));
-        setSessionState(loadedTodaySession.completed ? 'done' : 'resolved');
-        // Restored regardless of completed/resolved — this feeds preview's
-        // computation either way, not just the done-screen display fields.
-        // Re-applies the same M4 two-step-disclosure rule handleEnergyChange
-        // enforces live: a stored row from before that logic existed (or any
-        // other path producing energy > 2 with real tags) should never load
-        // straight into computePlanPreview as the "malformed payload" the
-        // engine contract says can't exist — enforced here too, not just on
-        // the live gauge-drag path.
-        setSymptomTags(loadedTodaySession.energy <= 2 ? new Set(loadedTodaySession.symptomTags) : new Set());
-        if (loadedTodaySession.completed) {
-          const [existingNote, existingFeedback, insight] = await Promise.all([
-            getSessionNote(localDateStr()),
-            getSessionFeedback(localDateStr()),
-            getBodyAreaInsight(),
-          ]);
-          if (existingNote) setNoteText(existingNote);
-          if (existingFeedback) setFeedbackGiven(existingFeedback);
-          setPostSessionNote(getPostSessionNote(loadedTodaySession.energy));
-          // Two independent AsyncStorage reads (session-history.ts and
-          // decision-trace-log.ts are separate keys, neither depends on the
-          // other), then two independent note computations over them — was
-          // four sequential round-trips stacked one after another, now two
-          // parallel batches.
-          const [history, traceLog] = await Promise.all([getSessionHistory(), getDecisionTraceLog()]);
-          setPacingTrendNote(getPacingTrendNote(history));
-          const [insightNote, fitNote] = await Promise.all([
-            getCoachingInsightNote(history),
-            getPlanFitNote(traceLog),
-          ]);
-          setCoachingInsightNote(insightNote);
-          setPlanFitNote(fitNote);
-          setDoneInsight(insight);
+      try {
+        const [
+          loadedProfile,
+          loadedLastCheckIn,
+          loadedTodaySession,
+          loadedCalibration,
+          loadedTrainingState,
+          loadedReadinessModifier,
+          loadedReadinessReasons,
+          loadedUnit,
+        ] = await Promise.all([
+          getProfile(),
+          getLastCheckIn(),
+          getTodaySession(),
+          getCalibration(),
+          getTrainingState(),
+          getHealthReadinessModifier(),
+          getHealthReadinessReasons(),
+          getUnitSystem(),
+        ]);
+        setProfile(loadedProfile);
+        setWeightUnit(loadedTodaySession?.loggedWeightsUnit ?? loadedUnit);
+        setLastCheckIn(loadedLastCheckIn);
+        setCalibration(loadedCalibration);
+        setTrainingState(loadedTrainingState);
+        setHealthReadinessModifier(loadedReadinessModifier);
+        setHealthReadinessReasons(loadedReadinessReasons);
+        if (loadedTodaySession) {
+          setEnergy(loadedTodaySession.energy);
+          setTimeAvailableMin(loadedTodaySession.timeAvailableMin ?? null);
+          // Same guard as handleEnergyChange's own reset — a stored `true`
+          // alongside a non-5 energy (e.g. from before this reset existed)
+          // should never load straight into computePlanPreview as accepted.
+          setFinisherAccepted(loadedTodaySession.energy === 5 && (loadedTodaySession.finisherAccepted ?? false));
+          setPreferredBodyArea(loadedTodaySession.preferredBodyArea ?? null);
+          setEquipmentOverride(loadedTodaySession.equipmentOverride ?? null);
+          setSessionState(loadedTodaySession.completed ? 'done' : 'resolved');
+          // Restored regardless of completed/resolved — this feeds preview's
+          // computation either way, not just the done-screen display fields.
+          // Re-applies the same M4 two-step-disclosure rule handleEnergyChange
+          // enforces live: a stored row from before that logic existed (or any
+          // other path producing energy > 2 with real tags) should never load
+          // straight into computePlanPreview as the "malformed payload" the
+          // engine contract says can't exist — enforced here too, not just on
+          // the live gauge-drag path.
+          setSymptomTags(loadedTodaySession.energy <= 2 ? new Set(loadedTodaySession.symptomTags) : new Set());
+          // BUG FIX: restores whatever weights were typed before an app kill
+          // interrupted the session — see loggedWeightsKg's own doc comment
+          // on TodaySession. Naturally empty for a completed session (Finish
+          // clears this field once weights are durably recorded elsewhere).
+          setLoggedWeightsKg(loadedTodaySession.loggedWeightsKg ?? {});
+          // The rest of a started session's exact state — see the fields' own
+          // doc comments on TodaySession for the resume bugs each one closes.
+          setSwappedExercises(loadedTodaySession.swappedExercises ?? {});
+          setFrozenReadiness(loadedTodaySession.planHealthReadiness ?? null);
+        setFrozenEquipment(loadedTodaySession.planEquipment);
+          if (loadedTodaySession.startedAt) sessionStartedAtRef.current = new Date(loadedTodaySession.startedAt);
+          if (!loadedTodaySession.completed) {
+            setCurrentExerciseIndex(loadedTodaySession.currentExerciseIndex ?? 0);
+            // Completion is already autosaved per exercise, in plan order —
+            // which, with the plan now frozen, is the same order on resume.
+            const partialLog = await getWorkoutLog(localDateStr());
+            if (partialLog) {
+              setCompletedExercises(new Set(partialLog.exercises.flatMap((exercise, i) => (exercise.completed ? [i] : []))));
+            }
+          }
+          if (loadedTodaySession.completed) {
+            const [existingNote, existingFeedback, insight] = await Promise.all([
+              getSessionNote(localDateStr()),
+              getSessionFeedback(localDateStr()),
+              getBodyAreaInsight(),
+            ]);
+            if (existingNote) setNoteText(existingNote);
+            if (existingFeedback) setFeedbackGiven(existingFeedback);
+            setPostSessionNote(getPostSessionNote(loadedTodaySession.energy));
+            // Two independent AsyncStorage reads (session-history.ts and
+            // decision-trace-log.ts are separate keys, neither depends on the
+            // other), then two independent note computations over them — was
+            // four sequential round-trips stacked one after another, now two
+            // parallel batches.
+            const [history, traceLog] = await Promise.all([getSessionHistory(), getDecisionTraceLog()]);
+            setPacingTrendNote(getPacingTrendNote(history));
+            const [insightNote, fitNote] = await Promise.all([
+              // Count-based — reads the same recent window it always did,
+              // not the longer-retained history (see getRecentSessionHistory).
+              getCoachingInsightNote(history.slice(0, ROLLING_WINDOW_DAYS)),
+              getPlanFitNote(traceLog),
+            ]);
+            setCoachingInsightNote(insightNote);
+            setPlanFitNote(fitNote);
+            setDoneInsight(insight);
+          }
         }
+      } finally {
+        setHydrated(true);
       }
     })();
   }, []);
@@ -492,7 +622,14 @@ export default function EnergyCheckInScreen() {
     saveSessionNote(localDateStr(), text);
   };
 
+  // BUG FIX: the pills stayed live while the history read below ran, so a
+  // second tap in that window submitted twice — and submitSessionFeedback
+  // is a read-nudge-write, so two answers nudged calibration twice for one
+  // session. One answer per session, decided on the first tap.
+  const feedbackSubmittingRef = useRef(false);
   const handleSubmitFeedback = async (response: FeedbackResponse) => {
+    if (feedbackSubmittingRef.current) return;
+    feedbackSubmittingRef.current = true;
     hapticSelect();
     const priorHistory = await getSessionHistory();
     setIsFirstFeedback(!priorHistory.some((e) => e.feedback !== undefined));
@@ -522,7 +659,7 @@ export default function EnergyCheckInScreen() {
   const isRestDay = trainingDays !== null && !trainingDays.includes(today);
   // Rest-day framing only applies before a session's been resolved — it's
   // not retroactively overridden by a session already checked into today.
-  const showRestDay = sessionState === 'checkin' && isRestDay && !showAnyway;
+  const showRestDay = hydrated && sessionState === 'checkin' && isRestDay && !showAnyway;
 
   const entering = useFadeInEntering();
   const reducedMotion = useReducedMotion();
@@ -547,6 +684,19 @@ export default function EnergyCheckInScreen() {
   // and it has zero effect on sighted users. The underlying "Check in
   // anyway" tree-registration gap remains genuinely open.
   const [screenReaderEnabled, setScreenReaderEnabled] = useState(false);
+  // Motion for the check-in form's conditional sections — the explanation,
+  // the Energy-5 finisher, the Energy-1/2 symptom picker, the rest-day body
+  // area picker — and the Start button under them. They used to pop in and
+  // out instantly as the gauge moved, jumping Start up and down the screen.
+  // Same spring as the exercise list's own layout transition; skipped for
+  // screen-reader users, same as the rest-day block's fades.
+  const sectionEntering = screenReaderEnabled
+    ? undefined
+    : FadeIn.duration(MOTION_DURATION.base).easing(MOTION_EASING.standard);
+  const sectionExiting = screenReaderEnabled
+    ? undefined
+    : FadeOut.duration(MOTION_DURATION.fast).easing(MOTION_EASING.standard);
+  const sectionLayout = screenReaderEnabled ? undefined : LinearTransition.springify(280).dampingRatio(0.8);
   useEffect(() => {
     AccessibilityInfo.isScreenReaderEnabled().then(setScreenReaderEnabled);
     const subscription = AccessibilityInfo.addEventListener('screenReaderChanged', setScreenReaderEnabled);
@@ -714,6 +864,16 @@ export default function EnergyCheckInScreen() {
           : null
       : null;
 
+  // The profile the plan is built from: the live one, except that a
+  // started session keeps the equipment list it started with (see
+  // TodaySession.planEquipment). Same object whenever nothing differs, so
+  // plan-preview's baseline cache (keyed on the input's identity) holds.
+  const planProfile = useMemo(() => {
+    if (!profile || frozenEquipment === undefined) return profile;
+    const equipment = frozenEquipment === '' ? undefined : frozenEquipment;
+    return profile.equipment === equipment ? profile : { ...profile, equipment };
+  }, [profile, frozenEquipment]);
+
   // Memoized — this now runs the real engine's filtering over the full
   // exercise library (see plan-preview.ts), not a cheap lookup. energy
   // changes on every drag step of the gauge below, so this matters more
@@ -722,31 +882,35 @@ export default function EnergyCheckInScreen() {
     () =>
       energy !== null
         ? computePlanPreview(
-            profile ?? {},
+            planProfile ?? {},
             energy,
             calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
             Array.from(symptomTags),
             trainingState ?? undefined,
-            effectiveHealthReadinessModifier,
+            planHealthReadinessModifier,
             verifiedYesterdayEnergy,
             timeAvailableMin ?? undefined,
             daysSinceLastCheckIn,
             finisherAccepted,
-            effectiveHealthReadinessReasons
+            planHealthReadinessReasons,
+            preferredBodyArea ?? undefined,
+            equipmentOverride ?? undefined
           )
         : null,
     [
-      profile,
+      planProfile,
       energy,
       calibration,
       symptomTags,
       trainingState,
-      effectiveHealthReadinessModifier,
+      planHealthReadinessModifier,
       verifiedYesterdayEnergy,
       timeAvailableMin,
       daysSinceLastCheckIn,
       finisherAccepted,
-      effectiveHealthReadinessReasons,
+      planHealthReadinessReasons,
+      preferredBodyArea,
+      equipmentOverride,
     ]
   );
   // The baseline ("Good") session — comparing against it is what makes the
@@ -757,21 +921,30 @@ export default function EnergyCheckInScreen() {
   const baseline = useMemo(
     () =>
       computePlanPreview(
-        profile ?? {},
+        planProfile ?? {},
         4,
         calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
         Array.from(symptomTags),
         undefined,
-        effectiveHealthReadinessModifier,
+        planHealthReadinessModifier,
         undefined,
         undefined,
         undefined,
         undefined,
-        effectiveHealthReadinessReasons
+        planHealthReadinessReasons
       ),
-    [profile, calibration, symptomTags, effectiveHealthReadinessModifier, effectiveHealthReadinessReasons]
+    [planProfile, calibration, symptomTags, planHealthReadinessModifier, planHealthReadinessReasons]
   );
   const exerciseDelta = preview ? baseline.exerciseCount - preview.exerciseCount : 0;
+  // A symptom already set in Settings' Ongoing Symptoms applies every day
+  // on its own — offering it again here would be a chip that does nothing.
+  const dailySymptomTags = useMemo(
+    () => SYMPTOM_TAGS.filter((tag) => !(profile?.standingSymptoms ?? []).includes(tag)),
+    [profile]
+  );
+  // Named on the offer itself, so the extra minutes are known before it's
+  // accepted rather than discovered in the session length afterwards.
+  const finisherCostMin = preview?.finisherMinutes ?? 0;
   // BUG FIX: exerciseDelta alone can't tell "genuinely standard" apart from
   // "same exercise count, but every set just got scaled down" — Energy 2's
   // real setsMultiplier is 0.6 (see ENERGY_MODIFIER_TABLE), which reduces
@@ -802,7 +975,11 @@ export default function EnergyCheckInScreen() {
   // like this" stays reviewable in one consistent place (this panel)
   // instead of only appearing transiently before the session starts.
   const symptomLines = useMemo(
-    () => Array.from(symptomTags).map((tag) => TAG_LINES[tag]).filter((line): line is string => Boolean(line)),
+    // Cast, not a type-level guarantee — symptomTags is only ever populated
+    // from the fixed canonical picker below, never free text, but the state
+    // itself is a plain Set<string>. Filtered, not thrown, since this is a
+    // cosmetic reasoning-panel line, not an engine safety boundary.
+    () => Array.from(symptomTags).map((tag) => TAG_LINES[tag as SymptomTag]).filter((line): line is string => Boolean(line)),
     [symptomTags]
   );
   const comparisonText =
@@ -926,6 +1103,18 @@ export default function EnergyCheckInScreen() {
   // the affordance itself is always shown while an exercise is unresolved,
   // and an empty result here just means the sheet's own empty state renders
   // instead of a picker list.
+  // Equipment ticked off mid-workout on the swap sheet ("Missing
+  // something?") — saved to the profile for future plans straight away, and
+  // held here so the rest of this session's swap options respect it too,
+  // without re-planning the session itself (its list is frozen — see
+  // planProfile).
+  const [missingEquipment, setMissingEquipment] = useState<Set<string>>(new Set());
+  const [equipmentRemovedNote, setEquipmentRemovedNote] = useState(false);
+  const ownedNow = useMemo(() => {
+    const owned = ownedEquipmentFor(equipmentOverride ?? planProfile?.environment, planProfile?.equipment);
+    return owned === null ? null : owned.filter((item) => !missingEquipment.has(item));
+  }, [equipmentOverride, planProfile, missingEquipment]);
+
   const swapModalCandidates = useMemo(() => {
     if (swapModalIndex === null || !preview) return [];
     const target = sessionExercises[swapModalIndex];
@@ -934,8 +1123,33 @@ export default function EnergyCheckInScreen() {
       target,
       preview.constraints,
       sessionExercises.map((e) => e.id)
-    );
-  }, [swapModalIndex, preview, sessionExercises]);
+    ).filter((candidate) => ownedNow === null || hasEquipmentFor(candidate, ownedNow));
+  }, [swapModalIndex, preview, sessionExercises, ownedNow]);
+
+  // What the exercise being swapped uses from their own list — only for a
+  // home list; a full gym has nothing to take off.
+  const swapMissingOptions = useMemo((): OwnedEquipment[] => {
+    if (swapModalIndex === null || ownedNow === null) return [];
+    const target = sessionExercises[swapModalIndex];
+    if (!target) return [];
+    const needs = new Set((equipmentRequirementsFor(target.id) ?? []).flat());
+    return ownedNow.filter((item): item is OwnedEquipment => needs.has(item) && isOwnedEquipment(item));
+  }, [swapModalIndex, ownedNow, sessionExercises]);
+
+  const handleMissingEquipment = async (item: OwnedEquipment) => {
+    hapticSelect();
+    setMissingEquipment((prev) => new Set(prev).add(item));
+    setEquipmentRemovedNote(true);
+    // Read fresh rather than from state — the list may have changed in
+    // Settings since this screen loaded.
+    const latest = await getProfile();
+    const owned = ownedEquipmentFor(latest?.environment, latest?.equipment);
+    if (owned) {
+      await updateProfile({
+        equipment: serializeOwnedEquipment(owned.filter((i): i is OwnedEquipment => i !== item && isOwnedEquipment(i))),
+      });
+    }
+  };
 
   const handleOpenSwap = (index: number) => {
     hapticSelect();
@@ -969,6 +1183,7 @@ export default function EnergyCheckInScreen() {
   const handleCloseSwap = () => {
     hapticImpactLight();
     setSwapModalIndex(null);
+    setEquipmentRemovedNote(false);
   };
 
   // Ratio-scales the chosen candidate against the ORIGINAL engine-delivered
@@ -987,16 +1202,69 @@ export default function EnergyCheckInScreen() {
     setSwapModalIndex(null);
   };
 
+  // Everything today's record carries regardless of which save it is —
+  // one place, so no call site can forget a field and silently wipe it
+  // (the old positional saveTodaySession's standing hazard).
+  const todaySessionBase = (sessionEnergy: EnergyScore, completed: boolean): TodaySessionInput => ({
+    energy: sessionEnergy,
+    completed,
+    symptomTags: Array.from(symptomTags),
+    timeAvailableMin: timeAvailableMin ?? undefined,
+    finisherAccepted,
+    preferredBodyArea: preferredBodyArea ?? undefined,
+    equipmentOverride: equipmentOverride ?? undefined,
+    swappedExercises,
+    planHealthReadiness: frozenReadiness ?? undefined,
+    planEquipment: frozenEquipment,
+    startedAt: sessionStartedAtRef.current?.toISOString(),
+  });
+
+  // BUG FIX (found in a later full-app audit): loggedWeightsKg used to live
+  // only in state, with nothing persisting it until Finish — an app kill
+  // mid-session (OS memory pressure, an incoming call, a force-quit)
+  // silently lost every typed weight. Swaps and the current position are
+  // persisted alongside now too: weights are keyed by exercise index, so
+  // restoring them without the swaps that produced those indexes attached a
+  // weight to the wrong exercise. Debounced (not on every keystroke) the
+  // same way notes/[id].tsx's own autosave is, and gated to the active
+  // 'resolved' session only — 'done' is handled by handleFinishSession's own
+  // explicit save, which intentionally drops the weights once
+  // exercise-performance.ts has durably recorded them.
+  useEffect(() => {
+    if (energy === null || sessionState !== 'resolved') return;
+    const timeout = setTimeout(() => {
+      saveTodaySession({
+        ...todaySessionBase(energy, false),
+        loggedWeightsKg,
+        loggedWeightsUnit: weightUnit,
+        currentExerciseIndex,
+      });
+    }, 600);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loggedWeightsKg, swappedExercises, currentExerciseIndex]);
+
   const handleStartSession = async () => {
     if (energy === null || isStartingSessionRef.current) return;
     isStartingSessionRef.current = true;
+    setIsStartingSession(true);
     sessionStartedAtRef.current = new Date();
     setCurrentExerciseIndex(0);
     if (energy === 1) hapticWarning();
     else if (energy === 5) hapticSuccess();
     else hapticImpactLight();
     recordCheckIn(energy);
-    saveTodaySession(energy, false, Array.from(symptomTags), timeAvailableMin ?? undefined, finisherAccepted);
+    const readinessAtStart = { modifier: effectiveHealthReadinessModifier, reasons: effectiveHealthReadinessReasons };
+    setFrozenReadiness(readinessAtStart);
+    const equipmentAtStart = profile?.equipment ?? '';
+    setFrozenEquipment(equipmentAtStart);
+    saveTodaySession({
+      ...todaySessionBase(energy, false),
+      planHealthReadiness: readinessAtStart,
+      planEquipment: equipmentAtStart,
+    });
+    // Already showed up today — a "Training day" nudge later would be noise.
+    cancelTodaysReminder();
     // The honest starting point for today's completion signal — a real
     // 'skipped' entry the moment the session begins (zero exercises done
     // yet), overwritten with the real status as exercises complete and
@@ -1024,15 +1292,40 @@ export default function EnergyCheckInScreen() {
     if (isFinishingSessionRef.current) return;
     isFinishingSessionRef.current = true;
     setIsFinishingSession(true);
-    hapticSuccess();
+    // A light tap to acknowledge the press; the success haptic belongs to
+    // the checkmark landing on the done screen (SuccessCheckmark fires it) —
+    // firing both made one finish buzz twice.
+    hapticImpactLight();
     // Re-passes the same tags/time/finisher choice picked at Start —
     // saveTodaySession replaces the whole record each call, so omitting any
     // of them would silently wipe them.
-    saveTodaySession(energy, true, Array.from(symptomTags), timeAvailableMin ?? undefined, finisherAccepted);
+    saveTodaySession(todaySessionBase(energy, true));
     const finalExercises = buildWorkoutLogExercises(completedExercises);
     const status = getCompletionStatus(finalExercises);
     const completedSomething = status !== 'skipped';
-    await recordSessionCompletion(completedSomething, energy, status);
+    // Computed before recordSessionCompletion (moved up from its previous
+    // spot after that call) so the same honest estimate check-in.tsx already
+    // shows can also be persisted into session-history.ts's own
+    // caloriesBurned field — see that field's doc comment for why summing
+    // real per-session estimates there, not re-deriving from workout-log.ts,
+    // is what feeds the weekly burn total. Only the exercises actually
+    // checked off, each with its own real intensity/duration — see
+    // estimateCaloriesBurned's own doc comment for why this isn't a single
+    // flat per-session number. Weight is the only profile field this needs
+    // (not height/age — those feed a different metric, daily BMR, not a
+    // single workout's active energy); no honest estimate exists without
+    // it, so this stays undefined rather than guessing a default bodyweight.
+    const weightKg = Number(profile?.weightKg);
+    const caloriesForSession =
+      completedSomething && weightKg > 0
+        ? estimateCaloriesBurned(
+            sessionExercises
+              .filter((_, index) => completedExercises.has(index))
+              .map((ex) => ({ intensity: ex.intensity, durationMin: ex.durationMin })),
+            weightKg
+          )
+        : null;
+    await recordSessionCompletion(completedSomething, energy, status, caloriesForSession ?? undefined);
     // Only a real session (done or partial) counts toward the lifetime
     // total — never a skipped one, so this can't be inflated by opening the
     // app or abandoning a session before doing anything.
@@ -1042,23 +1335,6 @@ export default function EnergyCheckInScreen() {
     // a nice-to-have sync (see saveCompletedWorkout's own doc comment), not
     // something worth making Finish wait on.
     if (completedSomething && sessionStartedAtRef.current) {
-      // Only the exercises actually checked off, each with its own real
-      // intensity/duration — see estimateCaloriesBurned's own doc comment
-      // for why this isn't a single flat per-session number. Weight is the
-      // only profile field this needs (not height/age — those feed a
-      // different metric, daily BMR, not a single workout's active energy);
-      // no honest estimate exists without it, so this stays undefined
-      // rather than guessing a default bodyweight.
-      const weightKg = Number(profile?.weightKg);
-      const caloriesForSession =
-        weightKg > 0
-          ? estimateCaloriesBurned(
-              sessionExercises
-                .filter((_, index) => completedExercises.has(index))
-                .map((ex) => ({ intensity: ex.intensity, durationMin: ex.durationMin })),
-              weightKg
-            )
-          : null;
       setEstimatedCalories(caloriesForSession);
       saveCompletedWorkout(
         profile?.goal,
@@ -1078,20 +1354,25 @@ export default function EnergyCheckInScreen() {
       .map(([indexStr, weightText]) => {
         const index = Number(indexStr);
         const exercise = sessionExercises[index];
-        const weightKg = Number(weightText);
+        const typed = parseDecimalInput(weightText);
+        const weightKg = typed !== null ? displayWeightToKg(typed, weightUnit) : NaN;
         const reps = exercise?.reps;
         if (!exercise || !(weightKg > 0) || typeof reps !== 'number') return null;
         return { exerciseName: exercise.name, weightKg, reps };
       })
       .filter((entry): entry is { exerciseName: string; weightKg: number; reps: number } => entry !== null);
     if (loggedEntries.length > 0) {
-      const results = await Promise.all(
-        loggedEntries.map(async ({ exerciseName, weightKg, reps }) => ({
-          exerciseName,
-          result: await recordPerformance(exerciseName, weightKg, reps),
-        }))
-      );
+      // recordPerformanceBatch (not N parallel recordPerformance calls) —
+      // see that function's own doc comment for the lost-update race this
+      // avoids when a session logs weights for more than one exercise.
+      const results = await recordPerformanceBatch(loggedEntries);
       setLoadImprovementNote(getLoadImprovementNote(results));
+      // Fire-and-forget, same as saveCompletedWorkout above — a delayed
+      // celebration notification is a nice-to-have, never something worth
+      // making Finish wait on. Plus-gated: same tier as the in-app note
+      // just above and Progress's own Strength Progress card, which this
+      // same logged data also feeds.
+      if (isPremium) schedulePrCelebration(results);
     }
     setPostSessionNote(getPostSessionNote(energy));
     // Same parallelization as the initial-load effect above — two
@@ -1099,10 +1380,14 @@ export default function EnergyCheckInScreen() {
     const [historyForNotes, traceLogForNotes] = await Promise.all([getSessionHistory(), getDecisionTraceLog()]);
     setPacingTrendNote(getPacingTrendNote(historyForNotes));
     const [insightNote, fitNote] = await Promise.all([
-      getCoachingInsightNote(historyForNotes),
+      getCoachingInsightNote(historyForNotes.slice(0, ROLLING_WINDOW_DAYS)),
       getPlanFitNote(traceLogForNotes),
     ]);
     setCoachingInsightNote(insightNote);
+    // The one real showing — see markCoachingInsightShown's own doc comment
+    // for why this call doesn't also happen on the reopen-a-completed-
+    // session load path below.
+    if (insightNote) markCoachingInsightShown();
     setPlanFitNote(fitNote);
     // Awaited (unlike the old fire-and-forget) so today's exercises are
     // already in storage before getBodyAreaInsight reads the breakdown —
@@ -1110,7 +1395,24 @@ export default function EnergyCheckInScreen() {
     await saveWorkoutLog(localDateStr(), finalExercises);
     recordDecisionTrace(localDateStr(), preview.trace);
     setDoneInsight(await getBodyAreaInsight());
+    // Only after a real session — the moment "remind me next training day"
+    // actually means something — and only ever offered once (marked the
+    // moment it's shown, not when tapped, so ignoring it counts as an answer).
+    if (completedSomething && (await shouldOfferReminderPrompt(trainingDaysList))) {
+      setReminderOffer('pending');
+      markReminderPromptOffered();
+    }
     setSessionState('done');
+  };
+
+  const handleAcceptReminderOffer = async () => {
+    hapticSelect();
+    const granted = await enableSessionReminders(trainingDaysList);
+    setReminderOffer(granted ? 'on' : 'declined');
+    if (granted) {
+      hapticSuccess();
+      registerForRemotePushNotifications();
+    }
   };
 
   // Flow-layout logo for the checkin/resolved/done ScrollViews — see
@@ -1154,8 +1456,8 @@ export default function EnergyCheckInScreen() {
         {showRestDay ? (
           <ReanimatedAnimated.View
             key="rest-day"
-            entering={screenReaderEnabled ? undefined : FadeIn.duration(CROSS_FADE_MS)}
-            exiting={screenReaderEnabled ? undefined : FadeOut.duration(CROSS_FADE_MS)}
+            entering={screenReaderEnabled ? undefined : FadeIn.duration(MOTION_DURATION.base).easing(MOTION_EASING.standard)}
+            exiting={screenReaderEnabled ? undefined : FadeOut.duration(MOTION_DURATION.base).easing(MOTION_EASING.standard)}
           >
             <Text style={styles.title} maxFontSizeMultiplier={1.3}>Rest day</Text>
             <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>
@@ -1163,7 +1465,7 @@ export default function EnergyCheckInScreen() {
             </Text>
 
             <Pressable
-              style={styles.restDayLinkHit}
+              style={({ pressed }) => [styles.restDayLinkHit, pressed && PRESSED_DIM]}
               onPress={() => setShowAnyway(true)}
               hitSlop={12}
               accessibilityRole="button"
@@ -1177,11 +1479,11 @@ export default function EnergyCheckInScreen() {
               </ReanimatedAnimated.Text>
             </Pressable>
           </ReanimatedAnimated.View>
-        ) : sessionState === 'checkin' ? (
+        ) : !hydrated ? null : sessionState === 'checkin' ? (
           <ReanimatedAnimated.ScrollView
             key="check-in"
-            entering={FadeIn.duration(CROSS_FADE_MS)}
-            exiting={FadeOut.duration(CROSS_FADE_MS)}
+            entering={FadeIn.duration(MOTION_DURATION.base).easing(MOTION_EASING.standard)}
+            exiting={FadeOut.duration(MOTION_DURATION.base).easing(MOTION_EASING.standard)}
             style={styles.flowScroll}
             contentContainerStyle={styles.checkinFlow}
             showsVerticalScrollIndicator={false}
@@ -1217,9 +1519,12 @@ export default function EnergyCheckInScreen() {
                   return (
                     <Pressable
                       key={minutes}
-                      style={[styles.timePill, active && styles.timePillActive]}
+                      style={({ pressed }) => [styles.timePill, active && styles.timePillActive, pressed && PRESSED_DIM]}
                       onPress={() => handleTimeAvailableChange(minutes)}
                       hitSlop={2}
+                      accessibilityRole="button"
+                      accessibilityLabel={TIME_AVAILABLE_LABELS[minutes]}
+                      accessibilityState={{ selected: active }}
                     >
                       <Text
                         style={[styles.timePillText, active && styles.timePillTextActive]}
@@ -1233,49 +1538,143 @@ export default function EnergyCheckInScreen() {
               </View>
             </View>
 
-            {preview ? (
-              <ReanimatedAnimated.View key={energy} entering={FadeIn.duration(220)} style={styles.checkinExplanationBlock}>
-                <Text style={styles.explanationText} maxFontSizeMultiplier={1.4}>
-                  {preview.explanation}
+            <View style={styles.timeAvailableSection}>
+              <Text style={styles.noteLabel} maxFontSizeMultiplier={1.3}>
+                WHERE ARE YOU WORKING OUT TODAY? (OPTIONAL)
+              </Text>
+              <View style={styles.symptomChipRow}>
+                {ENVIRONMENT_ORDER.map((environment) => {
+                  const active = equipmentOverride === environment;
+                  return (
+                    <Pressable
+                      key={environment}
+                      style={({ pressed }) => [styles.timePill, active && styles.timePillActive, pressed && PRESSED_DIM]}
+                      onPress={() => handleEquipmentOverrideChange(environment)}
+                      hitSlop={2}
+                      accessibilityRole="button"
+                      accessibilityLabel={ENVIRONMENT_LABELS[environment]}
+                      accessibilityState={{ selected: active }}
+                    >
+                      <Text
+                        style={[styles.timePillText, active && styles.timePillTextActive]}
+                        maxFontSizeMultiplier={1.2}
+                      >
+                        {ENVIRONMENT_LABELS[environment]}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            {/* Only offered on the rest-day "check in anyway" bonus session
+                (see isRestDay/showAnyway) — a normal scheduled day keeps
+                letting the engine's own neglected-area signal decide, which
+                is the whole adaptive-plan identity this app is built around.
+                A day the engine wasn't already planning to train at all is
+                the one place honoring an explicit personal choice over that
+                signal doesn't compete with it. See plan-preview.ts's own
+                preferredBodyArea param for how this overrides the reorder. */}
+            {isRestDay && showAnyway ? (
+              <ReanimatedAnimated.View
+                entering={sectionEntering}
+                exiting={sectionExiting}
+                layout={sectionLayout}
+                style={styles.timeAvailableSection}
+              >
+                <Text style={styles.noteLabel} maxFontSizeMultiplier={1.3}>
+                  WHAT DO YOU FEEL LIKE TRAINING? (OPTIONAL)
                 </Text>
-                {comparisonText ? (
-                  <Text style={styles.comparisonText} maxFontSizeMultiplier={1.4}>
-                    {comparisonText}
-                  </Text>
-                ) : null}
+                <View style={styles.symptomChipRow}>
+                  {BODY_AREA_ORDER.map((area) => {
+                    const active = preferredBodyArea === area;
+                    return (
+                      <Pressable
+                        key={area}
+                        style={({ pressed }) => [styles.timePill, active && styles.timePillActive, pressed && PRESSED_DIM]}
+                        onPress={() => handleBodyAreaChange(area)}
+                        hitSlop={2}
+                        accessibilityRole="button"
+                        accessibilityLabel={BODY_AREA_LABELS[area]}
+                        accessibilityState={{ selected: active }}
+                      >
+                        <Text
+                          style={[styles.timePillText, active && styles.timePillTextActive]}
+                          maxFontSizeMultiplier={1.2}
+                        >
+                          {BODY_AREA_LABELS[area]}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </ReanimatedAnimated.View>
+            ) : null}
+
+            {/* Fades in once, when the first level is picked — then its
+                height changes glide (sectionLayout) as the gauge moves. It
+                used to be keyed by energy, which re-mounted AND re-faded it
+                at every level crossed mid-drag; the key now lives on
+                ExplanationBlock alone, which still resets its own
+                Read-more state for each new level without any flicker. */}
+            {preview ? (
+              <ReanimatedAnimated.View entering={sectionEntering} layout={sectionLayout} style={styles.checkinExplanationBlock}>
+                <SessionSizeLine
+                  minutes={preview.durationMin}
+                  exercises={preview.exerciseCount}
+                  instant={reducedMotion}
+                  styles={styles}
+                />
+                <ExplanationBlock key={energy} explanation={preview.explanation} comparisonText={comparisonText} styles={styles} />
               </ReanimatedAnimated.View>
             ) : null}
 
             {energy === 5 ? (
+              <ReanimatedAnimated.View entering={sectionEntering} exiting={sectionExiting} layout={sectionLayout}>
               <Pressable
-                style={[styles.timePill, finisherAccepted && styles.timePillActive, styles.finisherPill]}
+                style={({ pressed }) => [styles.timePill, finisherAccepted && styles.timePillActive, styles.finisherPill, pressed && PRESSED_DIM]}
                 onPress={handleFinisherToggle}
                 hitSlop={4}
+                accessibilityRole="button"
+                accessibilityLabel={`${finisherAccepted ? 'Finisher added' : 'Add a finisher set'}${
+                  finisherCostMin ? `, ${finisherCostMin} more minutes` : ''
+                }`}
+                accessibilityState={{ selected: finisherAccepted }}
               >
                 <Text
                   style={[styles.timePillText, finisherAccepted && styles.timePillTextActive]}
                   maxFontSizeMultiplier={1.2}
                 >
                   {finisherAccepted ? 'Finisher added' : 'Add a finisher set'}
+                  {finisherCostMin ? ` · +${finisherCostMin} min` : ''}
                 </Text>
               </Pressable>
+              </ReanimatedAnimated.View>
             ) : null}
 
             {energy !== null && energy <= 2 ? (
-              <View style={styles.symptomSection}>
+              <ReanimatedAnimated.View
+                entering={sectionEntering}
+                exiting={sectionExiting}
+                layout={sectionLayout}
+                style={styles.symptomSection}
+              >
                 <PremiumGate isPremium={isPremium} label="Symptom tracking">
                   <Text style={styles.noteLabel} maxFontSizeMultiplier={1.3}>
                     ANYTHING GOING ON TODAY? (OPTIONAL)
                   </Text>
                   <View style={styles.symptomChipRow}>
-                    {SYMPTOM_TAGS.map((tag) => {
+                    {dailySymptomTags.map((tag) => {
                       const active = symptomTags.has(tag);
                       return (
                         <Pressable
                           key={tag}
-                          style={[styles.symptomChip, active && styles.symptomChipActive]}
+                          style={({ pressed }) => [styles.symptomChip, active && styles.symptomChipActive, pressed && PRESSED_DIM]}
                           onPress={() => toggleSymptomTag(tag)}
                           hitSlop={2}
+                          accessibilityRole="button"
+                          accessibilityLabel={SYMPTOM_TAG_LABELS[tag]}
+                          accessibilityState={{ selected: active }}
                         >
                           <Text
                             style={[styles.symptomChipText, active && styles.symptomChipTextActive]}
@@ -1288,22 +1687,29 @@ export default function EnergyCheckInScreen() {
                     })}
                   </View>
                 </PremiumGate>
-              </View>
+              </ReanimatedAnimated.View>
             ) : null}
 
+            {/* Glides to its new spot as the sections above come and go,
+                instead of jumping. */}
+            <ReanimatedAnimated.View layout={sectionLayout}>
             <Pressable
               style={styles.checkinPrimaryButtonHit}
+              // 38pt tall by design; the slop brings the tap target past 44pt.
+              hitSlop={{ top: 6, bottom: 6 }}
               onPress={handleStartSession}
-              disabled={energy === null}
+              disabled={energy === null || isStartingSession}
               onHoverIn={ctaHover.onHoverIn}
               onHoverOut={ctaHover.onHoverOut}
               onPressIn={ctaPress.onPressIn}
               onPressOut={ctaPress.onPressOut}
+              accessibilityRole="button"
+              accessibilityLabel="Start session"
             >
               <Animated.View
                 style={[
                   styles.primaryButtonVisual,
-                  energy === null && styles.primaryButtonDisabled,
+                  (energy === null || isStartingSession) && styles.primaryButtonDisabled,
                   { transform: [{ scale: ctaPress.scale }] },
                 ]}
               >
@@ -1329,12 +1735,13 @@ export default function EnergyCheckInScreen() {
                 </View>
               </Animated.View>
             </Pressable>
+            </ReanimatedAnimated.View>
           </ReanimatedAnimated.ScrollView>
         ) : sessionState === 'resolved' && preview && energy !== null ? (
           <ReanimatedAnimated.ScrollView
             key="resolved"
-            entering={FadeIn.duration(CROSS_FADE_MS)}
-            exiting={FadeOut.duration(CROSS_FADE_MS)}
+            entering={FadeIn.duration(MOTION_DURATION.base).easing(MOTION_EASING.standard)}
+            exiting={FadeOut.duration(MOTION_DURATION.base).easing(MOTION_EASING.standard)}
             style={styles.flowScroll}
             contentContainerStyle={styles.resolvedFlow}
             showsVerticalScrollIndicator={false}
@@ -1353,12 +1760,14 @@ export default function EnergyCheckInScreen() {
             {exclusionSummary.length > 0 || symptomLines.length > 0 ? (
               <View style={styles.reasoningCard}>
                 <Pressable
-                  style={styles.reasoningToggleRow}
+                  style={({ pressed }) => [styles.reasoningToggleRow, pressed && PRESSED_DIM]}
                   onPress={() => {
                     hapticSelect();
                     setShowReasoning((v) => !v);
                   }}
                   hitSlop={4}
+                  accessibilityRole="button"
+                  accessibilityLabel={showReasoning ? 'Hide full reasoning' : 'See full reasoning'}
                 >
                   <Text style={styles.reasoningToggleText} maxFontSizeMultiplier={1.3}>
                     {showReasoning ? 'Hide full reasoning' : 'See full reasoning'}
@@ -1370,7 +1779,7 @@ export default function EnergyCheckInScreen() {
                   />
                 </Pressable>
                 {showReasoning ? (
-                  <ReanimatedAnimated.View entering={FadeIn.duration(160)} style={styles.reasoningBody}>
+                  <ReanimatedAnimated.View entering={FadeIn.duration(MOTION_DURATION.fast)} style={styles.reasoningBody}>
                     {symptomLines.map((line) => (
                       <Text key={line} style={styles.reasoningLine} maxFontSizeMultiplier={1.3}>
                         {line}
@@ -1423,8 +1832,8 @@ export default function EnergyCheckInScreen() {
                 // exercise would leave it silently running the OLD
                 // exercise's timer under the new one's name.
                 key={`${currentExerciseIndex}-${currentExercise.id}`}
-                entering={FadeIn.duration(180)}
-                exiting={FadeOut.duration(140)}
+                entering={FadeIn.duration(MOTION_DURATION.base)}
+                exiting={FadeOut.duration(MOTION_DURATION.fast)}
               >
                 {!currentExerciseTimerDone ? (
                   <ExerciseTimer
@@ -1461,7 +1870,7 @@ export default function EnergyCheckInScreen() {
                             happened last time. */}
                         {lastPerformanceByName[currentExercise.name] ? (
                           <Text style={styles.lastPerformanceHint} maxFontSizeMultiplier={1.2}>
-                            {`Last time: ${formatKg(lastPerformanceByName[currentExercise.name]!.weightKg)}kg × ${
+                            {`Last time: ${formatWeight(lastPerformanceByName[currentExercise.name]!.weightKg, weightUnit)} × ${
                               lastPerformanceByName[currentExercise.name]!.reps
                             }`}
                           </Text>
@@ -1476,7 +1885,7 @@ export default function EnergyCheckInScreen() {
                             onChangeText={(text) =>
                               setLoggedWeightsKg((prev) => ({ ...prev, [currentExerciseIndex]: text }))
                             }
-                            placeholder="kg"
+                            placeholder={weightUnitLabel(weightUnit)}
                             placeholderTextColor={colors.textTertiary}
                             keyboardType="decimal-pad"
                             maxLength={5}
@@ -1505,11 +1914,16 @@ export default function EnergyCheckInScreen() {
                                 // last time's weight only when the field is
                                 // still empty, so this always reflects intent
                                 // rather than a stale number once someone
-                                // starts typing a different target.
-                                Number(loggedWeightsKg[currentExerciseIndex]) > 0
-                                  ? Number(loggedWeightsKg[currentExerciseIndex])
-                                  : (lastPerformanceByName[currentExercise.name]?.weightKg ?? 0)
-                              )
+                                // starts typing a different target. Both are
+                                // in the display unit, broken down on that
+                                // unit's own bar and plates.
+                                (parseDecimalInput(loggedWeightsKg[currentExerciseIndex] ?? '') ?? 0) > 0
+                                  ? (parseDecimalInput(loggedWeightsKg[currentExerciseIndex] ?? '') as number)
+                                  : kgToDisplayWeight(lastPerformanceByName[currentExercise.name]?.weightKg ?? 0, weightUnit),
+                                PLATE_SETUP_BY_UNIT[weightUnit].barbell,
+                                PLATE_SETUP_BY_UNIT[weightUnit].plates
+                              ),
+                              PLATE_SETUP_BY_UNIT[weightUnit].label
                             )}
                           </Text>
                         ) : null}
@@ -1520,11 +1934,18 @@ export default function EnergyCheckInScreen() {
               </ReanimatedAnimated.View>
             ) : null}
 
-            <View style={styles.resolvedExerciseCard}>
+            {/* This card, Next and Skip ride the same spring as the timer
+                card above them: when that card grows or shrinks (an exercise
+                finishing, "How to" opening, the next exercise arriving) the
+                column below it glides instead of jumping to its new place. */}
+            <ReanimatedAnimated.View layout={sectionLayout} style={styles.resolvedExerciseCard}>
               <View pointerEvents="none" style={styles.exerciseCardSheen} />
               <Text style={styles.exerciseLogHint} maxFontSizeMultiplier={1.3}>
                 One at a time — finish the timer above or skip it, whichever works today
               </Text>
+              {/* Checks already there when the card mounts (a resumed
+                  session) just appear; one earned now springs in. */}
+              <LayoutAnimationConfig skipEntering>
               {sessionExercises.map((exercise, index) => {
                 const isDone = completedExercises.has(index);
                 const isCurrent = index === currentExerciseIndex && !isDone;
@@ -1541,7 +1962,12 @@ export default function EnergyCheckInScreen() {
                   >
                     <View style={styles.exerciseNameRow}>
                       <View style={[styles.exerciseCheckbox, isDone && styles.exerciseCheckboxDone]}>
-                        {isDone ? <SymbolView name="checkmark" size={10} tintColor="#ffffff" weight="bold" /> : null}
+                        {isDone ? (
+                          // Scales a symbol image, never text — safe to zoom.
+                          <ReanimatedAnimated.View entering={ZoomIn.springify().duration(300).dampingRatio(0.7)}>
+                            <SymbolView name="checkmark" size={10} tintColor="#ffffff" weight="bold" />
+                          </ReanimatedAnimated.View>
+                        ) : null}
                       </View>
                       <Text
                         style={[styles.exerciseName, isDone && styles.exerciseNameDone]}
@@ -1591,6 +2017,10 @@ export default function EnergyCheckInScreen() {
                           setExpandedExerciseIndex((v) => (v === index ? null : index));
                         }}
                         hitSlop={4}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          isExpanded ? `Hide how-to for ${exercise.name}` : `Show how-to for ${exercise.name}`
+                        }
                       >
                         {row}
                       </Pressable>
@@ -1599,8 +2029,8 @@ export default function EnergyCheckInScreen() {
                     )}
                     {cue && isExpanded ? (
                       <ReanimatedAnimated.View
-                        entering={FadeIn.duration(160)}
-                        exiting={FadeOut.duration(120)}
+                        entering={FadeIn.duration(MOTION_DURATION.fast)}
+                        exiting={FadeOut.duration(MOTION_DURATION.fast)}
                         style={styles.exerciseExpandedBody}
                       >
                         <CueContent cue={cue} styles={styles} />
@@ -1609,19 +2039,25 @@ export default function EnergyCheckInScreen() {
                   </ReanimatedAnimated.View>
                 );
               })}
+              </LayoutAnimationConfig>
               <Text style={styles.equipmentNote} maxFontSizeMultiplier={1.3}>
                 {preview.equipmentNote}
               </Text>
-            </View>
+            </ReanimatedAnimated.View>
 
+            <ReanimatedAnimated.View layout={sectionLayout}>
             <Pressable
               style={styles.checkinPrimaryButtonHit}
+              // 38pt tall by design; the slop brings the tap target past 44pt.
+              hitSlop={{ top: 6, bottom: 6 }}
               onPress={() => (isLastExercise ? handleFinishSession() : handleNextExercise())}
               disabled={!currentExerciseTimerDone || isFinishingSession}
               onHoverIn={finishHover.onHoverIn}
               onHoverOut={finishHover.onHoverOut}
               onPressIn={finishPress.onPressIn}
               onPressOut={finishPress.onPressOut}
+              accessibilityRole="button"
+              accessibilityLabel={isLastExercise ? 'Finish session' : 'Next exercise'}
             >
               <Animated.View
                 style={[
@@ -1654,7 +2090,9 @@ export default function EnergyCheckInScreen() {
                 </View>
               </Animated.View>
             </Pressable>
+            </ReanimatedAnimated.View>
 
+            <ReanimatedAnimated.View layout={sectionLayout}>
             <Pressable
               style={styles.skipExerciseHit}
               onPress={handleSkipPress}
@@ -1663,6 +2101,8 @@ export default function EnergyCheckInScreen() {
               onHoverOut={skipExerciseHover.onHoverOut}
               onPressIn={skipExercisePress.onPressIn}
               onPressOut={skipExercisePress.onPressOut}
+              accessibilityRole="button"
+              accessibilityLabel="Skip this exercise"
             >
               <Animated.Text
                 style={[styles.skipExerciseText, textDimStyle(skipExerciseHover, skipExercisePress)]}
@@ -1671,6 +2111,7 @@ export default function EnergyCheckInScreen() {
                 Skip this exercise
               </Animated.Text>
             </Pressable>
+            </ReanimatedAnimated.View>
 
             <Modal
               visible={showSkipConfirm}
@@ -1696,6 +2137,8 @@ export default function EnergyCheckInScreen() {
                       onHoverOut={skipCancelHover.onHoverOut}
                       onPressIn={skipCancelPress.onPressIn}
                       onPressOut={skipCancelPress.onPressOut}
+                      accessibilityRole="button"
+                      accessibilityLabel="Keep going"
                     >
                       <PillWash hover={skipCancelHover} press={skipCancelPress} radius={14} styles={styles} />
                       <Text style={styles.skipConfirmCancelText} maxFontSizeMultiplier={1.2}>
@@ -1710,6 +2153,8 @@ export default function EnergyCheckInScreen() {
                       onHoverOut={skipConfirmHover.onHoverOut}
                       onPressIn={skipConfirmPress.onPressIn}
                       onPressOut={skipConfirmPress.onPressOut}
+                      accessibilityRole="button"
+                      accessibilityLabel="Skip anyway"
                     >
                       <Animated.Text
                         style={[styles.skipConfirmConfirmText, textDimStyle(skipConfirmHover, skipConfirmPress)]}
@@ -1741,33 +2186,71 @@ export default function EnergyCheckInScreen() {
                     </Text>
                   ) : (
                     <ScrollView style={styles.swapModalList} showsVerticalScrollIndicator={false}>
-                      {swapModalCandidates.map((candidate, index) => (
-                        <Pressable
-                          key={candidate.id}
-                          style={[
-                            styles.swapModalRow,
-                            index < swapModalCandidates.length - 1 && styles.swapModalRowDivider,
-                          ]}
-                          onPress={() => handleSelectSwap(candidate)}
-                        >
-                          <Text style={styles.swapModalRowName} maxFontSizeMultiplier={1.3}>
-                            {candidate.name}
-                          </Text>
-                          <Text style={styles.swapModalRowStat} maxFontSizeMultiplier={1.3}>
-                            {formatExerciseStat({
-                              sets: candidate.base_sets,
-                              reps: candidate.base_reps,
-                              durationMin: candidate.base_duration_min,
-                            })}
-                          </Text>
-                        </Pressable>
-                      ))}
+                      {swapModalCandidates.map((candidate, index) => {
+                        const candidateStat = formatExerciseStat({
+                          sets: candidate.base_sets,
+                          reps: candidate.base_reps,
+                          durationMin: candidate.base_duration_min,
+                        });
+                        return (
+                          <Pressable
+                            key={candidate.id}
+                            style={[
+                              styles.swapModalRow,
+                              index < swapModalCandidates.length - 1 && styles.swapModalRowDivider,
+                            ]}
+                            onPress={() => handleSelectSwap(candidate)}
+                            accessibilityRole="button"
+                            accessibilityLabel={`${candidate.name}, ${candidateStat}`}
+                          >
+                            <Text style={styles.swapModalRowName} maxFontSizeMultiplier={1.3}>
+                              {candidate.name}
+                            </Text>
+                            <Text style={styles.swapModalRowStat} maxFontSizeMultiplier={1.3}>
+                              {candidateStat}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
                     </ScrollView>
                   )}
+                  {swapMissingOptions.length > 0 ? (
+                    <View style={styles.swapMissing}>
+                      <Text style={styles.swapMissingLabel} maxFontSizeMultiplier={1.3}>
+                        Missing something? Tap what you don&apos;t have.
+                      </Text>
+                      <View style={styles.swapMissingRow}>
+                        {swapMissingOptions.map((item) => (
+                          <Pressable
+                            key={item}
+                            style={({ pressed }) => [styles.swapMissingChip, pressed && PRESSED_DIM]}
+                            onPress={() => handleMissingEquipment(item)}
+                            accessibilityRole="button"
+                            accessibilityLabel={`I don't have: ${OWNED_EQUIPMENT_LABELS[item]}`}
+                          >
+                            <Text style={styles.swapMissingChipText} maxFontSizeMultiplier={1.2}>
+                              {OWNED_EQUIPMENT_LABELS[item]}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </View>
+                  ) : null}
+                  {equipmentRemovedNote ? (
+                    <ReanimatedAnimated.Text
+                      entering={FadeIn.duration(MOTION_DURATION.base)}
+                      style={styles.swapMissingNote}
+                      maxFontSizeMultiplier={1.3}
+                    >
+                      Taken off your equipment — future plans won&apos;t use it.
+                    </ReanimatedAnimated.Text>
+                  ) : null}
                   <Pressable
-                    style={styles.swapModalCancelHit}
+                    style={({ pressed }) => [styles.swapModalCancelHit, pressed && PRESSED_DIM]}
                     onPress={handleCloseSwap}
                     hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Cancel"
                   >
                     <Text style={styles.swapModalCancelText} maxFontSizeMultiplier={1.2}>
                       Cancel
@@ -1780,8 +2263,8 @@ export default function EnergyCheckInScreen() {
         ) : (
           <ReanimatedAnimated.ScrollView
             key="done"
-            entering={FadeIn.duration(CROSS_FADE_MS)}
-            exiting={FadeOut.duration(CROSS_FADE_MS)}
+            entering={FadeIn.duration(MOTION_DURATION.base).easing(MOTION_EASING.standard)}
+            exiting={FadeOut.duration(MOTION_DURATION.base).easing(MOTION_EASING.standard)}
             style={styles.flowScroll}
             contentContainerStyle={styles.doneWrap}
             showsVerticalScrollIndicator={false}
@@ -1797,7 +2280,7 @@ export default function EnergyCheckInScreen() {
                 or broken number since it only ever counts up. */}
             {milestoneReached ? (
               <ReanimatedAnimated.Text
-                entering={FadeIn.duration(240)}
+                entering={FadeIn.duration(MOTION_DURATION.emphasis)}
                 style={styles.milestoneText}
                 maxFontSizeMultiplier={1.2}
                 accessibilityLabel={`${milestoneReached} session${milestoneReached === 1 ? '' : 's'} logged so far`}
@@ -1814,12 +2297,14 @@ export default function EnergyCheckInScreen() {
                 session that isn't a real milestone (no separate nag). */}
             {milestoneReached ? (
               <Pressable
-                style={styles.doneInsightHit}
+                style={({ pressed }) => [styles.doneInsightHit, pressed && PRESSED_DIM]}
                 onPress={() => {
                   hapticSelect();
                   router.push('/referral' as never);
                 }}
                 hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel="Bring a training partner along. Invite a friend"
               >
                 <Text style={styles.doneInsightText} maxFontSizeMultiplier={1.3}>
                   Bring a training partner along. <Text style={styles.doneInsightLink}>Invite a friend</Text>
@@ -1840,14 +2325,40 @@ export default function EnergyCheckInScreen() {
               </Text>
             ) : null}
 
+            {/* Same pressable-sentence pattern as the "See Progress" and
+                "Invite a friend" lines — an offer, not a modal. */}
+            {reminderOffer === 'pending' ? (
+              <Pressable
+                style={({ pressed }) => [styles.doneInsightHit, pressed && PRESSED_DIM]}
+                onPress={handleAcceptReminderOffer}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel="Want a nudge on your training days? Turn on reminders"
+              >
+                <Text style={styles.doneInsightText} maxFontSizeMultiplier={1.3}>
+                  Want a nudge on your training days? <Text style={styles.doneInsightLink}>Turn on reminders</Text>
+                </Text>
+              </Pressable>
+            ) : reminderOffer === 'on' ? (
+              <ReanimatedAnimated.Text
+                entering={FadeIn.duration(MOTION_DURATION.emphasis)}
+                style={styles.milestoneText}
+                maxFontSizeMultiplier={1.2}
+              >
+                Reminders on for your training days.
+              </ReanimatedAnimated.Text>
+            ) : null}
+
             {doneInsight ? (
               <Pressable
-                style={styles.doneInsightHit}
+                style={({ pressed }) => [styles.doneInsightHit, pressed && PRESSED_DIM]}
                 onPress={() => {
                   hapticSelect();
                   router.push('/(tabs)/progress' as never);
                 }}
                 hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={`${doneInsight} See Progress`}
               >
                 <Text style={styles.doneInsightText} maxFontSizeMultiplier={1.3}>
                   {doneInsight} <Text style={styles.doneInsightLink}>See Progress</Text>
@@ -1857,7 +2368,7 @@ export default function EnergyCheckInScreen() {
 
             {pacingTrendNote ? (
               <ReanimatedAnimated.Text
-                entering={FadeIn.duration(240)}
+                entering={FadeIn.duration(MOTION_DURATION.emphasis)}
                 style={styles.milestoneText}
                 maxFontSizeMultiplier={1.2}
               >
@@ -1871,7 +2382,7 @@ export default function EnergyCheckInScreen() {
                 shouldn't tease it for free right here. */}
             {isPremium && loadImprovementNote ? (
               <ReanimatedAnimated.Text
-                entering={FadeIn.duration(240)}
+                entering={FadeIn.duration(MOTION_DURATION.emphasis)}
                 style={styles.milestoneText}
                 maxFontSizeMultiplier={1.2}
               >
@@ -1888,7 +2399,7 @@ export default function EnergyCheckInScreen() {
                 announcing an absence. */}
             {isPremium && coachingInsightNote ? (
               <ReanimatedAnimated.Text
-                entering={FadeIn.duration(240)}
+                entering={FadeIn.duration(MOTION_DURATION.emphasis)}
                 style={styles.milestoneText}
                 maxFontSizeMultiplier={1.2}
               >
@@ -1898,7 +2409,7 @@ export default function EnergyCheckInScreen() {
 
             {isPremium && planFitNote ? (
               <ReanimatedAnimated.Text
-                entering={FadeIn.duration(240)}
+                entering={FadeIn.duration(MOTION_DURATION.emphasis)}
                 style={styles.milestoneText}
                 maxFontSizeMultiplier={1.2}
               >
@@ -1911,13 +2422,17 @@ export default function EnergyCheckInScreen() {
                 HOW DID THAT FEEL?
               </Text>
               {feedbackGiven ? (
-                <Text style={styles.feedbackConfirmText} maxFontSizeMultiplier={1.3}>
+                <ReanimatedAnimated.Text
+                  entering={FadeIn.duration(MOTION_DURATION.base).delay(MOTION_DURATION.fast)}
+                  style={styles.feedbackConfirmText}
+                  maxFontSizeMultiplier={1.3}
+                >
                   {isFirstFeedback
                     ? "That's your first pacing call — we'll get sharper together."
                     : FEEDBACK_CONFIRM_TEXT[feedbackGiven]}
-                </Text>
+                </ReanimatedAnimated.Text>
               ) : (
-                <View style={styles.feedbackButtonRow}>
+                <ReanimatedAnimated.View exiting={FadeOut.duration(MOTION_DURATION.fast)} style={styles.feedbackButtonRow}>
                   <Pressable
                     style={styles.feedbackButton}
                     onPress={() => handleSubmitFeedback('much_too_easy')}
@@ -1925,6 +2440,8 @@ export default function EnergyCheckInScreen() {
                     onHoverOut={feedbackMuchTooEasyHover.onHoverOut}
                     onPressIn={feedbackMuchTooEasyPress.onPressIn}
                     onPressOut={feedbackMuchTooEasyPress.onPressOut}
+                    accessibilityRole="button"
+                    accessibilityLabel="Way too easy"
                   >
                     <PillWash hover={feedbackMuchTooEasyHover} press={feedbackMuchTooEasyPress} radius={8} styles={styles} />
                     <Text style={styles.feedbackButtonText} maxFontSizeMultiplier={1.2}>Way too easy</Text>
@@ -1936,6 +2453,8 @@ export default function EnergyCheckInScreen() {
                     onHoverOut={feedbackTooEasyHover.onHoverOut}
                     onPressIn={feedbackTooEasyPress.onPressIn}
                     onPressOut={feedbackTooEasyPress.onPressOut}
+                    accessibilityRole="button"
+                    accessibilityLabel="Too easy"
                   >
                     <PillWash hover={feedbackTooEasyHover} press={feedbackTooEasyPress} radius={8} styles={styles} />
                     <Text style={styles.feedbackButtonText} maxFontSizeMultiplier={1.2}>Too easy</Text>
@@ -1947,6 +2466,8 @@ export default function EnergyCheckInScreen() {
                     onHoverOut={feedbackJustRightHover.onHoverOut}
                     onPressIn={feedbackJustRightPress.onPressIn}
                     onPressOut={feedbackJustRightPress.onPressOut}
+                    accessibilityRole="button"
+                    accessibilityLabel="Just right"
                   >
                     <PillWash hover={feedbackJustRightHover} press={feedbackJustRightPress} radius={8} styles={styles} />
                     <Text style={styles.feedbackButtonText} maxFontSizeMultiplier={1.2}>Just right</Text>
@@ -1958,6 +2479,8 @@ export default function EnergyCheckInScreen() {
                     onHoverOut={feedbackTooHardHover.onHoverOut}
                     onPressIn={feedbackTooHardPress.onPressIn}
                     onPressOut={feedbackTooHardPress.onPressOut}
+                    accessibilityRole="button"
+                    accessibilityLabel="Too hard"
                   >
                     <PillWash hover={feedbackTooHardHover} press={feedbackTooHardPress} radius={8} styles={styles} />
                     <Text style={styles.feedbackButtonText} maxFontSizeMultiplier={1.2}>Too hard</Text>
@@ -1969,11 +2492,13 @@ export default function EnergyCheckInScreen() {
                     onHoverOut={feedbackMuchTooHardHover.onHoverOut}
                     onPressIn={feedbackMuchTooHardPress.onPressIn}
                     onPressOut={feedbackMuchTooHardPress.onPressOut}
+                    accessibilityRole="button"
+                    accessibilityLabel="Way too hard"
                   >
                     <PillWash hover={feedbackMuchTooHardHover} press={feedbackMuchTooHardPress} radius={8} styles={styles} />
                     <Text style={styles.feedbackButtonText} maxFontSizeMultiplier={1.2}>Way too hard</Text>
                   </Pressable>
-                </View>
+                </ReanimatedAnimated.View>
               )}
             </View>
 
@@ -2000,6 +2525,8 @@ export default function EnergyCheckInScreen() {
               onHoverOut={backToHomeHover.onHoverOut}
               onPressIn={backToHomePress.onPressIn}
               onPressOut={backToHomePress.onPressOut}
+              accessibilityRole="button"
+              accessibilityLabel="Back to Home"
             >
               <PillWash hover={backToHomeHover} press={backToHomePress} radius={6} styles={styles} />
               <Text style={styles.doneBackButtonText} maxFontSizeMultiplier={1.2}>Back to Home</Text>
@@ -2068,6 +2595,112 @@ function textDimStyle(hover: ReturnType<typeof useHoverFade>, press: ReturnType<
       outputRange: [1, 0.7, 0.55],
     }),
   };
+}
+
+/**
+ * Today's session size, right under the gauge: the plan visibly answering
+ * the check-in before Start. The minutes count to each new value as energy
+ * or time changes (the same move as the vervein.app demo); Reduce Motion
+ * shows the new number straight away. VoiceOver reads the settled values.
+ */
+function SessionSizeLine({
+  minutes,
+  exercises,
+  instant,
+  styles,
+}: {
+  minutes: number;
+  exercises: number;
+  instant: boolean;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  const shownMinutes = useCountTo(minutes, instant);
+  const exerciseText = `${exercises} exercise${exercises === 1 ? '' : 's'}`;
+  return (
+    <View style={styles.sessionSizeRow} accessible accessibilityLabel={`Today: ${minutes} minutes, ${exerciseText}`}>
+      <Text style={styles.sessionSizeNumber} maxFontSizeMultiplier={1.2}>
+        {shownMinutes}
+      </Text>
+      <Text style={styles.sessionSizeUnit} maxFontSizeMultiplier={1.2}>
+        min · {exerciseText}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * BUG FIX: preview.explanation is real engine reasoning (see plan-preview.ts
+ * — it lists out every real factor: energy, sleep, a logged symptom tag,
+ * each as its own sentence), so it grows every time someone adds another
+ * symptom tag below. Rendered inline at full length, that meant tagging a
+ * few things (Period, Brain fog, Poor sleep, …) kept shoving the real
+ * Start Session button further down the screen — the exact opposite of
+ * what a quick daily check-in should feel like. This truncates the
+ * DISPLAY only (numberOfLines), never the actual copy — the full reasoning
+ * is still one tap away behind Read More, not shortened or reworded.
+ * Local state here (not lifted to the parent) resets for free whenever
+ * this remounts under its key={energy} parent — a fresh energy pick starts
+ * collapsed again, same as first seeing it.
+ */
+function ExplanationBlock({
+  explanation,
+  comparisonText,
+  styles,
+}: {
+  explanation: string;
+  comparisonText: string | null;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [truncated, setTruncated] = useState(false);
+
+  return (
+    <>
+      {/* BUG FIX: onTextLayout on a numberOfLines-limited Text only ever
+          reports the lines that actually got rendered — capped at 3 — never
+          how many the full, untruncated content would have needed. That
+          made `lines.length > 3` impossible to ever be true, so "Read more"
+          never appeared even though the visible text was genuinely being
+          cut off (with its own trailing "…"). This hidden, unlimited-line
+          copy measures the real line count once; the visible Text below it
+          still does the actual truncating. Hidden from screen readers too,
+          since it's a pure layout-measurement duplicate of the real text. */}
+      <View style={styles.explanationMeasureWrap} pointerEvents="none">
+        <Text
+          style={[styles.explanationText, styles.explanationMeasure]}
+          maxFontSizeMultiplier={1.4}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          onTextLayout={(e) => setTruncated(e.nativeEvent.lines.length > 3)}
+        >
+          {explanation}
+        </Text>
+      </View>
+      <Text style={styles.explanationText} maxFontSizeMultiplier={1.4} numberOfLines={expanded ? undefined : 3}>
+        {explanation}
+      </Text>
+      {truncated ? (
+        <Pressable
+          onPress={() => {
+            hapticSelect();
+            setExpanded((prev) => !prev);
+          }}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={expanded ? 'Show less' : 'Read more'}
+        >
+          <Text style={styles.explanationReadMore} maxFontSizeMultiplier={1.3}>
+            {expanded ? 'Show less' : 'Read more'}
+          </Text>
+        </Pressable>
+      ) : null}
+      {comparisonText ? (
+        <Text style={styles.comparisonText} maxFontSizeMultiplier={1.4}>
+          {comparisonText}
+        </Text>
+      ) : null}
+    </>
+  );
 }
 
 /**
@@ -2179,7 +2812,10 @@ function ExerciseTimer({
 
   // A visible beat under the existing haptic the instant a phase's
   // countdown reaches 0 — natural tick-out or the early-finish bypass both
-  // land here. The final interval already gets hapticSuccess via onComplete
+  // land here. A quick dip in opacity, not a scale: BUG FIX — it used to
+  // scale the clock to 1.14, and scaling a text layer makes iOS stretch its
+  // rasterized bitmap, so the 34pt digits blurred on every set end (the
+  // same reason button-interactions.ts dropped press-scale). The final interval already gets hapticSuccess via onComplete
   // above (fired in the parent), so this only adds a NEW haptic for the
   // non-final "awaiting next phase" case; the pulse itself fires either way,
   // since both are "something just finished" moments. Mutating clockPulse
@@ -2191,10 +2827,10 @@ function ExerciseTimer({
   const clockPulse = useSharedValue(1);
   useEffect(() => {
     if (secondsLeft !== 0) return;
-    clockPulse.value = withSequence(withTiming(1.14, { duration: 110 }), withTiming(1, { duration: 180 }));
+    clockPulse.set(withSequence(withTiming(0.35, { duration: 110 }), withTiming(1, { duration: 220 })));
     if (!isLastInterval) hapticImpactLight();
   }, [secondsLeft, isLastInterval, clockPulse]);
-  const clockPulseStyle = useAnimatedStyle(() => ({ transform: [{ scale: clockPulse.value }] }));
+  const clockPulseStyle = useAnimatedStyle(() => ({ opacity: clockPulse.get() }));
 
   // Fluidity pass: this cluster is tapped constantly during a real session
   // (every set, every rest, every "how to" check) and previously had zero
@@ -2337,8 +2973,8 @@ function ExerciseTimer({
       </View>
       {cue && showCue ? (
         <ReanimatedAnimated.View
-          entering={FadeIn.duration(160)}
-          exiting={FadeOut.duration(120)}
+          entering={FadeIn.duration(MOTION_DURATION.fast)}
+          exiting={FadeOut.duration(MOTION_DURATION.fast)}
           style={styles.timerCueBody}
         >
           <CueContent cue={cue} styles={styles} />
@@ -2367,6 +3003,8 @@ function ExerciseTimer({
           onHoverOut={startNextHover.onHoverOut}
           onPressIn={startNextPress.onPressIn}
           onPressOut={startNextPress.onPressOut}
+          accessibilityRole="button"
+          accessibilityLabel={nextPhaseButtonLabel ?? undefined}
         >
           <PillWash hover={startNextHover} press={startNextPress} radius={16} styles={styles} />
           <SymbolView name="play.fill" size={12} tintColor="#ffffff" />
@@ -2384,6 +3022,8 @@ function ExerciseTimer({
             onHoverOut={pauseHover.onHoverOut}
             onPressIn={pausePress.onPressIn}
             onPressOut={pausePress.onPressOut}
+            accessibilityRole="button"
+            accessibilityLabel={active ? 'Pause' : 'Resume'}
           >
             <PillWash hover={pauseHover} press={pausePress} radius={14} styles={styles} />
             <SymbolView name={active ? 'pause.fill' : 'play.fill'} size={12} tintColor={colors.text} />
@@ -2400,6 +3040,8 @@ function ExerciseTimer({
               onHoverOut={doneEarlyHover.onHoverOut}
               onPressIn={doneEarlyPress.onPressIn}
               onPressOut={doneEarlyPress.onPressOut}
+              accessibilityRole="button"
+              accessibilityLabel="Done early?"
             >
               <PillWash hover={doneEarlyHover} press={doneEarlyPress} radius={14} styles={styles} />
               <SymbolView name="checkmark" size={11} tintColor={colors.textSecondary} />
@@ -2443,7 +3085,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     logoMark: {
       position: 'absolute',
       left: 145.65,
-      top: 68,
+      top: 68 + REST_DAY_OFFSET,
       width: 83.7,
       height: 75.11,
     },
@@ -2472,10 +3114,10 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       position: 'absolute',
       left: 0,
       right: 0,
-      top: 180,
+      top: 180 + REST_DAY_OFFSET,
       paddingHorizontal: 44,
       color: colors.text,
-      fontSize: 24,
+      fontSize: Type.display,
       lineHeight: 30,
       letterSpacing: -0.3,
       textAlign: 'center',
@@ -2488,10 +3130,10 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       position: 'absolute',
       left: 0,
       right: 0,
-      top: 246,
+      top: 246 + REST_DAY_OFFSET,
       paddingHorizontal: 56,
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       lineHeight: 17,
       textAlign: 'center',
       fontFamily: 'Geist-Regular',
@@ -2514,15 +3156,35 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     explanationText: {
       color: colors.text,
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       lineHeight: 20,
       textAlign: 'center',
       fontFamily: 'Geist-SemiBold',
     },
+    explanationReadMore: {
+      marginTop: 4,
+      color: '#438C63',
+      fontSize: Type.secondary,
+      fontFamily: 'Geist-SemiBold',
+      textAlign: 'center',
+    },
+    explanationMeasureWrap: {
+      position: 'relative',
+      width: '100%',
+      height: 0,
+      overflow: 'hidden',
+    },
+    explanationMeasure: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      top: 0,
+      opacity: 0,
+    },
     comparisonText: {
       marginTop: 6,
       color: '#438C63',
-      fontSize: 11,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
     },
     // Flow-based counterparts of title/subtitle/gaugeWrap/explanationBlock,
@@ -2550,7 +3212,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     checkinTitle: {
       paddingHorizontal: 44,
       color: colors.text,
-      fontSize: 24,
+      fontSize: Type.display,
       lineHeight: 30,
       letterSpacing: -0.3,
       textAlign: 'center',
@@ -2560,7 +3222,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       marginTop: 8,
       paddingHorizontal: 56,
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       lineHeight: 17,
       textAlign: 'center',
       fontFamily: 'Geist-Regular',
@@ -2573,6 +3235,24 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       marginTop: 16,
       paddingHorizontal: 40,
       alignItems: 'center',
+    },
+    sessionSizeRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      marginBottom: 8,
+    },
+    sessionSizeNumber: {
+      color: colors.text,
+      fontSize: 30,
+      letterSpacing: -0.6,
+      fontFamily: 'Geist-Bold',
+      ...TabularNums,
+    },
+    sessionSizeUnit: {
+      marginLeft: 6,
+      color: colors.textSecondary,
+      fontSize: Type.body,
+      fontFamily: 'Geist-Medium',
     },
     symptomSection: {
       marginTop: 24,
@@ -2601,11 +3281,11 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     symptomChipText: {
       color: colors.textSecondary,
-      fontSize: 11,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
     },
     symptomChipTextActive: {
-      color: '#5FBE84',
+      color: colors.accentText,
       fontFamily: 'Geist-SemiBold',
     },
     // A distinct, more solid treatment than the symptom chips above —
@@ -2626,7 +3306,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     timePillText: {
       color: colors.textSecondary,
-      fontSize: 11,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
     },
     timePillTextActive: {
@@ -2657,7 +3337,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     skipExerciseText: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
       textDecorationLine: 'underline',
       textAlign: 'center',
@@ -2682,13 +3362,13 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     skipConfirmTitle: {
       color: colors.text,
-      fontSize: 16,
+      fontSize: Type.subtitle,
       fontFamily: 'Geist-SemiBold',
       textAlign: 'center',
     },
     skipConfirmBody: {
       color: colors.textSecondary,
-      fontSize: 13,
+      fontSize: Type.body,
       lineHeight: 19,
       fontFamily: 'Geist-Medium',
       textAlign: 'center',
@@ -2707,7 +3387,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     skipConfirmCancelText: {
       color: '#ffffff',
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
     skipConfirmConfirmHit: {
@@ -2718,7 +3398,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     skipConfirmConfirmText: {
       color: colors.textTertiary,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
       textDecorationLine: 'underline',
     },
@@ -2750,13 +3430,46 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     swapModalRowName: {
       color: colors.text,
-      fontSize: 14,
+      fontSize: Type.bodyLarge,
       fontFamily: 'Geist-SemiBold',
     },
     swapModalRowStat: {
       marginTop: 2,
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
+      fontFamily: 'Geist-Medium',
+    },
+    swapMissing: {
+      marginTop: 14,
+      gap: 8,
+    },
+    swapMissingLabel: {
+      color: colors.textSecondary,
+      fontSize: Type.caption,
+      fontFamily: 'Geist-Medium',
+    },
+    swapMissingRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    swapMissingChip: {
+      paddingVertical: 7,
+      paddingHorizontal: 11,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.surfaceBorder,
+      backgroundColor: colors.pillBg,
+    },
+    swapMissingChipText: {
+      color: colors.text,
+      fontSize: Type.caption,
+      fontFamily: 'Geist-SemiBold',
+    },
+    swapMissingNote: {
+      marginTop: 10,
+      color: colors.accentText,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
     },
     swapModalCancelHit: {
@@ -2767,7 +3480,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     swapModalCancelText: {
       color: colors.textTertiary,
-      fontSize: 13,
+      fontSize: Type.body,
       fontFamily: 'Geist-Medium',
       textDecorationLine: 'underline',
     },
@@ -2806,7 +3519,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     exerciseProgressText: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
     },
     exerciseProgressTrack: {
@@ -2834,7 +3547,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     timerExerciseName: {
       paddingHorizontal: 20,
       color: colors.textSecondary,
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     timerLinksRow: {
@@ -2858,7 +3571,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     timerWatchFormText: {
       color: colors.textSecondary,
-      fontSize: 11,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
     },
     // Green for an active set, orange for rest — same shared brand literals
@@ -2868,8 +3581,8 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     // label there.
     timerPhaseLabel: {
       marginTop: 10,
-      color: '#5FBE84',
-      fontSize: 11,
+      color: colors.accentText,
+      fontSize: Type.caption,
       letterSpacing: 0.4,
       textTransform: 'uppercase',
       fontFamily: 'Geist-Bold',
@@ -2904,7 +3617,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     timerPauseText: {
       color: colors.text,
-      fontSize: 11.5,
+      fontSize: Type.caption,
       fontFamily: 'Geist-SemiBold',
     },
     // Only ever shown next to Pause for a bypassable (discrete-reps) work
@@ -2922,7 +3635,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     timerDoneEarlyText: {
       color: colors.textSecondary,
-      fontSize: 11.5,
+      fontSize: Type.caption,
       fontFamily: 'Geist-SemiBold',
     },
     // Shown instead of the pause/done-early row while awaiting the
@@ -2942,19 +3655,19 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     timerStartNextText: {
       color: '#ffffff',
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Bold',
     },
     timerDoneText: {
       marginTop: 8,
-      color: '#5FBE84',
-      fontSize: 11.5,
+      color: colors.accentText,
+      fontSize: Type.caption,
       fontFamily: 'Geist-SemiBold',
     },
     lastPerformanceHint: {
       marginTop: 10,
       color: colors.textTertiary,
-      fontSize: 10.5,
+      fontSize: Type.micro,
       fontFamily: 'Geist-Regular',
     },
     loadInputRow: {
@@ -2965,7 +3678,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     loadInputLabel: {
       color: colors.textSecondary,
-      fontSize: 11,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Regular',
     },
     loadInput: {
@@ -2977,20 +3690,20 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       paddingHorizontal: 10,
       paddingVertical: 6,
       color: colors.text,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
       textAlign: 'center',
     },
     plateToggleText: {
       color: '#438C63',
-      fontSize: 11,
+      fontSize: Type.caption,
       fontFamily: 'Geist-SemiBold',
       textDecorationLine: 'underline',
     },
     plateBreakdownText: {
       marginTop: 6,
       color: colors.textSecondary,
-      fontSize: 11,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
     },
     resolvedExerciseCard: {
@@ -3015,12 +3728,12 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       position: 'absolute',
       left: 0,
       right: 0,
-      top: 310,
+      top: 310 + REST_DAY_OFFSET,
       alignItems: 'center',
     },
     restDayLinkText: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
       textDecorationLine: 'underline',
     },
@@ -3031,12 +3744,12 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     // resolvedEnergyChip above — this is just the shared value/label text.)
     energyChipValue: {
       color: colors.text,
-      fontSize: 20,
+      fontSize: Type.headerTitle,
       fontFamily: 'Geist-Black',
     },
     energyChipLabel: {
       color: colors.textSecondary,
-      fontSize: 11,
+      fontSize: Type.caption,
       fontFamily: 'Geist-SemiBold',
     },
     exerciseCardSheen: {
@@ -3045,13 +3758,13 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       right: 0,
       top: 0,
       height: '30%',
-      backgroundColor: colors.surfaceSheen,
+      ...sheenGradient(colors.surfaceSheen),
     },
     exerciseLogHint: {
       paddingTop: 12,
       paddingBottom: 2,
       color: colors.textTertiary,
-      fontSize: 10,
+      fontSize: Type.micro,
       fontFamily: 'Geist-Medium',
     },
     equipmentNote: {
@@ -3079,7 +3792,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     reasoningToggleText: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     reasoningBody: {
@@ -3089,7 +3802,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     reasoningLine: {
       color: colors.textTertiary,
-      fontSize: 11.5,
+      fontSize: Type.caption,
       lineHeight: 16,
       fontFamily: 'Geist-Regular',
     },
@@ -3127,7 +3840,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     cueText: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       lineHeight: 17,
       fontFamily: 'Geist-Regular',
     },
@@ -3142,7 +3855,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     cueSimpleText: {
       marginTop: 8,
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       lineHeight: 17,
       fontFamily: 'Geist-Regular',
     },
@@ -3168,7 +3881,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     exerciseName: {
       flex: 1,
       color: colors.text,
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     exerciseNameDone: {
@@ -3185,7 +3898,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     exerciseStatText: {
       color: colors.textSecondary,
-      fontSize: 10.5,
+      fontSize: Type.micro,
       fontFamily: 'Geist-SemiBold',
     },
     // Was position:'absolute'/top:260 — moved to flow layout (paddingTop
@@ -3199,7 +3912,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     milestoneText: {
       marginTop: 4,
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       letterSpacing: 0.3,
       textTransform: 'uppercase',
       fontFamily: 'Geist-SemiBold',
@@ -3208,7 +3921,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       marginTop: 28,
       paddingHorizontal: 44,
       color: colors.text,
-      fontSize: 24,
+      fontSize: Type.display,
       lineHeight: 30,
       letterSpacing: -0.3,
       textAlign: 'center',
@@ -3218,7 +3931,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       marginTop: 8,
       paddingHorizontal: 56,
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       lineHeight: 17,
       textAlign: 'center',
       fontFamily: 'Geist-Regular',
@@ -3229,7 +3942,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     calorieEstimateText: {
       marginTop: 4,
       color: colors.textTertiary,
-      fontSize: 11,
+      fontSize: Type.caption,
       textAlign: 'center',
       fontFamily: 'Geist-Regular',
     },
@@ -3240,7 +3953,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     doneInsightText: {
       color: colors.textTertiary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       lineHeight: 17,
       textAlign: 'center',
       fontFamily: 'Geist-Medium',
@@ -3272,13 +3985,13 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     feedbackButtonText: {
       color: colors.text,
-      fontSize: 10,
+      fontSize: Type.micro,
       textAlign: 'center',
       fontFamily: 'Geist-SemiBold',
     },
     feedbackConfirmText: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
     },
     noteSection: {
@@ -3288,7 +4001,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     noteLabel: {
       marginBottom: 8,
       color: colors.textTertiary,
-      fontSize: 10.5,
+      fontSize: Type.micro,
       letterSpacing: 0.4,
       fontFamily: 'Geist-Medium',
     },
@@ -3301,7 +4014,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       paddingHorizontal: 14,
       paddingVertical: 10,
       color: colors.text,
-      fontSize: 12.5,
+      fontSize: Type.secondary,
       lineHeight: 18,
       fontFamily: 'Geist-Regular',
       textAlignVertical: 'top',
@@ -3318,7 +4031,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     doneBackButtonText: {
       color: '#ffffff',
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     primaryButtonVisual: {
@@ -3336,7 +4049,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     primaryText: {
       color: '#ffffff',
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     buttonArrow: {

@@ -1,4 +1,6 @@
-import { Easing, FadeIn, useReducedMotion } from 'react-native-reanimated';
+import { FadeIn, useReducedMotion } from 'react-native-reanimated';
+
+import { MOTION_DURATION, MOTION_EASING } from '@/lib/motion';
 
 /**
  * Shared transition system for the Vervein auth/onboarding flow: an extremely
@@ -19,5 +21,5 @@ import { Easing, FadeIn, useReducedMotion } from 'react-native-reanimated';
 export function useFadeInEntering() {
   const reduced = useReducedMotion();
   if (reduced) return undefined;
-  return FadeIn.duration(180).easing(Easing.out(Easing.quad));
+  return FadeIn.duration(MOTION_DURATION.base).easing(MOTION_EASING.standard);
 }

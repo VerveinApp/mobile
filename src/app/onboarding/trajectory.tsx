@@ -1,6 +1,8 @@
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Animated, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+
+import { useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, { FadeIn, useReducedMotion } from 'react-native-reanimated';
 import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 
@@ -8,9 +10,11 @@ import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { COMMITMENT_LEVELS } from '@/lib/commitment-levels';
 import { DEFAULT_CALIBRATION } from '@/lib/engine/personal-calibration';
 import { hapticImpactLight } from '@/lib/haptics';
+import { MOTION_DURATION, ONBOARDING_REVEAL_DELAY_MS, ONBOARDING_REVEAL_STAGGER_MS } from '@/lib/motion';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
 import { useFadeInEntering } from '@/lib/screen-transitions';
+import { AndroidRippleOnAccent, Type, sheenGradient } from '@/constants/theme';
 import { useAppTheme } from '@/lib/theme-context';
 import { getProfile, type UserProfile } from '@/lib/user-profile';
 import {
@@ -37,8 +41,7 @@ const isGlassAvailable = isLiquidGlassAvailable();
  * onboarding/potential.tsx and Progress's old "Your Potential" section.
  */
 export default function OnboardingTrajectoryScreen() {
-  const { width: windowWidth } = useWindowDimensions();
-  const scale = windowWidth / CANVAS_WIDTH;
+  const scale = useCanvasScale();
   const { colors, resolvedScheme } = useAppTheme();
   const hoverWashColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
   const styles = useMemo(() => createStyles(colors, hoverWashColor), [colors, hoverWashColor]);
@@ -64,6 +67,12 @@ export default function OnboardingTrajectoryScreen() {
 
   const handleContinue = () => {
     hapticImpactLight();
+    // dismissAll() first — this is the true end of the whole onboarding
+    // chain (welcome → ... → trajectory), all still one flat root Stack, so
+    // replace() alone would leave every prior step reachable with repeated
+    // edge-swipe-backs. Same fix as auth/verify.tsx's and create-account.tsx's
+    // matching (tabs) landings.
+    router.dismissAll();
     router.replace('/(tabs)' as never);
   };
 
@@ -85,7 +94,7 @@ export default function OnboardingTrajectoryScreen() {
         <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>Built around what you told us — nothing generic.</Text>
 
         <ReanimatedAnimated.View
-          entering={reducedMotion ? undefined : FadeIn.duration(350).delay(950)}
+          entering={reducedMotion ? undefined : FadeIn.duration(MOTION_DURATION.slow).delay(ONBOARDING_REVEAL_DELAY_MS)}
           style={styles.highlightsCard}
         >
           <View pointerEvents="none" style={styles.highlightsSheen} />
@@ -110,7 +119,11 @@ export default function OnboardingTrajectoryScreen() {
         </ReanimatedAnimated.View>
 
         <ReanimatedAnimated.Text
-          entering={reducedMotion ? undefined : FadeIn.duration(350).delay(1150)}
+          entering={
+            reducedMotion
+              ? undefined
+              : FadeIn.duration(MOTION_DURATION.slow).delay(ONBOARDING_REVEAL_DELAY_MS + ONBOARDING_REVEAL_STAGGER_MS)
+          }
           style={styles.closingLine}
           maxFontSizeMultiplier={1.4}
         >
@@ -125,6 +138,7 @@ export default function OnboardingTrajectoryScreen() {
           onHoverOut={ctaHover.onHoverOut}
           onPressIn={ctaPress.onPressIn}
           onPressOut={ctaPress.onPressOut}
+          android_ripple={AndroidRippleOnAccent}
         >
           <Animated.View
             style={[
@@ -211,7 +225,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       top: 168,
       paddingHorizontal: 40,
       color: colors.text,
-      fontSize: 22,
+      fontSize: Type.heading,
       lineHeight: 27,
       letterSpacing: -0.3,
       textAlign: 'center',
@@ -223,7 +237,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       right: 0,
       top: 202,
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: Type.secondary,
       textAlign: 'center',
       fontFamily: 'Geist-Regular',
     },
@@ -246,7 +260,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       right: 0,
       top: 0,
       height: '48%',
-      backgroundColor: colors.surfaceSheen,
+      ...sheenGradient(colors.surfaceSheen),
     },
     highlightRow: {
       flexDirection: 'row',
@@ -281,7 +295,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       fontFamily: 'Geist-Medium',
     },
     closingLineAccent: {
-      color: '#5FBE84',
+      color: colors.accentText,
       fontFamily: 'Geist-Bold',
     },
     // A few px taller than the standard CTA — this is one of the three
@@ -310,7 +324,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     primaryText: {
       color: '#ffffff',
-      fontSize: 12,
+      fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
     buttonArrow: {

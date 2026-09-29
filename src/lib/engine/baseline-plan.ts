@@ -8,11 +8,11 @@
 // against them: unvalidated hard-safety filters (arthritis / chronic
 // back-knee-pain exclusions shipping ahead of their own validation process)
 // and a missing consent-schema for the health data conditions depend on.
-// generateBaselinePlan is always called from this app with `conditions`,
-// `standingSymptomTags`, and `movementRestrictions` as empty arrays — the
-// onboardingConstraints() logic below still runs (so this stays a faithful,
-// unmodified port) but produces no exclusions from those dimensions, since
-// there's nothing in the sets to iterate. See onboarding-to-engine.ts.
+// generateBaselinePlan is always called from this app with `conditions` as
+// an empty array — the onboardingConstraints() logic below still runs (so
+// this stays a faithful, unmodified port) but produces no exclusions from
+// it. `standingSymptomTags` (Settings > Ongoing Symptoms) and
+// `movementRestrictions` are real and do apply. See onboarding-to-engine.ts.
 //
 // Builds the user's standing session once, at onboarding, by reusing M6's
 // filtering logic with an onboarding-time constraint set — no daily
@@ -40,6 +40,14 @@
 // could. See exercise-filtering.ts for the matching gap-fill-side bias and
 // onboarding-to-engine.ts for the experience → bias mapping.
 //
+// DISCLOSED DIVERGENCE (Vervein addition, not in the vault): past that
+// beginner bias, bySelectionOrder now ranks by training value for everyone
+// (training moves before mobility, compound and patterned moves first, a
+// home kit list's own equipment preferred — see its comment), and each area
+// takes varied movement patterns before repeating one. Numeric order only
+// breaks ties. Library order alone was handing setups without the barbell
+// staples two isolation moves as their whole upper-body day.
+//
 // Standing symptom tags apply here (onboarding-collected, active every day);
 // conditions apply here too — contraindications are a hard Gate 1 exclusion
 // from the very first plan (founder-approved amendment, 2026-07-22).
@@ -58,6 +66,7 @@ import type {
   Impact,
 } from './types';
 import { SYMPTOM_OVERRIDE_TABLE } from './reference/symptom-override-table';
+import type { SymptomTag } from '@/lib/symptom-tags';
 import { EXERCISES_PER_FOCUS_AREA } from './reference/policy-parameters';
 import { exerciseLibrary, INTENSITY_RANK, IMPACT_RANK, byNumericId, bySelectionOrder } from './exercise-library';
 import { filterAndSubstitute } from './exercise-filtering';
@@ -71,6 +80,9 @@ export type OnboardingContext = {
   conditions: string[]; // founder-approved amendment — contraindications apply from the first plan
   standingSymptomTags: string[];
   movementRestrictions: string[];
+  // Vervein addition — the equipment actually on hand; see
+  // EffectiveConstraintSet.ownedEquipment. Absent = tier ceiling only.
+  ownedEquipment?: readonly string[] | null;
   // SOFT EXPERIENCE BIAS (Vervein addition, not in the vault — see the
   // COMPOSITION comment below and exercise-filtering.ts's matching header
   // note for the full rationale). true for profile.experience ===
@@ -95,7 +107,12 @@ function onboardingConstraints(ctx: OnboardingContext): EffectiveConstraintSet {
   const forceAddTypes = new Set<string>();
 
   for (const tag of new Set(ctx.standingSymptomTags)) {
-    const row = SYMPTOM_OVERRIDE_TABLE[tag];
+    // Cast, not a type-level guarantee: standingSymptomTags is still plain
+    // string[] at this boundary (real caller-supplied data), so the runtime
+    // guard right below is still the actual safety net — SYMPTOM_OVERRIDE_TABLE's
+    // own SymptomTag-keyed type only guarantees the TABLE itself covers every
+    // canonical tag, not that an arbitrary input string is one.
+    const row = SYMPTOM_OVERRIDE_TABLE[tag as SymptomTag];
     if (!row) {
       throw new Error(`M3: unrecognized standing symptom tag "${tag}" — rejected, never silently passed through.`);
     }
@@ -112,7 +129,8 @@ function onboardingConstraints(ctx: OnboardingContext): EffectiveConstraintSet {
   return {
     intensityCeiling,
     impactCeiling,
-    equipmentCeiling: ctx.equipment,
+    equipmentCeiling: ctx.ownedEquipment != null ? 'full_gym' : ctx.equipment,
+    ownedEquipment: ctx.ownedEquipment ?? null,
     excludeBodyAreas: [...excludeBodyAreas],
     excludeMovementPatterns: [...new Set(ctx.movementRestrictions)] as MovementPattern[],
     forceAddTypes: [...forceAddTypes],
@@ -142,7 +160,7 @@ export function generateBaselinePlan(ctx: OnboardingContext, userId: string): Ba
     focusAreas: ctx.focusAreas,
   };
   const { filtered } = filterAndSubstitute(candidatePlan, constraints, ctx.biasSimpleExercises);
-  const eligible = [...filtered].sort(bySelectionOrder(ctx.biasSimpleExercises));
+  const eligible = [...filtered].sort(bySelectionOrder(ctx.biasSimpleExercises, ctx.ownedEquipment));
 
   // --- Composition (Founder Decision): N per focus area. ---
   const areaTargets: BodyArea[] = ctx.focusAreas.includes('full')
@@ -153,15 +171,26 @@ export function generateBaselinePlan(ctx: OnboardingContext, userId: string): Ba
   const chosenIds = new Set<string>();
   for (const area of areaTargets) {
     let taken = 0;
-    // First pass: the area's own pool. Second pass: full-body exercises can
-    // fill any area's remaining slots (they train that area).
-    for (const pool of [eligible.filter((e) => e.body_area === area), eligible.filter((e) => e.body_area === 'full')]) {
-      for (const ex of pool) {
+    // Vervein addition: varied before repeated — a pick that shares an
+    // already-chosen movement pattern in this area (a second squat, a
+    // second press) only once nothing else fits, so an upper day reads as a
+    // push and a pull rather than two presses.
+    const usedPatterns = new Set<string>();
+    for (const allowRepeat of [false, true]) {
+      // First the area's own pool, then full-body exercises, which can fill
+      // any area's remaining slots (they train that area).
+      for (const pool of [eligible.filter((e) => e.body_area === area), eligible.filter((e) => e.body_area === 'full')]) {
+        for (const ex of pool) {
+          if (taken >= EXERCISES_PER_FOCUS_AREA) break;
+          if (chosenIds.has(ex.id)) continue;
+          const pattern = ex.movement_patterns[0];
+          if (!allowRepeat && pattern && usedPatterns.has(pattern)) continue;
+          chosen.push(ex);
+          chosenIds.add(ex.id);
+          if (pattern) usedPatterns.add(pattern);
+          taken++;
+        }
         if (taken >= EXERCISES_PER_FOCUS_AREA) break;
-        if (chosenIds.has(ex.id)) continue;
-        chosen.push(ex);
-        chosenIds.add(ex.id);
-        taken++;
       }
       if (taken >= EXERCISES_PER_FOCUS_AREA) break;
     }

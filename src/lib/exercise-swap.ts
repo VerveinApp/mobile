@@ -74,8 +74,17 @@ export function buildSwapReplacement(
       ? original.durationMin / originalFull.base_duration_min
       : 1;
   const sets = candidate.base_sets !== null ? Math.max(1, Math.round(candidate.base_sets * setsRatio)) : null;
-  const durationMin =
+  // BUG FIX (found in a later full-app audit): this doc comment claims the
+  // exact same formulas volume-scaling.ts's scaleVolume uses, but only
+  // `sets` above actually carried over that file's Math.max(1, ...) floor —
+  // duration never did, so a swap into a short candidate on a low-ratio day
+  // could round to 0 and render as a real user-visible "Candidate — 0 min,"
+  // the identical defect volume-scaling.ts's own adapted_duration_min
+  // already has a floor-to-1 safety net for (see that file's own comment on
+  // why 0 is a real defect, not just an internal concern).
+  const rawDurationMin =
     candidate.base_duration_min !== null ? Math.round((candidate.base_duration_min * durationRatio) / 5) * 5 : null;
+  const durationMin = rawDurationMin === 0 ? 1 : rawDurationMin;
   return {
     name: candidate.name,
     sets,

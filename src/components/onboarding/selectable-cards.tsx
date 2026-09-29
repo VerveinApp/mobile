@@ -1,9 +1,12 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import ReanimatedAnimated, { FadeIn, ZoomIn } from 'react-native-reanimated';
 import { useFocusEffect } from 'expo-router';
 
+import { AndroidCardElevation, AndroidRipple, sheenGradient } from '@/constants/theme';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticSelect } from '@/lib/haptics';
+import { MOTION_DURATION, MOTION_EASING } from '@/lib/motion';
 import { useAppTheme } from '@/lib/theme-context';
 
 const SELECTION_CONFIRM_MS = 100;
@@ -123,6 +126,10 @@ function SelectableCard<T extends string>({
       onHoverOut={hover.onHoverOut}
       onPressIn={press.onPressIn}
       onPressOut={press.onPressOut}
+      android_ripple={AndroidRipple}
+      accessibilityRole="button"
+      accessibilityLabel={option.label}
+      accessibilityState={{ selected: isSelected }}
     >
       <Animated.View
         style={[
@@ -148,7 +155,11 @@ function SelectableCard<T extends string>({
           ]}
         />
         {isSelected ? (
-          <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.cardWashSelected]} />
+          <ReanimatedAnimated.View
+            pointerEvents="none"
+            entering={FadeIn.duration(MOTION_DURATION.fast).easing(MOTION_EASING.standard)}
+            style={[StyleSheet.absoluteFill, styles.cardWashSelected]}
+          />
         ) : null}
         <View pointerEvents="none" style={styles.cardSheen} />
         {hasIcon && Icon ? (
@@ -164,17 +175,22 @@ function SelectableCard<T extends string>({
             {option.subtitle ? <Text style={styles.optionSubtitle} maxFontSizeMultiplier={1.3}>{option.subtitle}</Text> : null}
           </View>
         )}
-        {isSelected ? (
-          <View style={styles.checkBadge}>
-            <View style={styles.checkDot} />
-          </View>
-        ) : null}
+        {/* BUG FIX: the badge only took up room once selected, so picking a
+            card narrowed its text by the badge's 28pt and a long option
+            ("Move better, have more energy, and feel capable") re-wrapped
+            onto another line mid-tap. The slot is always there now; only its
+            fill and dot appear. The dot is a plain circle, safe to scale. */}
+        <View style={[styles.checkBadge, isSelected && styles.checkBadgeSelected]}>
+          {isSelected ? (
+            <ReanimatedAnimated.View entering={ZoomIn.springify().duration(250).dampingRatio(0.7)} style={styles.checkDot} />
+          ) : null}
+        </View>
       </Animated.View>
     </Pressable>
   );
 }
 
-const CARD_RADIUS = 10;
+const CARD_RADIUS = Platform.OS === 'android' ? 16 : 10;
 
 function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColor: string) {
   return StyleSheet.create({
@@ -189,9 +205,10 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       alignItems: 'center',
       paddingHorizontal: 12,
       borderRadius: CARD_RADIUS,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
       backgroundColor: colors.surface,
+      ...(Platform.OS === 'android'
+        ? AndroidCardElevation
+        : { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.surfaceBorder }),
     },
     cardVisualPlain: {
       width: '100%',
@@ -200,9 +217,10 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       paddingHorizontal: 14,
       paddingVertical: 14,
       borderRadius: CARD_RADIUS,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.surfaceBorder,
       backgroundColor: colors.surface,
+      ...(Platform.OS === 'android'
+        ? AndroidCardElevation
+        : { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.surfaceBorder }),
     },
     // A static, subtle top-edge highlight — not the native glass material used
     // on primary buttons (cards were deliberately kept out of that pass), just
@@ -215,7 +233,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       height: '48%',
       borderTopLeftRadius: CARD_RADIUS - 1,
       borderTopRightRadius: CARD_RADIUS - 1,
-      backgroundColor: colors.surfaceSheen,
+      ...sheenGradient(colors.surfaceSheen),
       zIndex: -1,
     },
     cardWash: {
@@ -266,6 +284,8 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       marginLeft: 10,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    checkBadgeSelected: {
       backgroundColor: 'rgba(67,140,99,0.18)',
     },
     checkDot: {
