@@ -829,7 +829,7 @@ function PlanRow({
     return () => clearTimeout(timer);
   }, []);
   const transition = {
-    transitionProperty: ['borderColor', 'backgroundColor'],
+    transitionProperty: ['borderColor', 'backgroundColor'] as ('borderColor' | 'backgroundColor')[],
     transitionDuration: reducedMotion ? 0 : MOTION_DURATION.base,
     transitionTimingFunction: 'ease-out' as const,
   };
