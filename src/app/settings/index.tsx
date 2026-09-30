@@ -49,6 +49,7 @@ import { BiometricsSheet } from '@/components/settings/biometrics-sheet';
 import { ConditionsSheet } from '@/components/settings/conditions-sheet';
 import { GoalsSheet } from '@/components/settings/goals-sheet';
 import { PremiumGate } from '@/components/premium-gate';
+import { openPaywall } from '@/lib/plus-features';
 import { MovementRestrictionsSheet } from '@/components/settings/movement-restrictions-sheet';
 import { StandingSymptomsSheet } from '@/components/settings/standing-symptoms-sheet';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
@@ -243,6 +244,7 @@ export default function SettingsScreen() {
   const goalsHover = useHoverFade();
   const referralHover = useHoverFade();
   const manageSubscriptionHover = useHoverFade();
+  const getPlusHover = useHoverFade();
   const adjustPlanHover = useHoverFade();
   const conditionsHover = useHoverFade();
   const movementRestrictionsHover = useHoverFade();
@@ -626,7 +628,7 @@ export default function SettingsScreen() {
               // Same Plus gate as the DATA section and log.tsx's Log hub
               // (its own matching "Weight" row) — this row is the third,
               // otherwise-free door to the same feature those two now lock.
-              onPress={() => (isPremium ? router.push('/settings/weight-history' as never) : router.push('/paywall' as never))}
+              onPress={() => (isPremium ? router.push('/settings/weight-history' as never) : openPaywall('history'))}
               hover={weightHistoryHover}
               locked={!isPremium}
             />
@@ -635,7 +637,7 @@ export default function SettingsScreen() {
               colors={colors}
               icon="target"
               label="Goals"
-              onPress={() => (isPremium ? goalsSheetRef.current?.present() : router.push('/paywall' as never))}
+              onPress={() => (isPremium ? goalsSheetRef.current?.present() : openPaywall('goals'))}
               hover={goalsHover}
               locked={!isPremium}
             />
@@ -736,7 +738,7 @@ export default function SettingsScreen() {
             full history of why that nuance existed and was intentionally
             given up here). */}
         <Section styles={styles} title="DATA">
-          <PremiumGate isPremium={isPremium} label="Data">
+          <PremiumGate isPremium={isPremium} label="Data" feature="history">
           <View style={styles.card}>
             <NavRow
               styles={styles}
@@ -801,6 +803,18 @@ export default function SettingsScreen() {
                 label="Manage Subscription"
                 onPress={handleManageSubscription}
                 hover={manageSubscriptionHover}
+              />
+            ) : isPremium === false ? (
+              // The paywall's own door — without it Settings only reached the
+              // paywall through a locked row, so Restore Purchases (which
+              // lives only on the paywall) had no obvious way in.
+              <NavRow
+                styles={styles}
+                colors={colors}
+                icon="sparkles"
+                label="Get VerveIn Plus"
+                onPress={() => openPaywall()}
+                hover={getPlusHover}
               />
             ) : null}
             <NavRow

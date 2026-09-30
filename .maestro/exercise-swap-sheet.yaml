@@ -86,7 +86,7 @@ appId: app.vervein
 # The dial is now a horizontal 5-segment bar (redesigned from the original
 # dome), 5 equal segments left-to-right Empty→Great. This point lands on the
 # rightmost segment (Great/5) — chosen specifically because Energy 5 never
-# grows the "Symptom tracking"/paywall card Energy 1 does, so "Start
+# grows the "Symptom tagging"/paywall card Energy 1 does, so "Start
 # session" stays on-screen without needing a scroll. A short settle before
 # this tap avoids a race with the rest-day dismissal's own transition still
 # finishing.

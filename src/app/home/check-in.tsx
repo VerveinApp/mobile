@@ -1659,7 +1659,7 @@ export default function EnergyCheckInScreen() {
                 layout={sectionLayout}
                 style={styles.symptomSection}
               >
-                <PremiumGate isPremium={isPremium} label="Symptom tracking">
+                <PremiumGate isPremium={isPremium} label="Symptom tagging" feature="symptoms">
                   <Text style={styles.noteLabel} maxFontSizeMultiplier={1.3}>
                     ANYTHING GOING ON TODAY? (OPTIONAL)
                   </Text>

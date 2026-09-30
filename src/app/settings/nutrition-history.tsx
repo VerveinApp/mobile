@@ -203,7 +203,7 @@ export default function NutritionHistoryScreen() {
           </View>
 
           {nutritionTrendData.length > 0 ? (
-            <PremiumGate isPremium={isPremium} label="Full nutrition trend">
+            <PremiumGate isPremium={isPremium} label="Full nutrition trend" feature="history">
               <View style={styles.section}>
                 <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TREND</Text>
                 <View style={[styles.card, styles.chartCardPadding]}>
@@ -234,7 +234,7 @@ export default function NutritionHistoryScreen() {
           </View>
 
           {olderEntries.length > 0 ? (
-            <PremiumGate isPremium={isPremium} label="Full nutrition history">
+            <PremiumGate isPremium={isPremium} label="Full nutrition history" feature="history">
               <View style={styles.section}>
                 <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>EARLIER</Text>
                 <View style={styles.card}>

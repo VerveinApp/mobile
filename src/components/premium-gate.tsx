@@ -1,4 +1,3 @@
-import { router } from 'expo-router';
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { SymbolView } from '@/components/ui/app-symbol';
@@ -6,6 +5,7 @@ import { SymbolView } from '@/components/ui/app-symbol';
 import { Type } from '@/constants/theme';
 import { useHoverFade, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticSelect } from '@/lib/haptics';
+import { openPaywall, type PlusFeature } from '@/lib/plus-features';
 import { useAppTheme } from '@/lib/theme-context';
 
 /**
@@ -23,12 +23,15 @@ import { useAppTheme } from '@/lib/theme-context';
 export function PremiumGate({
   isPremium,
   label,
+  feature,
   style,
   children,
 }: {
   isPremium: boolean | null;
   /** What's behind the lock, e.g. "Training Balance" — used in the teaser's own copy. */
   label: string;
+  /** Which paywall row this lock belongs to — the paywall leads with it. */
+  feature: PlusFeature;
   style?: StyleProp<ViewStyle>;
   children: React.ReactNode;
 }) {
@@ -43,7 +46,7 @@ export function PremiumGate({
       style={({ pressed }) => [styles.card, style, pressed && PRESSED_DIM]}
       onPress={() => {
         hapticSelect();
-        router.push('/paywall' as never);
+        openPaywall(feature);
       }}
       onHoverIn={hover.onHoverIn}
       onHoverOut={hover.onHoverOut}

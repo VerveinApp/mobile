@@ -369,7 +369,7 @@ export default function ProfileScreen() {
             jammed against the LOG section above it. */}
         <View style={styles.section}>
           <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>GOALS</Text>
-          <PremiumGate isPremium={isPremium} label="Goals">
+          <PremiumGate isPremium={isPremium} label="Goals" feature="goals">
           <Pressable
             style={({ pressed }) => [styles.card, pressed && PRESSED_DIM]}
             onPress={() => goalsSheetRef.current?.present()}

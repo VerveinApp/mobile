@@ -806,7 +806,7 @@ function YourFitness({
           glanceable summary shows, so this closes the last free preview of
           it rather than leaving the headline number reachable for free
           while its detail view costs Plus. */}
-      <PremiumGate isPremium={isPremium} label="Training Load">
+      <PremiumGate isPremium={isPremium} label="Training Load" feature="consistency">
       <View style={styles.fitnessCard}>
         <View style={styles.fitnessCardHeader}>
           <Text style={styles.fitnessCardLabel} maxFontSizeMultiplier={1.3}>Training Load</Text>
@@ -851,7 +851,7 @@ function YourFitness({
       </View>
       </PremiumGate>
 
-      <PremiumGate isPremium={isPremium} label="Consistency">
+      <PremiumGate isPremium={isPremium} label="Consistency" feature="consistency">
       <View style={styles.fitnessCard}>
         <View style={styles.fitnessCardHeader}>
           <Text style={styles.fitnessCardLabel} maxFontSizeMultiplier={1.3}>Consistency</Text>

@@ -26,9 +26,9 @@ import {
 const CANVAS_WIDTH = 375;
 const CANVAS_HEIGHT = 812;
 
-// Liquid Glass is otherwise reserved for exactly one place (the EnergyGauge
-// dial) plus account creation, so it reads as a deliberate "this moment
-// matters" cue — entering the app for the first time is the third.
+// Liquid Glass is reserved for the moments that matter — the EnergyGauge
+// dial, account creation, subscribing (paywall.tsx) — so it reads as a
+// deliberate cue; entering the app for the first time is one of them.
 const isGlassAvailable = isLiquidGlassAvailable();
 
 /**

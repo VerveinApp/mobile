@@ -12,6 +12,7 @@ import { getOrCreateReferralCode, redeemReferralCode } from '@/lib/referral';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
+import { CONTACT_EMAIL } from '@/lib/legal/terms-content';
 
 /**
  * Reached from Settings and from the post-session milestone moment (see
@@ -92,14 +93,20 @@ export default function ReferralScreen() {
     const outcome = await redeemReferralCode(code);
     setIsRedeeming(false);
     if (outcome.ok) {
-      hapticSuccess();
       setRedeemInput('');
-      setRedeemMessage({
-        text: outcome.rewardGranted
-          ? "You're both set — a free week of VerveIn Plus just landed on your account."
-          : 'Code accepted — your reward is on its way.',
-        kind: 'success',
-      });
+      // Nothing retries a grant that failed server-side (redeem-referral
+      // records the redemption either way), so this can't promise it's
+      // "on its way" — it says what happened and who can fix it.
+      if (outcome.rewardGranted) hapticSuccess();
+      else hapticError();
+      setRedeemMessage(
+        outcome.rewardGranted
+          ? { text: "You're both set — a free week of VerveIn Plus just landed on your account.", kind: 'success' }
+          : {
+              text: `Code accepted, but the free week didn't go through. Email ${CONTACT_EMAIL} and we'll add it for you both.`,
+              kind: 'error',
+            }
+      );
     } else {
       hapticError();
       setRedeemMessage({ text: outcome.error, kind: 'error' });

@@ -68,7 +68,7 @@ export default function LogScreen() {
           substitute for today&apos;s real check-in.
         </Text>
 
-        <PremiumGate isPremium={isPremium} label="Log">
+        <PremiumGate isPremium={isPremium} label="Log" feature="history">
         <View style={styles.card}>
           <LogRow
             styles={styles}

@@ -33,6 +33,7 @@ import {
 } from '@/lib/workout-log';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 import { PRESSED_DIM } from '@/lib/button-interactions';
+import { openPaywall } from '@/lib/plus-features';
 
 const WEEKDAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 const MONTH_WEEK_COUNT = 4;
@@ -394,7 +395,7 @@ export default function ProgressScreen() {
               Plus" teaser cards stacked back-to-back, since both gates
               shared the same label. One gate wrapping both real sections
               below. */}
-          <PremiumGate isPremium={isPremium} label="The consistency calendar">
+          <PremiumGate isPremium={isPremium} label="The consistency calendar" feature="consistency">
             {consistencyMeterData.length >= 2 ? (
               <View style={styles.card}>
                 <View style={styles.chartCaptionRow}>
@@ -478,11 +479,11 @@ export default function ProgressScreen() {
                                 // into a specific day's detail is the same
                                 // gated screen Settings' own DATA section
                                 // links to.
-                                router.push(
-                                  (isPremium
-                                    ? { pathname: '/settings/progress-history', params: { date: day.date } }
-                                    : '/paywall') as never
-                                );
+                                if (isPremium) {
+                                  router.push({ pathname: '/settings/progress-history', params: { date: day.date } } as never);
+                                } else {
+                                  openPaywall('history');
+                                }
                               }}
                               accessibilityRole={day.completed === null ? undefined : 'button'}
                               accessibilityLabel={
@@ -558,7 +559,7 @@ export default function ProgressScreen() {
               ))}
             </View>
           </View>
-          <PremiumGate isPremium={isPremium} label="Training Balance">
+          <PremiumGate isPremium={isPremium} label="Training Balance" feature="balance">
             {bodyAreaBreakdown && BODY_AREA_ORDER.some((area) => bodyAreaBreakdown[area].total > 0) ? (
               <View style={styles.card}>
                 {hasMovementData ? (
@@ -716,7 +717,7 @@ export default function ProgressScreen() {
             the honest default, not a lesser version of this section. */}
         <View style={styles.section}>
           <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>STRENGTH PROGRESS</Text>
-          <PremiumGate isPremium={isPremium} label="Strength Progress">
+          <PremiumGate isPremium={isPremium} label="Strength Progress" feature="strength">
             {improvedExercises.length > 0 ? (
               <View style={styles.card}>
                 {improvedExercises.map((entry, index) => {

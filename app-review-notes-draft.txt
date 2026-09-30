@@ -44,12 +44,23 @@ THIRD-PARTY SERVICES USED
 
 SUBSCRIPTIONS
 VerveIn Plus (monthly and yearly auto-renewing subscriptions) is offered on
-the paywall, reachable from Settings and from any locked Plus section. The
-paywall states the price and period, that it renews automatically unless
-canceled at least 24 hours before the period ends, and links to the Terms
-of Service and Privacy Policy. A free-trial label only appears when the
-Apple ID is actually eligible for the trial. Restore Purchases is on the
-same screen.
+the paywall. To open it: Settings > VERVEIN PLUS > Get VerveIn Plus, or tap
+any "… is part of VerveIn Plus" lock card in the app; it also appears once,
+automatically, after the third check-in. The paywall states the price and
+period of the selected plan, that it renews automatically unless canceled at
+least 24 hours before the period ends, how to cancel, and links to the Terms
+of Service and Privacy Policy; Restore Purchases is on the same screen. The
+free trial (3 days) is on the monthly plan only; the yearly plan has none. A
+free-trial label only appears when the Apple ID is actually eligible for it.
+
+Referral rewards: an account less than a week old can enter a friend's
+referral code once (Settings > VERVEIN PLUS > Bring a Training Partner). The
+new account and the code's owner each get 7 days of VerveIn Plus, granted
+server-side as a RevenueCat promotional entitlement that expires on its own
+and never charges; the code's owner gets one such grant per friend who
+redeems. Codes can't be bought and have no cash value. No paid access is
+sold outside In-App Purchase — every paid path is the StoreKit subscription
+above.
 
 REGIONAL DIFFERENCES
 None. The app's features and content are identical in every region.
