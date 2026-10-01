@@ -14,16 +14,25 @@ import {
   View,
 } from 'react-native';
 import ReanimatedAnimated, {
+  Easing,
+  Extrapolation,
   FadeIn,
   FadeOut,
+  interpolate,
   LayoutAnimationConfig,
+  type SharedValue,
+  useAnimatedStyle,
   useReducedMotion,
+  useSharedValue,
+  withDelay,
+  withTiming,
   ZoomIn,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { PurchasesPackage } from 'react-native-purchases';
 
 import { SymbolView } from '@/components/ui/app-symbol';
+import { ProgressRing } from '@/components/ui/progress-ring';
 import { SkeletonBlock } from '@/components/ui/skeleton';
 import { Sparkline } from '@/components/ui/sparkline';
 import { SuccessCheckmark } from '@/components/onboarding/success-checkmark';
@@ -38,7 +47,7 @@ import { PRESSED_DIM, useDisabledScrimStyle, useHoverFade, useLiquidPress } from
 import { hapticError, hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { LIST_ROW_ENTERING, LIST_ROW_EXITING, LIST_ROW_LAYOUT, MOTION_DURATION } from '@/lib/motion';
 import { useIsOffline } from '@/lib/network-status';
-import { isPlusFeature, PLUS_FEATURES } from '@/lib/plus-features';
+import { isPlusFeature, PLUS_FEATURE_GROUPS, PLUS_FEATURES } from '@/lib/plus-features';
 import {
   getIntroOfferEligibility,
   loadPlans,
@@ -81,6 +90,8 @@ const REVEAL_ANIMATION_AFTER_MS = 150;
  * retries on its own this many times, this far apart, then waits for
  * "Try again". */
 const AUTO_RETRY_DELAYS_MS = [3000, 10000];
+const DISCLOSURE_LINE_HEIGHT = 14;
+const DISCLOSURE_MAX_LINES = 5;
 const GENERIC_DISCLOSURE =
   'Plans renew automatically unless canceled at least 24 hours before the current period ends — manage or cancel anytime in your Apple ID subscription settings.';
 
@@ -368,29 +379,41 @@ export default function PaywallScreen() {
   const ctaScrimStyle = useDisabledScrimStyle(ctaDisabled && !ctaWorking);
   const closeScrimStyle = useDisabledScrimStyle(busy && success === null);
 
-  const orderedFeatures = highlightedFeature
-    ? [
-        ...PLUS_FEATURES.filter((f) => f.id === highlightedFeature),
-        ...PLUS_FEATURES.filter((f) => f.id !== highlightedFeature),
-      ]
-    : PLUS_FEATURES;
+  // Two skimmable groups; the feature someone tapped leads its group, and
+  // its group leads the list.
+  const highlightedGroup = PLUS_FEATURES.find((f) => f.id === highlightedFeature)?.group;
+  const featureGroups = [...PLUS_FEATURE_GROUPS]
+    .sort((a, b) => Number(b.id === highlightedGroup) - Number(a.id === highlightedGroup))
+    .map((group) => {
+      const members = PLUS_FEATURES.filter((f) => f.group === group.id);
+      return {
+        ...group,
+        features: [
+          ...members.filter((f) => f.id === highlightedFeature),
+          ...members.filter((f) => f.id !== highlightedFeature),
+        ],
+      };
+    });
 
   const errorRed = resolvedScheme === 'dark' ? '#e5484d' : '#CE2C31';
   const disclosure =
     plans.kind === 'ready' && selectedPackage ? renewalDisclosure(selectedPackage, selectedTrial) : GENERIC_DISCLOSURE;
-  // The line right above the button: the trial and what it becomes, or — in
-  // the compact layout, where the full terms sit in the scroll — the price,
-  // period and renewal in one line.
+  // The one line right above the button says what you're agreeing to — the
+  // trial and what it becomes, or the price, period and renewal. The full
+  // terms sit just under the button (or, in the compact layout, under the
+  // plans).
   const footerSummary =
     plans.kind !== 'ready' || !selectedPackage
       ? null
       : selectedTrial
-        ? `${selectedTrial}, then ${priceWithPeriod(selectedPackage)}${compact ? ', renews until canceled' : ''}.`
-        : !compact
-          ? null
-          : billingPeriod(selectedPackage)
-            ? `${priceWithPeriod(selectedPackage)}, renews automatically until canceled.`
-            : `One-time purchase of ${selectedPackage.product.priceString}.`;
+        ? `${selectedTrial}, then ${priceWithPeriod(selectedPackage)}.`
+        : billingPeriod(selectedPackage)
+          ? `${priceWithPeriod(selectedPackage)}, renews automatically until canceled.`
+          : `One-time purchase of ${selectedPackage.product.priceString}.`;
+  // Room for the longest terms (a trial on a narrow phone wraps to five
+  // lines), held whatever plan is selected — the terms sit under the button,
+  // so a shorter variant must not let the button drop under a thumb.
+  const disclosureMinHeight = DISCLOSURE_LINE_HEIGHT * DISCLOSURE_MAX_LINES * Math.min(fontScale, 1.3);
   const headerTextScale = compact ? 1.2 : undefined;
 
   return (
@@ -406,14 +429,20 @@ export default function PaywallScreen() {
         >
           <View style={styles.column}>
             <View style={styles.header}>
-              <PlusLockup scale={0.82} color={colors.text} plusColor={colors.accentText} />
+              {/* A soft brand glow behind the lockup — the page's one bit of
+                  atmosphere, so the first screen reads as premium rather
+                  than a plain sheet. Decorative only. */}
+              <View pointerEvents="none" style={styles.heroGlow} />
+              <PlusLockup scale={0.9} color={colors.text} plusColor={colors.accentText} />
               <Text
                 style={styles.headline}
                 maxFontSizeMultiplier={headerTextScale ?? 1.4}
                 accessibilityRole="header"
                 lineBreakStrategyIOS="push-out"
               >
-                See what your training adds up to.
+                {/* A deliberate break: at this size the line wraps anyway,
+                    and left to itself it strands "up to." on its own. */}
+                {'See what your training\nadds up to.'}
               </Text>
               <Text style={styles.subhead} maxFontSizeMultiplier={headerTextScale ?? 1.5} lineBreakStrategyIOS="push-out">
                 Strength, consistency and recovery trends, built from the sessions you log.
@@ -479,39 +508,51 @@ export default function PaywallScreen() {
             ) : null}
 
             <ReanimatedAnimated.View layout={LIST_ROW_LAYOUT} style={styles.section}>
-              <PreviewCard loggedSessionCount={loggedSessionCount} styles={styles} colors={colors} />
+              <PreviewCard
+                loggedSessionCount={loggedSessionCount}
+                styles={styles}
+                colors={colors}
+                reducedMotion={reducedMotion}
+              />
             </ReanimatedAnimated.View>
 
-            <ReanimatedAnimated.View layout={LIST_ROW_LAYOUT} style={[styles.section, styles.featureCard]}>
-              {orderedFeatures.map((feature, index) => {
-                const highlighted = feature.id === highlightedFeature;
-                return (
-                  <View key={feature.id}>
-                    {index > 0 ? <View style={styles.featureDivider} /> : null}
-                    <View
-                      style={[styles.featureRow, highlighted && styles.featureRowHighlighted]}
-                      accessible
-                      accessibilityLabel={`${feature.title}. ${feature.detail}`}
-                    >
-                      <View style={styles.featureIcon}>
-                        <SymbolView name={feature.icon} size={15} weight="semibold" tintColor={BRAND_GREEN} />
-                      </View>
-                      <View style={styles.featureText}>
-                        <Text
-                          style={[styles.featureTitle, highlighted && styles.featureTitleHighlighted]}
-                          maxFontSizeMultiplier={1.5}
+            {featureGroups.map((group) => (
+              <ReanimatedAnimated.View key={group.id} layout={LIST_ROW_LAYOUT} style={styles.featureGroup}>
+                <Text style={styles.featureGroupTitle} maxFontSizeMultiplier={1.3} accessibilityRole="header">
+                  {group.title.toUpperCase()}
+                </Text>
+                <View style={styles.featureCard}>
+                  {group.features.map((feature, index) => {
+                    const highlighted = feature.id === highlightedFeature;
+                    return (
+                      <View key={feature.id}>
+                        {index > 0 ? <View style={styles.featureDivider} /> : null}
+                        <View
+                          style={[styles.featureRow, highlighted && styles.featureRowHighlighted]}
+                          accessible
+                          accessibilityLabel={`${feature.title}. ${feature.detail}`}
                         >
-                          {feature.title}
-                        </Text>
-                        <Text style={styles.featureDetail} maxFontSizeMultiplier={1.5}>
-                          {feature.detail}
-                        </Text>
+                          <View style={styles.featureIcon}>
+                            <SymbolView name={feature.icon} size={14} weight="semibold" tintColor={BRAND_GREEN} />
+                          </View>
+                          <View style={styles.featureText}>
+                            <Text
+                              style={[styles.featureTitle, highlighted && styles.featureTitleHighlighted]}
+                              maxFontSizeMultiplier={1.5}
+                            >
+                              {feature.title}
+                            </Text>
+                            <Text style={styles.featureDetail} maxFontSizeMultiplier={1.5}>
+                              {feature.detail}
+                            </Text>
+                          </View>
+                        </View>
                       </View>
-                    </View>
-                  </View>
-                );
-              })}
-            </ReanimatedAnimated.View>
+                    );
+                  })}
+                </View>
+              </ReanimatedAnimated.View>
+            ))}
 
             {/* Grounded in something true about this engine (see
                 policy-orchestration.ts's "surfacing, not hiding" comment),
@@ -554,17 +595,6 @@ export default function PaywallScreen() {
                 {footerSummary}
               </ReanimatedAnimated.Text>
             ) : null}
-            {/* Apple 3.1.2 and the California/Illinois auto-renewal laws want
-                the terms right at the point of purchase: price, period, that
-                it renews, and how to cancel. Above the button (not below) so
-                a plan switch changes its length without moving the button
-                under someone's thumb. */}
-            {compact ? null : (
-              <Text style={styles.disclosureText} maxFontSizeMultiplier={1.3}>
-                {disclosure}
-              </Text>
-            )}
-
             <Pressable
               style={styles.ctaHit}
               onPress={ctaMode === 'retry' ? handleRetry : handlePurchase}
@@ -612,6 +642,7 @@ export default function PaywallScreen() {
                     { opacity: ctaHover.anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.12] }) },
                   ]}
                 />
+                <CtaShimmer play={plans.kind === 'ready'} reducedMotion={reducedMotion} />
                 <View pointerEvents="none" style={styles.ctaLabelSlot}>
                   <ReanimatedAnimated.Text
                     key={ctaLabel}
@@ -657,6 +688,18 @@ export default function PaywallScreen() {
               </View>
             </Pressable>
 
+            {/* Apple 3.1.2 and the California/Illinois auto-renewal laws want
+                the terms at the point of purchase: price, period, that it
+                renews, and how to cancel. A quiet block right under the
+                button, holding a fixed height (see disclosureMinHeight). */}
+            {compact ? null : (
+              <Text
+                style={[styles.disclosureText, styles.disclosureUnderCta, { minHeight: disclosureMinHeight }]}
+                maxFontSizeMultiplier={1.3}
+              >
+                {disclosure}
+              </Text>
+            )}
             <View style={styles.linksRow}>
               <Pressable
                 onPress={handleRestore}
@@ -917,7 +960,7 @@ function PlanRowPlaceholder({ styles }: { styles: Styles }) {
   );
 }
 
-// Clearly labelled example data: the page sells charts, so it shows one —
+// Clearly labelled example data: the page sells charts, so it shows them —
 // not the person's own (that's the Plus feature itself), and never dressed
 // up as theirs.
 const EXAMPLE_STRENGTH = [100, 101, 103, 102, 105, 107, 106, 109, 112, 111, 114, 117].map((value) => ({ value }));
@@ -927,58 +970,116 @@ const EXAMPLE_WEEKS: boolean[][] = [
   [true, false, true, false, true, false, false],
   [true, true, false, false, true, false, true],
 ];
+const EXAMPLE_READINESS = 0.82;
 const GRID_CELL = 9;
 const GRID_GAP = 3;
 const GRID_WIDTH = 7 * GRID_CELL + 6 * GRID_GAP;
+const RING_SIZE = 46;
+const PREVIEW_GAP = 16;
+const PREVIEW_PADDING = 16;
+// The calendar fills in once the strength line has drawn itself (Sparkline
+// and ProgressRing both draw over 150 + 900ms), one day at a time.
+const GRID_FILL_DELAY_MS = 900;
+const GRID_FILL_PER_CELL_MS = 35;
+const GRID_CELLS = EXAMPLE_WEEKS.length * 7;
 
 function PreviewCard({
   loggedSessionCount,
   styles,
   colors,
+  reducedMotion,
 }: {
   loggedSessionCount: number | null;
   styles: Styles;
   colors: Colors;
+  reducedMotion: boolean;
 }) {
   const [width, setWidth] = useState(0);
-  const sparkWidth = Math.max(0, width - 32 - GRID_WIDTH - 20);
+  const sparkWidth = Math.max(0, width - PREVIEW_PADDING * 2 - GRID_WIDTH - RING_SIZE - PREVIEW_GAP * 2);
+  const fill = useSharedValue(reducedMotion ? GRID_CELLS : 0);
+  useEffect(() => {
+    if (reducedMotion) {
+      fill.value = GRID_CELLS;
+      return;
+    }
+    fill.value = withDelay(
+      GRID_FILL_DELAY_MS,
+      withTiming(GRID_CELLS, { duration: GRID_CELLS * GRID_FILL_PER_CELL_MS, easing: Easing.linear })
+    );
+  }, [fill, reducedMotion]);
   // Honest about which chart fills in from what: every logged session lands
-  // on the calendar, but a strength trend needs weights logged on a lift —
-  // most people's Strength Progress starts empty (see progress.tsx).
+  // on the calendar, but a strength trend needs weights logged on a lift
+  // (most people's Strength Progress starts empty, see progress.tsx), and
+  // readiness needs Apple Health.
   const caption =
     loggedSessionCount !== null && loggedSessionCount > 0
-      ? `You've logged ${loggedSessionCount} session${loggedSessionCount === 1 ? '' : 's'} — ${loggedSessionCount === 1 ? 'it lands' : 'they land'} on your consistency calendar. Strength trends appear once you log weights on a lift.`
-      : 'Every session you log lands on your consistency calendar. Strength trends appear once you log weights on a lift.';
+      ? `You've logged ${loggedSessionCount} session${loggedSessionCount === 1 ? '' : 's'} — ${loggedSessionCount === 1 ? "it's" : "they're"} already on your calendar. Strength needs logged weights; readiness needs Apple Health.`
+      : 'The calendar fills from every session you log. Strength needs logged weights; readiness needs Apple Health.';
   return (
     <View
       style={styles.previewCard}
       onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
       accessible
-      accessibilityLabel={`Example charts: a rising strength trend and a four-week consistency calendar. ${caption}`}
+      accessibilityLabel={`Example charts: a rising strength trend, a four-week consistency calendar and a readiness score. ${caption}`}
     >
       <View style={styles.previewHeader}>
         <Text style={styles.previewEyebrow} maxFontSizeMultiplier={1.3}>
-          STRENGTH · CONSISTENCY
+          WHAT YOU&apos;LL SEE
         </Text>
         <Text style={styles.previewTag} maxFontSizeMultiplier={1.3}>
           Example
         </Text>
       </View>
       <View style={styles.previewCharts}>
-        <View style={styles.previewSpark}>
-          {sparkWidth > 0 ? <Sparkline data={EXAMPLE_STRENGTH} width={sparkWidth} height={52} color={BRAND_GREEN} filled /> : null}
+        <View style={styles.previewTile}>
+          <View style={[styles.previewChartBox, { width: sparkWidth }]}>
+            {sparkWidth > 0 ? (
+              <Sparkline data={EXAMPLE_STRENGTH} width={sparkWidth} height={46} color={BRAND_GREEN} filled />
+            ) : null}
+          </View>
+          <Text style={styles.previewTileLabel} maxFontSizeMultiplier={1.3}>
+            Strength
+          </Text>
         </View>
-        <View style={styles.previewGrid}>
-          {EXAMPLE_WEEKS.map((week, w) => (
-            <View key={w} style={styles.previewGridRow}>
-              {week.map((done, d) => (
-                <View
-                  key={d}
-                  style={[styles.previewGridCell, { backgroundColor: done ? BRAND_GREEN : colors.backgroundSelected }]}
-                />
-              ))}
+        <View style={styles.previewTile}>
+          <View style={[styles.previewChartBox, styles.previewGrid]}>
+            {EXAMPLE_WEEKS.map((week, w) => (
+              <View key={w} style={styles.previewGridRow}>
+                {week.map((done, d) => (
+                  <GridCell
+                    key={d}
+                    index={w * 7 + d}
+                    done={done}
+                    fill={fill}
+                    emptyColor={colors.backgroundSelected}
+                    style={styles.previewGridCell}
+                  />
+                ))}
+              </View>
+            ))}
+          </View>
+          <Text style={styles.previewTileLabel} maxFontSizeMultiplier={1.3}>
+            Consistency
+          </Text>
+        </View>
+        <View style={styles.previewTile}>
+          <View style={styles.previewChartBox}>
+            <ProgressRing
+              size={RING_SIZE}
+              strokeWidth={5}
+              progress={EXAMPLE_READINESS}
+              color={BRAND_GREEN}
+              trackColor={colors.backgroundSelected}
+            />
+            <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.previewRingCenter]}>
+              <Text style={styles.previewRingValue} maxFontSizeMultiplier={1}>
+                {Math.round(EXAMPLE_READINESS * 100)}
+              </Text>
             </View>
-          ))}
+          </View>
+          <Text style={styles.previewTileLabel} maxFontSizeMultiplier={1.3}>
+            Readiness
+          </Text>
         </View>
       </View>
       <Text style={styles.previewCaption} maxFontSizeMultiplier={1.5}>
@@ -987,6 +1088,81 @@ function PreviewCard({
     </View>
   );
 }
+
+/** One calendar day. A trained day fills in green (with a small pop) as the
+ * card's fill sweep reaches it; a rest day is just the empty square. */
+function GridCell({
+  index,
+  done,
+  fill,
+  emptyColor,
+  style,
+}: {
+  index: number;
+  done: boolean;
+  fill: SharedValue<number>;
+  emptyColor: string;
+  style: Styles['previewGridCell'];
+}) {
+  const doneStyle = useAnimatedStyle(() => {
+    const t = interpolate(fill.value, [index, index + 1], [0, 1], Extrapolation.CLAMP);
+    return { opacity: t, transform: [{ scale: interpolate(t, [0, 1], [0.4, 1]) }] };
+  });
+  return (
+    <View style={[style, { backgroundColor: emptyColor }]}>
+      {done ? (
+        <ReanimatedAnimated.View style={[StyleSheet.absoluteFill, { borderRadius: 2.5, backgroundColor: BRAND_GREEN }, doneStyle]} />
+      ) : null}
+    </View>
+  );
+}
+
+const SHIMMER_WIDTH = 90;
+
+/**
+ * One soft light sweep across the Buy button when prices first land — a cue
+ * to where the decision is. Plays once, never under Reduce Motion, and sits
+ * in its own clipped layer so the clip never touches the button's glass.
+ */
+function CtaShimmer({ play, reducedMotion }: { play: boolean; reducedMotion: boolean }) {
+  const [width, setWidth] = useState(0);
+  const sweep = useSharedValue(0);
+  const playedRef = useRef(false);
+  useEffect(() => {
+    if (!play || reducedMotion || width === 0 || playedRef.current) return;
+    playedRef.current = true;
+    sweep.value = withDelay(450, withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.quad) }));
+  }, [play, reducedMotion, width, sweep]);
+  const bandStyle = useAnimatedStyle(() => ({
+    opacity: sweep.value > 0 && sweep.value < 1 ? 1 : 0,
+    transform: [{ translateX: interpolate(sweep.value, [0, 1], [-SHIMMER_WIDTH, width]) }],
+  }));
+  return (
+    <View
+      pointerEvents="none"
+      style={[StyleSheet.absoluteFill, shimmerStyles.clip]}
+      onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+    >
+      <ReanimatedAnimated.View style={[shimmerStyles.band, bandStyle]} />
+    </View>
+  );
+}
+
+const shimmerStyles = StyleSheet.create({
+  clip: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  band: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    width: SHIMMER_WIDTH,
+    experimental_backgroundImage:
+      'linear-gradient(100deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.22) 50%, rgba(255,255,255,0) 100%)',
+  },
+});
 
 function createStyles(colors: Colors, isDark: boolean) {
   return StyleSheet.create({
@@ -1015,12 +1191,24 @@ function createStyles(colors: Colors, isDark: boolean) {
     header: {
       alignItems: 'center',
     },
+    // An ellipse of brand green fading to nothing, wider than the column and
+    // centred on the lockup.
+    heroGlow: {
+      position: 'absolute',
+      top: -120,
+      left: -80,
+      right: -80,
+      height: 330,
+      experimental_backgroundImage: isDark
+        ? 'radial-gradient(ellipse closest-side, rgba(95,190,132,0.26) 0%, rgba(95,190,132,0.08) 55%, rgba(95,190,132,0) 100%)'
+        : 'radial-gradient(ellipse closest-side, rgba(95,190,132,0.20) 0%, rgba(95,190,132,0.06) 55%, rgba(95,190,132,0) 100%)',
+    },
     headline: {
       marginTop: 18,
       color: colors.text,
-      fontSize: Type.heading,
-      lineHeight: 28,
-      letterSpacing: -0.3,
+      fontSize: 26,
+      lineHeight: 32,
+      letterSpacing: -0.5,
       textAlign: 'center',
       fontFamily: 'Geist-SemiBold',
     },
@@ -1171,16 +1359,37 @@ function createStyles(colors: Colors, isDark: boolean) {
       marginTop: 12,
       flexDirection: 'row',
       alignItems: 'flex-end',
-      gap: 20,
+      gap: PREVIEW_GAP,
     },
-    previewSpark: {
-      flex: 1,
-      height: 52,
+    previewTile: {
+      alignItems: 'center',
+    },
+    // Every chart sits in the same 46pt-tall box so the three labels line up.
+    previewChartBox: {
+      height: 46,
+      alignItems: 'center',
       justifyContent: 'flex-end',
+    },
+    previewTileLabel: {
+      marginTop: 6,
+      color: colors.textTertiary,
+      fontSize: Type.micro,
+      fontFamily: 'Geist-Medium',
+    },
+    previewRingCenter: {
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    previewRingValue: {
+      color: colors.text,
+      fontSize: Type.secondary,
+      fontFamily: 'Geist-SemiBold',
+      ...TabularNums,
     },
     previewGrid: {
       width: GRID_WIDTH,
       gap: GRID_GAP,
+      justifyContent: 'center',
     },
     previewGridRow: {
       flexDirection: 'row',
@@ -1198,9 +1407,20 @@ function createStyles(colors: Colors, isDark: boolean) {
       lineHeight: 16.5,
       fontFamily: 'Geist-Regular',
     },
+    featureGroup: {
+      marginTop: 20,
+    },
+    featureGroupTitle: {
+      marginBottom: 8,
+      marginLeft: 4,
+      color: colors.textTertiary,
+      fontSize: Type.caption,
+      letterSpacing: 0.6,
+      fontFamily: 'Geist-Medium',
+    },
     featureCard: {
-      paddingVertical: 6,
-      paddingHorizontal: 8,
+      paddingVertical: 4,
+      paddingHorizontal: 6,
       borderRadius: 16,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.surfaceBorder,
@@ -1210,7 +1430,7 @@ function createStyles(colors: Colors, isDark: boolean) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 12,
-      paddingVertical: 10,
+      paddingVertical: 8,
       paddingHorizontal: 8,
       borderRadius: 12,
     },
@@ -1218,8 +1438,8 @@ function createStyles(colors: Colors, isDark: boolean) {
       backgroundColor: isDark ? 'rgba(95,190,132,0.10)' : 'rgba(95,190,132,0.08)',
     },
     featureIcon: {
-      width: 30,
-      height: 30,
+      width: 28,
+      height: 28,
       borderRadius: 8,
       alignItems: 'center',
       justifyContent: 'center',
@@ -1244,8 +1464,9 @@ function createStyles(colors: Colors, isDark: boolean) {
       fontFamily: 'Geist-Regular',
     },
     // Inset past the icon tile, like an iOS inset-grouped list.
+    // Inset past the icon tile, like an iOS inset-grouped list.
     featureDivider: {
-      marginLeft: 58,
+      marginLeft: 54,
       marginRight: 8,
       height: StyleSheet.hairlineWidth,
       backgroundColor: colors.surfaceDivider,
@@ -1281,7 +1502,7 @@ function createStyles(colors: Colors, isDark: boolean) {
       fontFamily: 'Geist-Regular',
     },
     trialText: {
-      marginBottom: 6,
+      marginBottom: 8,
       color: colors.text,
       fontSize: Type.body,
       lineHeight: 18,
@@ -1289,12 +1510,20 @@ function createStyles(colors: Colors, isDark: boolean) {
       fontFamily: 'Geist-Medium',
     },
     disclosureText: {
-      marginBottom: 12,
       color: colors.textSecondary,
       fontSize: Type.caption,
       lineHeight: 15,
       textAlign: 'center',
       fontFamily: 'Geist-Regular',
+    },
+    // Quieter under the button: smaller, and a step lighter in dark mode,
+    // where the tertiary grey still reads at 4.6:1 on black (light mode keeps
+    // the secondary grey — the tertiary one fails contrast on #F2F2F7).
+    disclosureUnderCta: {
+      marginTop: 10,
+      fontSize: Type.micro,
+      lineHeight: DISCLOSURE_LINE_HEIGHT,
+      color: isDark ? colors.textTertiary : colors.textSecondary,
     },
     disclosureInScroll: {
       marginTop: 12,

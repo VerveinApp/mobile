@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 
-import { isPlusFeature, openPaywall, PLUS_FEATURES } from '@/lib/plus-features';
+import { isPlusFeature, openPaywall, PLUS_FEATURE_GROUPS, PLUS_FEATURES } from '@/lib/plus-features';
 
 // Hoisted above the imports by babel-jest.
 jest.mock('expo-router', () => ({ router: { push: jest.fn() } }));
@@ -14,6 +14,14 @@ describe('Plus features', () => {
       expect(feature.detail.length).toBeGreaterThan(0);
       // Apple's naming rule: user-facing text says Apple Health, never the framework.
       expect(`${feature.title} ${feature.detail}`).not.toMatch(/HealthKit/);
+    }
+  });
+
+  it('puts every feature in a group the paywall shows', () => {
+    const groups = new Set(PLUS_FEATURE_GROUPS.map((g) => g.id));
+    for (const feature of PLUS_FEATURES) expect(groups.has(feature.group)).toBe(true);
+    for (const group of PLUS_FEATURE_GROUPS) {
+      expect(PLUS_FEATURES.some((f) => f.group === group.id)).toBe(true);
     }
   });
 
