@@ -9,6 +9,7 @@ import Purchases, {
   type PurchasesOffering,
   type PurchasesPackage,
 } from 'react-native-purchases';
+import * as Sentry from '@sentry/react-native';
 
 import { supabase } from '@/lib/supabase';
 
@@ -125,19 +126,109 @@ function syncIdentityWithSupabaseAuth(): void {
 }
 
 /**
- * The current offering's packages ($rc_monthly/$rc_annual/$rc_lifetime, as
- * configured in RevenueCat) — null if not configured or the fetch fails, so
- * the paywall can show an honest "couldn't load" state instead of an empty
- * screen pretending nothing's wrong.
+ * Why plans didn't load, in the terms the paywall can act on:
+ * - offline: no connection — it'll work once one is back.
+ * - store: the App Store was slow or had a problem — worth another try.
+ * - unavailable: RevenueCat or App Store Connect returned nothing to sell
+ *   (no current offering, no products attached, products not approved, the
+ *   Paid Apps agreement…). Retrying won't fix it, and the connection isn't
+ *   the cause, so the paywall must not say it is.
  */
-export async function getCurrentOffering(): Promise<PurchasesOffering | null> {
-  if (!configured) return null;
-  try {
-    const offerings = await Purchases.getOfferings();
-    return offerings.current;
-  } catch {
-    return null;
+export type PlansFailure = 'offline' | 'store' | 'unavailable';
+
+export type PlansResult =
+  | { kind: 'ready'; offering: PurchasesOffering; packages: PurchasesPackage[] }
+  | { kind: 'failed'; reason: PlansFailure };
+
+const OFFLINE_ERROR_CODES: readonly string[] = [
+  PURCHASES_ERROR_CODE.NETWORK_ERROR,
+  PURCHASES_ERROR_CODE.OFFLINE_CONNECTION_ERROR,
+];
+const STORE_ERROR_CODES: readonly string[] = [
+  PURCHASES_ERROR_CODE.STORE_PROBLEM_ERROR,
+  PURCHASES_ERROR_CODE.PRODUCT_REQUEST_TIMED_OUT_ERROR,
+];
+
+/**
+ * The current offering's packages, in display order — the monthly/annual/
+ * lifetime shortcuts ($rc_monthly/$rc_annual/$rc_lifetime, as configured in
+ * RevenueCat), or every available package if the offering uses custom ones.
+ *
+ * BUG FIX: this used to be getCurrentOffering(), which swallowed the error
+ * and returned null for every failure, so the paywall blamed "your
+ * connection" even when RevenueCat was reporting a configuration problem —
+ * and nobody could see which one it was. The real error code now reaches
+ * the device log (Console.app, filter "[paywall]") and Sentry, and the
+ * reason reaches the paywall.
+ */
+export async function loadPlans(): Promise<PlansResult> {
+  if (!configured) {
+    reportPlansFailure('not-configured');
+    return { kind: 'failed', reason: 'unavailable' };
   }
+  try {
+    const { current } = await Purchases.getOfferings();
+    if (!current) {
+      reportPlansFailure('no-current-offering');
+      return { kind: 'failed', reason: 'unavailable' };
+    }
+    const shortcuts = [current.monthly, current.annual, current.lifetime].filter(
+      // Loose inequality on purpose — an absent package type comes back as
+      // undefined at runtime, not the null the SDK's types declare.
+      (p): p is PurchasesPackage => p != null
+    );
+    const packages = shortcuts.length > 0 ? shortcuts : current.availablePackages;
+    if (packages.length === 0) {
+      reportPlansFailure('empty-offering');
+      return { kind: 'failed', reason: 'unavailable' };
+    }
+    return { kind: 'ready', offering: current, packages };
+  } catch (error) {
+    const { code } = (error ?? {}) as { code?: string };
+    reportPlansFailure(code ?? 'unknown', describePurchasesError(error));
+    if (code && OFFLINE_ERROR_CODES.includes(code)) return { kind: 'failed', reason: 'offline' };
+    if (code && STORE_ERROR_CODES.includes(code)) return { kind: 'failed', reason: 'store' };
+    return { kind: 'failed', reason: 'unavailable' };
+  }
+}
+
+type PurchasesErrorShape = {
+  message?: string;
+  userInfo?: {
+    readableErrorCode?: string;
+    underlyingErrorMessage?: string;
+    NSUnderlyingError?: { code?: string; domain?: string; userInfo?: { NSLocalizedDescription?: string } };
+  };
+};
+
+/**
+ * The parts of a RevenueCat rejection that say what actually went wrong, in
+ * the shape the native bridge really sends: on iOS the NSError's userInfo
+ * (readableErrorCode, and NSUnderlyingError for the StoreKit/network/backend
+ * cause), on Android userInfo.underlyingErrorMessage. The message itself
+ * already names the configuration cause (missing products and the like).
+ * Never the whole userInfo — the nested error carries native stack arrays.
+ */
+function describePurchasesError(error: unknown): string | undefined {
+  const { message, userInfo } = (error ?? {}) as PurchasesErrorShape;
+  const underlying = userInfo?.NSUnderlyingError;
+  const parts = [
+    userInfo?.readableErrorCode,
+    message,
+    underlying
+      ? `underlying ${underlying.domain ?? 'error'} ${underlying.code ?? ''}${underlying.userInfo?.NSLocalizedDescription ? `: ${underlying.userInfo.NSLocalizedDescription}` : ''}`.trim()
+      : userInfo?.underlyingErrorMessage,
+  ].filter((part): part is string => Boolean(part));
+  return parts.length > 0 ? parts.join(' — ') : undefined;
+}
+
+function reportPlansFailure(code: string, detail?: string): void {
+  console.warn(`[paywall] plans failed to load: ${code}${detail ? ` — ${detail}` : ''}`);
+  Sentry.captureMessage('Paywall plans failed to load', {
+    level: 'warning',
+    tags: { area: 'paywall-plans', code },
+    extra: detail ? { detail } : undefined,
+  });
 }
 
 /**

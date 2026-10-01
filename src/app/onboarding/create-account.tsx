@@ -66,9 +66,10 @@ const GOOGLE_BUTTON_TOP_OTHER = 212;
 const SOCIAL_NOTICE_TOP = 300;
 const AGE_CHECK_TOP = 718;
 
-// Liquid Glass is otherwise reserved for exactly one place (the EnergyGauge
-// dial) so it reads as a deliberate "this moment matters" cue, not
-// decoration. Account creation is the other moment that earns it.
+// Liquid Glass is reserved for the moments that matter — the EnergyGauge
+// dial, entering the app (trajectory.tsx) and subscribing (paywall.tsx) —
+// so it reads as a deliberate cue, not decoration. Account creation earns
+// it too.
 const isGlassAvailable = isLiquidGlassAvailable();
 
 // The age checkbox's red nudge and green checked fill fade rather than snap.
