@@ -46,6 +46,8 @@ import type { LegalSection } from '@/components/legal/legal-document-screen';
  * clause; survival, entire-agreement, venue, change-notice, and automatic
  * update terms; and Expo/Sentry as dependencies. Mirrored verbatim on
  * vervein.app/terms (vervein-marketing-site/terms.html) — change both.
+ *
+ * Revision 2026-10-02: §10 says exports don't include progress photos.
  */
 export const CONTACT_EMAIL = 'fuzayl@vervein.app';
 /** The individual who operates VerveIn — the same name as the App Store seller. */
@@ -57,7 +59,7 @@ export const OPERATOR_NAME = 'Barkath Mohammed';
  * one: every document that mentions it simply omits the line.
  */
 export const MAILING_ADDRESS = '';
-export const TERMS_EFFECTIVE_DATE = 'September 23, 2026';
+export const TERMS_EFFECTIVE_DATE = 'October 2, 2026';
 
 const CONTACT_LINE = MAILING_ADDRESS ? `${CONTACT_EMAIL} or by mail at ${MAILING_ADDRESS}` : CONTACT_EMAIL;
 
@@ -204,7 +206,8 @@ export const TERMS_SECTIONS: LegalSection[] = [
         'this information is permanently gone. We have no server-side copy to restore it from, and we are not ' +
         'responsible for that loss.',
       'If this data matters to you, use Export My Data periodically, especially before getting a new device or ' +
-        'deleting the App.',
+        'deleting the App. Exports don’t include progress photos — keep a device backup (such as iCloud Backup) on ' +
+        'if those matter to you.',
     ],
   },
   {

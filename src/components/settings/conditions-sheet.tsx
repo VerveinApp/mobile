@@ -26,12 +26,14 @@ export const ConditionsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [selected, setSelected] = useState<Set<Condition>>(new Set());
+  const [hasConsent, setHasConsent] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const loadFromProfile = useCallback(async () => {
     const profile = await getProfile();
     const stored = (profile?.conditions ?? []).filter((c): c is Condition => (CONDITIONS as readonly string[]).includes(c));
     setSelected(new Set(stored));
+    setHasConsent(profile?.healthConsent === 'true');
   }, []);
 
   usePreloadedSheet(forwardedRef, sheetRef, loadFromProfile);
@@ -98,6 +100,15 @@ export const ConditionsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
           exercise selection for these conditions, so nothing here changes what you&apos;re shown. It&apos;s saved for
           your own record and to be ready if that changes.
         </Text>
+        {/* Without health-info consent these stay on this device — the
+            server copy is withheld (see profile-sync.ts) — so say so
+            rather than let someone assume they're backed up with the
+            account. */}
+        {hasConsent ? null : (
+          <Text style={styles.hint} maxFontSizeMultiplier={1.4}>
+            Kept on this device only. To keep it with your account too, share your health info in Body &amp; Biometrics.
+          </Text>
+        )}
 
         <View style={styles.list}>
           {CONDITIONS.map((condition, index) => {
