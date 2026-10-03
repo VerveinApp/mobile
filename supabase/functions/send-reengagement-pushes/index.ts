@@ -126,6 +126,8 @@ Deno.serve(async (req: Request) => {
       // everywhere else. A few days off reads as recovered, because it is.
       title: 'Rested and ready',
       body: 'A few days off means you’re recovered — even a short session counts, whenever you’re ready.',
+      // Opens today's check-in when tapped (the app's notification-redirect.ts).
+      data: { url: '/home/check-in' },
     }))
   );
   await sendExpoPushBatch(adminClient, messages);

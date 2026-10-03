@@ -1,5 +1,6 @@
+import type { BottomSheetModal } from '@gorhom/bottom-sheet';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import ReanimatedAnimated, {
   Easing,
@@ -51,6 +52,7 @@ import { dismissEquipmentPrompt, shouldAskForEquipment } from '@/lib/equipment-p
 import { TodaysTrainingCard } from '@/components/home/todays-training-card';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 import { SymbolView } from '@/components/ui/app-symbol';
+import { BiometricsSheet } from '@/components/settings/biometrics-sheet';
 
 const WEEKDAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']; // Monday-start, matches session-history.ts
 
@@ -579,6 +581,7 @@ export default function SummaryScreen() {
           weekActivity={weekActivity}
           calibration={calibration}
           isPremium={isPremium}
+          onProfileChanged={handleRefresh}
         />
         </ReanimatedAnimated.View>
       </ScrollView>
@@ -726,6 +729,7 @@ function YourFitness({
   weekActivity,
   calibration,
   isPremium,
+  onProfileChanged,
 }: {
   styles: ReturnType<typeof createStyles>;
   profile: UserProfile | null;
@@ -733,7 +737,11 @@ function YourFitness({
   weekActivity: { days: WeekDay[]; completedCount: number; scheduledCount: number };
   calibration: UserCalibration | null;
   isPremium: boolean | null;
+  /** Re-reads Home after the body-info sheet below closes. */
+  onProfileChanged: () => void;
 }) {
+  const biometricsSheetRef = useRef<BottomSheetModal>(null);
+  const colors = useAppColors();
   const commitment = Number(profile?.commitmentLevel) || 4;
   const loadLabel = commitment <= 3 ? 'Light' : commitment <= 6 ? 'Moderate' : 'High';
   const energy = todaySession?.energy;
@@ -802,6 +810,7 @@ function YourFitness({
   // sharing it would otherwise read "bars fill in as you log sessions" week
   // after week while logging sessions and never see one.
   const hasBodyWeight = Number(profile?.weightKg) > 0;
+  const showsWeightLink = !hasAnyLoadData && !hasBodyWeight;
 
   return (
     <View style={styles.section}>
@@ -815,8 +824,26 @@ function YourFitness({
           glanceable summary shows, so this closes the last free preview of
           it rather than leaving the headline number reachable for free
           while its detail view costs Plus. */}
+      {/* Both cards open their detail on Progress — this one scrolled to
+          Progress's own Training Load section (energy line and banked
+          volume), the Consistency card below to the calendar at the top. */}
       <PremiumGate isPremium={isPremium} label="Training Load" feature="consistency">
-      <View style={styles.fitnessCard}>
+      <Pressable
+        style={({ pressed }) => [styles.fitnessCard, pressed && PRESSED_DIM]}
+        onPress={() => {
+          hapticSelect();
+          router.push('/(tabs)/progress?section=load' as never);
+        }}
+        accessibilityRole="button"
+        accessibilityHint="Opens Training Load on Progress"
+        // The whole card is one VoiceOver element, which hides the "Add your
+        // weight" link inside it — so that link is offered as an action on
+        // the card instead (swipe up or down to reach it).
+        accessibilityActions={showsWeightLink ? [{ name: 'addWeight', label: 'Add your weight' }] : undefined}
+        onAccessibilityAction={(event) => {
+          if (event.nativeEvent.actionName === 'addWeight') biometricsSheetRef.current?.present();
+        }}
+      >
         <View style={styles.fitnessCardHeader}>
           <Text style={styles.fitnessCardLabel} maxFontSizeMultiplier={1.3}>Training Load</Text>
           {/* Before any session: the PLANNED load (from the commitment level
@@ -824,17 +851,20 @@ function YourFitness({
               sat above an empty chart and read as a claim about training
               that hadn't happened. After: the week's real estimate, "~"
               like every other calorie figure in the app. */}
-          {hasAnyLoadData ? (
-            <Text style={styles.fitnessCardValue} maxFontSizeMultiplier={1.2}>
-              ~{weekKcal.toLocaleString('en-US')}
-              <Text style={styles.fitnessCardTier}> cal this week</Text>
-            </Text>
-          ) : (
-            <Text style={styles.fitnessCardValue} maxFontSizeMultiplier={1.2}>
-              {loadLabel}
-              <Text style={styles.fitnessCardTier}> plan</Text>
-            </Text>
-          )}
+          <View style={styles.fitnessCardValueRow}>
+            {hasAnyLoadData ? (
+              <Text style={styles.fitnessCardValue} maxFontSizeMultiplier={1.2}>
+                ~{weekKcal.toLocaleString('en-US')}
+                <Text style={styles.fitnessCardTier}> cal this week</Text>
+              </Text>
+            ) : (
+              <Text style={styles.fitnessCardValue} maxFontSizeMultiplier={1.2}>
+                {loadLabel}
+                <Text style={styles.fitnessCardTier}> plan</Text>
+              </Text>
+            )}
+            <SymbolView name="chevron.right" size={11} tintColor={colors.textTertiary} />
+          </View>
         </View>
         {hasAnyLoadData ? (
         <View style={styles.loadChart} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
@@ -868,11 +898,27 @@ function YourFitness({
           })}
         </View>
         ) : (
-          <Text style={styles.loadChartEmptyText} maxFontSizeMultiplier={1.3}>
-            {hasBodyWeight
-              ? 'Bars fill in as you log sessions this week.'
-              : 'Add your weight in Settings → Body & Biometrics to chart each session’s effort.'}
-          </Text>
+          hasBodyWeight ? (
+            <Text style={styles.loadChartEmptyText} maxFontSizeMultiplier={1.3}>
+              Bars fill in as you log sessions this week.
+            </Text>
+          ) : (
+            // Opens the body-info sheet right here instead of sending
+            // someone off to find it in Settings.
+            <Pressable
+              onPress={() => {
+                hapticSelect();
+                biometricsSheetRef.current?.present();
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Add your weight to chart each session’s effort"
+              hitSlop={6}
+            >
+              <Text style={styles.loadChartEmptyText} maxFontSizeMultiplier={1.3}>
+                <Text style={styles.loadChartEmptyLink}>Add your weight</Text> to chart each session’s effort.
+              </Text>
+            </Pressable>
+          )
         )}
         <Text style={styles.fitnessCardNote} maxFontSizeMultiplier={1.4}>{readinessNote}</Text>
         {calibrationNote ? (
@@ -880,17 +926,28 @@ function YourFitness({
             {calibrationNote}
           </Text>
         ) : null}
-      </View>
+      </Pressable>
       </PremiumGate>
 
       <PremiumGate isPremium={isPremium} label="Consistency" feature="consistency">
-      <View style={styles.fitnessCard}>
+      <Pressable
+        style={({ pressed }) => [styles.fitnessCard, pressed && PRESSED_DIM]}
+        onPress={() => {
+          hapticSelect();
+          router.push('/(tabs)/progress' as never);
+        }}
+        accessibilityRole="button"
+        accessibilityHint="Opens the consistency calendar on Progress"
+      >
         <View style={styles.fitnessCardHeader}>
           <Text style={styles.fitnessCardLabel} maxFontSizeMultiplier={1.3}>Consistency</Text>
-          <Text style={styles.fitnessCardValue} maxFontSizeMultiplier={1.2}>
-            {weekActivity.completedCount}/{weekActivity.scheduledCount}
-            <Text style={styles.fitnessCardTier}> this week</Text>
-          </Text>
+          <View style={styles.fitnessCardValueRow}>
+            <Text style={styles.fitnessCardValue} maxFontSizeMultiplier={1.2}>
+              {weekActivity.completedCount}/{weekActivity.scheduledCount}
+              <Text style={styles.fitnessCardTier}> this week</Text>
+            </Text>
+            <SymbolView name="chevron.right" size={11} tintColor={colors.textTertiary} />
+          </View>
         </View>
         <Text style={styles.fitnessCardNote} maxFontSizeMultiplier={1.4}>{consistencyNote}</Text>
         {isQuietWeek ? (
@@ -898,8 +955,9 @@ function YourFitness({
             On your side, not your goal&apos;s side.
           </Text>
         ) : null}
-      </View>
+      </Pressable>
       </PremiumGate>
+      <BiometricsSheet ref={biometricsSheetRef} onDismiss={onProfileChanged} />
     </View>
   );
 }
@@ -1173,6 +1231,11 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
+    fitnessCardValueRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
     fitnessCardValue: {
       color: colors.text,
       fontSize: Type.bodyLarge,
@@ -1227,6 +1290,10 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       color: colors.textTertiary,
       fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
+    },
+    loadChartEmptyLink: {
+      color: colors.accentText,
+      fontFamily: 'Geist-SemiBold',
     },
     fitnessCardNote: {
       marginTop: 6,

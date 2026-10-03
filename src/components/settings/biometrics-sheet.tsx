@@ -122,7 +122,7 @@ function ageToIndex(age: number): number {
  * AdjustPlanSheet's doc comment for why data loads on present here instead
  * of a route-focus effect.
  */
-export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRef) => {
+export const BiometricsSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void }>(({ onDismiss }, forwardedRef) => {
   const sheetRef = useRef<BottomSheetModal>(null);
 
   const insets = useSafeAreaInsets();
@@ -257,6 +257,7 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
     <BottomSheetModal
       ref={sheetRef}
       snapPoints={['90%']}
+      onDismiss={onDismiss}
       backdropComponent={renderBackdrop}
       backgroundStyle={Platform.OS === 'android' ? { backgroundColor: colors.background, borderTopLeftRadius: 28, borderTopRightRadius: 28 } : { backgroundColor: colors.background }}
       handleIndicatorStyle={{ backgroundColor: Platform.OS === 'android' ? 'rgba(95,190,132,0.5)' : colors.surfaceBorder, width: Platform.OS === 'android' ? 36 : undefined }}

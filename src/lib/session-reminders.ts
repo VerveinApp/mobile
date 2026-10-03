@@ -210,16 +210,21 @@ function pickRandom<T>(items: T[]): T {
   return items[Math.floor(Math.random() * items.length)];
 }
 
-async function buildReminderContent(): Promise<{ title: string; body: string }> {
+// A reminder is about today's session, so tapping one opens today's check-in
+// (see notification-redirect.ts) rather than wherever the app last was.
+const REMINDER_DATA = { url: '/home/check-in' };
+
+async function buildReminderContent(): Promise<{ title: string; body: string; data: { url: string } }> {
   const trainingState = await getTrainingState();
   const area = getMostNeglectedBodyArea(trainingState);
   if (area) {
     return {
       title: 'Training day',
       body: pickRandom(AREA_READY_TEMPLATES)(BODY_AREA_PRIORITY_LABEL[area]),
+      data: REMINDER_DATA,
     };
   }
-  return { title: 'Training day', body: pickRandom(GENERIC_TEMPLATES) };
+  return { title: 'Training day', body: pickRandom(GENERIC_TEMPLATES), data: REMINDER_DATA };
 }
 
 // BUG FIX: scheduleRollingWindow's own cancel-then-reschedule sequence had

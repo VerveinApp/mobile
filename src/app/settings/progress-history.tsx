@@ -228,7 +228,18 @@ export default function ProgressHistoryScreen() {
               <View style={styles.emptyCard}>
                 <SymbolView name="clock.arrow.circlepath" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />
                 <Text style={styles.emptyText} maxFontSizeMultiplier={1.3}>
-                  No sessions logged yet — complete a check-in to start your history.
+                  No sessions logged yet —{' '}
+                  <Text
+                    style={styles.emptyLink}
+                    onPress={() => {
+                      hapticSelect();
+                      router.push('/home/check-in' as never);
+                    }}
+                    accessibilityRole="button"
+                  >
+                    check in for today
+                  </Text>{' '}
+                  to start your history.
                 </Text>
               </View>
             ) : (
@@ -535,6 +546,10 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       fontFamily: 'Geist-Medium',
       lineHeight: 18,
       textAlign: 'center',
+    },
+    emptyLink: {
+      color: colors.accentText,
+      fontFamily: 'Geist-SemiBold',
     },
     entryRow: {
       paddingHorizontal: 16,
