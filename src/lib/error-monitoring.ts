@@ -23,6 +23,28 @@ export function initErrorMonitoring(): void {
   Sentry.init({
     dsn,
     debug: __DEV__,
-    tracesSampleRate: 1.0,
+    // Crash and error reports only — what the Privacy Policy (Section 7)
+    // describes. Performance tracing (this was 1.0) sent a trace from every
+    // session — app start, screen loads, every network request — not just
+    // the ones where something went wrong.
+    tracesSampleRate: 0,
+    // Explicit, not just the SDK default: no IP address or other user
+    // details attached to a report.
+    sendDefaultPii: false,
+    beforeBreadcrumb: stripRequestQuery,
   });
+}
+
+/**
+ * A report carries the requests made just before the error as breadcrumbs.
+ * Their query strings can hold the account ID (Supabase filters look like
+ * `profiles?user_id=eq.<id>`), so only the endpoint itself is kept — enough
+ * to see which call failed, without tying the report to an account.
+ */
+export function stripRequestQuery(breadcrumb: Sentry.Breadcrumb): Sentry.Breadcrumb {
+  const url = breadcrumb.data?.url;
+  if ((breadcrumb.category === 'fetch' || breadcrumb.category === 'xhr') && typeof url === 'string') {
+    return { ...breadcrumb, data: { ...breadcrumb.data, url: url.split('?')[0] } };
+  }
+  return breadcrumb;
 }

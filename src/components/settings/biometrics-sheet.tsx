@@ -280,9 +280,16 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
       >
+        {/* Saving here is how consent is given after onboarding, so it says
+            what onboarding's consent checkbox says — that this is stored
+            with the account, why, and how to take it back — instead of
+            only "add it anytime", which never mentioned the account. The
+            button below names the act ("Agree & Save") so consenting is a
+            deliberate tap, not a side effect of saving. */}
         {!hadConsent ? (
           <Text style={styles.hint} maxFontSizeMultiplier={1.4}>
-            You skipped sharing this during onboarding. Add it anytime — used only to tailor your training load.
+            You skipped sharing this during onboarding. Saving it means you agree to VerveIn storing it with your
+            account to tailor your training. You can stop sharing it here anytime.
           </Text>
         ) : null}
 
@@ -490,7 +497,7 @@ export const BiometricsSheet = forwardRef<BottomSheetModal>((_props, forwardedRe
               style={[StyleSheet.absoluteFill, styles.saveButtonGlow, { opacity: savePress.glow }]}
             />
             <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>
-              {saving ? 'Saving…' : 'Save'}
+              {saving ? 'Saving…' : hadConsent ? 'Save' : 'Agree & Save'}
             </Text>
           </View>
         </Pressable>

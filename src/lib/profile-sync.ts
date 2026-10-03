@@ -1,6 +1,53 @@
 import type { UserProfile } from '@/lib/user-profile';
 
 /**
+ * The `profiles` row for this profile — exactly what reaches the server.
+ * Kept separate from the upload itself so the consent rule below is tested
+ * directly (see __tests__/privacy-promises.test.ts).
+ */
+export function remoteProfileRow(profile: UserProfile, userId: string) {
+  // Health fields reach the server only with consent — the Privacy
+  // Policy's promise (Sections 2 and 10), enforced here, in the one place
+  // every profile save passes through, rather than at each screen that can
+  // edit them: Weight History, Health Conditions and Movement Restrictions
+  // all write to the profile without asking, and used to sync whatever
+  // they wrote. Without consent they go up as null — they still work on
+  // this device — which also clears anything an earlier build synced.
+  const consented = profile.healthConsent === 'true';
+  const ifConsented = <T>(value: T | undefined): T | null => (consented ? (value ?? null) : null);
+  return {
+    user_id: userId,
+    name: profile.name ?? null,
+    goal: profile.goal ?? null,
+    experience: profile.experience ?? null,
+    environment: profile.environment ?? null,
+    equipment: profile.equipment ?? null,
+    duration: profile.duration ?? null,
+    commitment_level: profile.commitmentLevel ?? null,
+    days: profile.days ?? null,
+    health_consent: profile.healthConsent ?? null,
+    health_consented_at: profile.healthConsentedAt ?? null,
+    sex: ifConsented(profile.sex),
+    height_cm: ifConsented(profile.heightCm),
+    weight_kg: ifConsented(profile.weightKg),
+    conditions: ifConsented(profile.conditions),
+    movement_restrictions: ifConsented(profile.movementRestrictions),
+    // BUG FIX (found in a later full-app audit): these were added to
+    // UserProfile for the Goals feature but never wired into either sync
+    // direction here, so a target weight or lift target set locally
+    // silently never reached a new device or a post-reinstall restore —
+    // see 20260907000000_profile_goals_fields.sql and
+    // 20260909000000_profile_target_lift_fields.sql for the matching
+    // column migrations this needs deployed to actually work.
+    age: ifConsented(profile.age),
+    target_weight_kg: profile.targetWeightKg ?? null,
+    target_lift_exercise: profile.targetLiftExercise ?? null,
+    target_lift_weight_kg: profile.targetLiftWeightKg ?? null,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+/**
  * Best-effort remote mirror of the local profile — see
  * supabase/migrations/20260903010000_profile_sync.sql for why this exists
  * and the table it writes to. Fire-and-forget by design, same as every
@@ -25,36 +72,7 @@ export async function pushProfileToRemote(profile: UserProfile): Promise<void> {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return;
-    const row = {
-      user_id: user.id,
-      name: profile.name ?? null,
-      goal: profile.goal ?? null,
-      experience: profile.experience ?? null,
-      environment: profile.environment ?? null,
-      equipment: profile.equipment ?? null,
-      duration: profile.duration ?? null,
-      commitment_level: profile.commitmentLevel ?? null,
-      days: profile.days ?? null,
-      health_consent: profile.healthConsent ?? null,
-      health_consented_at: profile.healthConsentedAt ?? null,
-      sex: profile.sex ?? null,
-      height_cm: profile.heightCm ?? null,
-      weight_kg: profile.weightKg ?? null,
-      conditions: profile.conditions ?? null,
-      movement_restrictions: profile.movementRestrictions ?? null,
-      // BUG FIX (found in a later full-app audit): these were added to
-      // UserProfile for the Goals feature but never wired into either sync
-      // direction here, so a target weight or lift target set locally
-      // silently never reached a new device or a post-reinstall restore —
-      // see 20260907000000_profile_goals_fields.sql and
-      // 20260909000000_profile_target_lift_fields.sql for the matching
-      // column migrations this needs deployed to actually work.
-      age: profile.age ?? null,
-      target_weight_kg: profile.targetWeightKg ?? null,
-      target_lift_exercise: profile.targetLiftExercise ?? null,
-      target_lift_weight_kg: profile.targetLiftWeightKg ?? null,
-      updated_at: new Date().toISOString(),
-    };
+    const row = remoteProfileRow(profile, user.id);
     const { error } = await supabase.from('profiles').upsert(row);
     // Until 20260928000000_profiles_equipment.sql is deployed, the server
     // rejects the whole row over the one column it doesn't have — sync
