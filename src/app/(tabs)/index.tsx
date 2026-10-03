@@ -793,6 +793,10 @@ function YourFitness({
   // An all-empty chart was seven flat stubs under 40pt of blank space — a
   // plain line saying what will appear there reads better until real data does.
   const hasAnyLoadData = weekActivity.days.some((day) => (day.caloriesBurned ?? 0) > 0);
+  // Once real sessions are in, the header reports what the week actually
+  // took — the same estimates the bars are drawn from — instead of the
+  // planned level, which only stands in until there's something to measure.
+  const weekKcal = weekActivity.days.reduce((sum, day) => sum + (day.caloriesBurned ?? 0), 0);
 
   return (
     <View style={styles.section}>
@@ -810,29 +814,50 @@ function YourFitness({
       <View style={styles.fitnessCard}>
         <View style={styles.fitnessCardHeader}>
           <Text style={styles.fitnessCardLabel} maxFontSizeMultiplier={1.3}>Training Load</Text>
-          {/* The PLANNED load (from the commitment level chosen at setup),
-              not a measurement — labeled as such, since it sat above an
-              empty chart for anyone who hadn't logged a session yet and
-              read as a claim about training that hadn't happened. */}
-          <Text style={styles.fitnessCardValue} maxFontSizeMultiplier={1.2}>
-            {loadLabel}
-            <Text style={styles.fitnessCardTier}> plan</Text>
-          </Text>
+          {/* Before any session: the PLANNED load (from the commitment level
+              chosen at setup), not a measurement — labeled as such, since it
+              sat above an empty chart and read as a claim about training
+              that hadn't happened. After: the week's real estimate, "~"
+              like every other calorie figure in the app. */}
+          {hasAnyLoadData ? (
+            <Text style={styles.fitnessCardValue} maxFontSizeMultiplier={1.2}>
+              ~{weekKcal.toLocaleString('en-US')}
+              <Text style={styles.fitnessCardTier}> cal this week</Text>
+            </Text>
+          ) : (
+            <Text style={styles.fitnessCardValue} maxFontSizeMultiplier={1.2}>
+              {loadLabel}
+              <Text style={styles.fitnessCardTier}> plan</Text>
+            </Text>
+          )}
         </View>
         {hasAnyLoadData ? (
         <View style={styles.loadChart} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-          {weekActivity.days.map((day) => {
+          {weekActivity.days.map((day, index) => {
             const kcal = day.caloriesBurned ?? 0;
             const hasData = kcal > 0;
             const ratio = hasData ? kcal / maxDailyKcal : 0;
             const barColor = ratio > 0.66 ? LOAD_METER_COLORS[2] : ratio > 0.33 ? LOAD_METER_COLORS[1] : LOAD_METER_COLORS[0];
             return (
-              <View key={day.date} style={styles.loadChartTrack}>
-                {hasData ? (
-                  <LoadChartBar styles={styles} heightPct={Math.max(ratio, 0.12) * 100} color={barColor} />
-                ) : (
-                  <View style={[styles.loadChartBar, styles.loadChartBarEmpty]} />
-                )}
+              <View key={day.date} style={styles.loadChartColumn}>
+                <View style={styles.loadChartTrack}>
+                  {hasData ? (
+                    <LoadChartBar
+                      styles={styles}
+                      heightPct={Math.max(ratio, 0.12) * 100}
+                      color={barColor}
+                      delay={index * 40}
+                    />
+                  ) : (
+                    <View style={[styles.loadChartBar, styles.loadChartBarEmpty]} />
+                  )}
+                </View>
+                <Text
+                  style={[styles.loadChartDay, day.isToday && styles.loadChartDayToday]}
+                  maxFontSizeMultiplier={1.15}
+                >
+                  {WEEKDAY_LETTERS[index]}
+                </Text>
               </View>
             );
           })}
@@ -875,17 +900,19 @@ function YourFitness({
 /**
  * One day's bar in Training Load — grows up from its baseline the first
  * time it appears, on the same curve as the app's other charts (Sparkline,
- * ProgressRing, RadarChart), rather than appearing fully drawn. Instant
- * under Reduce Motion.
+ * ProgressRing, RadarChart), rather than appearing fully drawn; `delay`
+ * lets the week rise left to right. Instant under Reduce Motion.
  */
 function LoadChartBar({
   styles,
   heightPct,
   color,
+  delay,
 }: {
   styles: ReturnType<typeof createStyles>;
   heightPct: number;
   color: string;
+  delay: number;
 }) {
   const reducedMotion = useReducedMotion();
   const grow = useSharedValue(reducedMotion ? 1 : 0);
@@ -894,8 +921,8 @@ function LoadChartBar({
       grow.value = 1;
       return;
     }
-    grow.value = withDelay(150, withTiming(1, { duration: 700, easing: Easing.out(Easing.cubic) }));
-  }, [grow, reducedMotion]);
+    grow.value = withDelay(150 + delay, withTiming(1, { duration: 700, easing: Easing.out(Easing.cubic) }));
+  }, [grow, reducedMotion, delay]);
   const growStyle = useAnimatedStyle(() => ({ transform: [{ scaleY: grow.value }] }));
   return (
     <ReanimatedAnimated.View
@@ -1150,25 +1177,43 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       fontSize: Type.secondary,
       fontFamily: 'Geist-Medium',
     },
+    // Seven slim columns with their weekday under each — the bars used to
+    // run edge to edge with no labels, so a tall one couldn't be read as a
+    // particular day without counting along from Monday.
     loadChart: {
-      marginTop: 10,
-      height: 40,
+      marginTop: 14,
       flexDirection: 'row',
-      alignItems: 'flex-end',
-      gap: 4,
+      gap: 6,
+    },
+    loadChartColumn: {
+      flex: 1,
+      alignItems: 'center',
     },
     loadChartTrack: {
-      flex: 1,
-      height: '100%',
+      width: '100%',
+      height: 56,
+      alignItems: 'center',
       justifyContent: 'flex-end',
     },
     loadChartBar: {
-      width: '100%',
-      borderRadius: 2,
+      width: '58%',
+      maxWidth: 22,
+      borderRadius: 4,
     },
     loadChartBarEmpty: {
-      height: '12%',
+      height: 4,
+      borderRadius: 2,
       backgroundColor: colors.badgeBg,
+    },
+    loadChartDay: {
+      marginTop: 6,
+      color: colors.textTertiary,
+      fontSize: Type.micro,
+      fontFamily: 'Geist-Medium',
+    },
+    loadChartDayToday: {
+      color: colors.text,
+      fontFamily: 'Geist-SemiBold',
     },
     loadChartEmptyText: {
       marginTop: 10,

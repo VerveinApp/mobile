@@ -8,8 +8,6 @@ import {
   StyleSheet,
   Text,
   View,
-  type StyleProp,
-  type ViewStyle,
 } from 'react-native';
 import ReanimatedAnimated, {
   Easing,
@@ -19,11 +17,13 @@ import ReanimatedAnimated, {
   useSharedValue,
   withDelay,
   withTiming,
+  type SharedValue,
 } from 'react-native-reanimated';
 import type { SFSymbol } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SymbolView } from '@/components/ui/app-symbol';
+import { ENERGY_LABELS, type EnergyScore } from '@/components/home/energy-gauge';
 import { RadarChart } from '@/components/onboarding/radar-chart';
 import { AndroidCardElevation, AndroidRipple, TabularNums, Type } from '@/constants/theme';
 import { PremiumGate } from '@/components/premium-gate';
@@ -178,6 +178,7 @@ export default function ProgressScreen() {
   const [balanceView, setBalanceView] = useState<'body-area' | 'pattern'>('body-area');
   const balanceSinceDays = balanceRange === 'recent' ? RECENT_BALANCE_WINDOW_DAYS : undefined;
   const [consistencyMeterWidth, setConsistencyMeterWidth] = useState(0);
+  const [energyChartWidth, setEnergyChartWidth] = useState(0);
   // Which chart a finger is holding, and the point under it — one at a time,
   // since there's only one finger on the page. The scroll view stays locked
   // while it's set so dragging across a chart reads it instead of scrolling.
@@ -332,16 +333,14 @@ export default function ProgressScreen() {
   const bankedAreas = trainingState
     ? BODY_AREA_ORDER.filter((area) => trainingState.stimulusDebt.value[area].debtSets > 0)
     : [];
-  // Self-normalized against the user's own busiest banked area, same
-  // "no external target" register the radar/donut already use — a bar's
-  // length here is a magnitude comparison between real areas, never a
-  // fraction of some assigned ceiling, so this isn't the fill-toward-a-
-  // target bar the vault's brand system rules out (see balanceRow's own
-  // comment on that rule).
-  const maxBankedSets =
-    trainingState && bankedAreas.length > 0
-      ? Math.max(1, ...bankedAreas.map((area) => trainingState.stimulusDebt.value[area].debtSets))
-      : 1;
+  const totalBankedSets = trainingState
+    ? bankedAreas.reduce((sum, area) => sum + trainingState.stimulusDebt.value[area].debtSets, 0)
+    : 0;
+  // The same check-ins capacityTrend reads (its rolling window, oldest
+  // first), drawn as a line instead of summarized as one word — so "Steady"
+  // sits next to the real week of energy it describes.
+  const energyDays = trainingState?.rollingWindow.value.days ?? [];
+  const scrubbedEnergy = scrub?.chart === 'energy' ? energyDays[scrub.index] : undefined;
 
   // Relative strength (Vervein addition) — same "no fabricated default"
   // discipline check-in.tsx's own calorie estimate already applies to this
@@ -745,54 +744,90 @@ export default function ProgressScreen() {
 
         <View style={styles.section} onLayout={(e) => handleSectionLayout('load', e.nativeEvent.layout.y)}>
           <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TRAINING LOAD</Text>
-          {showTrend || showDebt ? (
+          {showTrend && trainingState ? (
             <View style={styles.card}>
-              {showTrend && trainingState ? (
-                <View style={[styles.trendRow, showDebt && styles.rowDivider]}>
-                  <SymbolView
-                    name={TREND_ICON[trainingState.capacityTrend.value]}
-                    size={15}
-                    tintColor={trainingState.capacityTrend.value === 'improving' ? '#5FBE84' : colors.textSecondary}
-                  />
-                  <Text style={styles.trendText} maxFontSizeMultiplier={1.3}>
-                    Energy trend: <Text style={styles.trendValue}>{TREND_LABEL[trainingState.capacityTrend.value]}</Text>
-                  </Text>
-                </View>
-              ) : null}
-              {showDebt ? (
-                bankedAreas.length > 0 ? (
+              <View style={styles.chartCaptionRow}>
+                {scrubbedEnergy ? (
                   <>
-                    <Text style={styles.debtHint} maxFontSizeMultiplier={1.3}>
-                      Banked volume — sets a lower-energy day trimmed from your plan, there for a stronger day if you
-                      want them.
+                    <Text style={styles.chartCaption} maxFontSizeMultiplier={1.3}>
+                      {formatEntryDateLabel(scrubbedEnergy.date)}
                     </Text>
-                    {bankedAreas.map((area, index) => {
-                      const debtSets = trainingState?.stimulusDebt.value[area].debtSets ?? 0;
-                      const barFraction = Math.min(1, debtSets / maxBankedSets);
-                      return (
-                        <View
-                          key={area}
-                          style={[styles.debtRowStacked, index < bankedAreas.length - 1 && styles.rowDivider]}
-                        >
-                          <View style={styles.debtRow}>
-                            <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{BODY_AREA_LABELS[area]}</Text>
-                            <Text style={styles.debtValue} maxFontSizeMultiplier={1.2}>{debtSets} sets banked</Text>
-                          </View>
-                          <View style={styles.barTrack}>
-                            <BankedBarFill fraction={barFraction} play={revealed.load} style={styles.barFill} />
-                          </View>
-                        </View>
-                      );
-                    })}
+                    <Text style={styles.chartTrendText} maxFontSizeMultiplier={1.2}>
+                      Energy: {ENERGY_LABELS[scrubbedEnergy.energyScore as EnergyScore]}
+                    </Text>
                   </>
                 ) : (
-                  <Text style={styles.debtHint} maxFontSizeMultiplier={1.3}>
-                    No banked volume right now — recent sessions delivered what your plan called for.
-                  </Text>
-                )
-              ) : null}
+                  <>
+                    <Text style={styles.chartCaption} maxFontSizeMultiplier={1.3}>
+                      Energy · last {energyDays.length} check-ins
+                    </Text>
+                    <View style={styles.chartTrendIndicator}>
+                      <SymbolView
+                        name={TREND_ICON[trainingState.capacityTrend.value]}
+                        size={11}
+                        tintColor={trainingState.capacityTrend.value === 'improving' ? '#5FBE84' : colors.textTertiary}
+                      />
+                      <Text style={styles.chartTrendText} maxFontSizeMultiplier={1.2}>
+                        {TREND_LABEL[trainingState.capacityTrend.value]}
+                      </Text>
+                    </View>
+                  </>
+                )}
+              </View>
+              <View style={styles.chartCardInner} onLayout={(e) => setEnergyChartWidth(e.nativeEvent.layout.width)}>
+                {energyChartWidth > 0 ? (
+                  // Fixed to the check-in's own 1–5 scale, so a run of
+                  // "Okay" days sits mid-height instead of being stretched
+                  // into a dramatic swing.
+                  <Sparkline
+                    data={energyDays.map((day) => ({ value: day.energyScore }))}
+                    width={energyChartWidth}
+                    height={56}
+                    min={1}
+                    max={5}
+                    filled
+                    color="#5FBE84"
+                    play={revealed.load}
+                    onScrub={scrubHandler('energy')}
+                  />
+                ) : null}
+              </View>
             </View>
-          ) : (
+          ) : null}
+          {showDebt && trainingState ? (
+            <View style={styles.card}>
+              <View style={styles.chartCaptionRow}>
+                <Text style={styles.chartCaption} maxFontSizeMultiplier={1.3}>Banked volume</Text>
+                {/* A total only adds anything across 2+ areas — with one, it
+                    just repeats that area's own count right below. */}
+                {bankedAreas.length > 1 ? (
+                  <Text style={[styles.chartTrendText, TabularNums]} maxFontSizeMultiplier={1.2}>
+                    {totalBankedSets} {totalBankedSets === 1 ? 'set' : 'sets'}
+                  </Text>
+                ) : null}
+              </View>
+              {bankedAreas.map((area, index) => {
+                const bankedSets = trainingState.stimulusDebt.value[area].debtSets;
+                return (
+                  <View key={area} style={styles.bankedArea}>
+                    <View style={styles.bankedAreaHeader}>
+                      <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{BODY_AREA_LABELS[area]}</Text>
+                      <Text style={styles.debtValue} maxFontSizeMultiplier={1.2}>
+                        {bankedSets} {bankedSets === 1 ? 'set' : 'sets'}
+                      </Text>
+                    </View>
+                    <BankedSetPips count={bankedSets} play={revealed.load} delay={index * 120} />
+                  </View>
+                );
+              })}
+              <Text style={styles.bankedHint} maxFontSizeMultiplier={1.3}>
+                {bankedAreas.length > 0
+                  ? 'Sets a lower-energy day trimmed from your plan — there for a stronger day if you want them.'
+                  : 'No banked volume right now — recent sessions delivered what your plan called for.'}
+              </Text>
+            </View>
+          ) : null}
+          {showTrend || showDebt ? null : (
             <View style={styles.emptyCard}>
               <SymbolView name="chart.line.uptrend.xyaxis" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />
               <Text style={styles.emptyText} maxFontSizeMultiplier={1.3}>
@@ -899,28 +934,71 @@ function LegendDot({
   );
 }
 
+// One square per banked set — sets are a count, so they're drawn as one,
+// rather than as a bar whose length only means something next to another
+// area's bar (with a single banked area it always read as a full, finished
+// bar). Same rounded-square shape as the calendar's own day cells. Past a
+// couple of rows' worth, the rest is summarized as "+N" instead of letting
+// the card grow without limit; the exact count is always in the header.
+const MAX_BANKED_PIPS = 40;
+const PIP_SIZE = 9;
+
 /**
- * One banked-volume bar's fill — grows out from the left the first time its
- * section scrolls into view, on the same curve and timing as Home's Training
- * Load bars, then just re-renders in place when its value changes. Instant
- * under Reduce Motion.
+ * Fades its squares in left to right the first time its section scrolls
+ * into view — read as sets being counted out, not as a meter filling up —
+ * then just re-renders in place when the count changes. Instant under
+ * Reduce Motion.
  */
-function BankedBarFill({ fraction, play, style }: { fraction: number; play: boolean; style: StyleProp<ViewStyle> }) {
+function BankedSetPips({ count, play, delay }: { count: number; play: boolean; delay: number }) {
   const reducedMotion = useReducedMotion();
-  const grow = useSharedValue(reducedMotion ? 1 : 0);
+  const reveal = useSharedValue(reducedMotion ? 1 : 0);
   useEffect(() => {
     if (reducedMotion) {
-      grow.value = 1;
+      reveal.value = 1;
       return;
     }
     if (!play) return;
-    grow.value = withDelay(150, withTiming(1, { duration: 700, easing: Easing.out(Easing.cubic) }));
-  }, [grow, play, reducedMotion]);
-  const growStyle = useAnimatedStyle(() => ({ transform: [{ scaleX: grow.value }] }));
+    reveal.value = withDelay(150 + delay, withTiming(1, { duration: 600, easing: Easing.out(Easing.cubic) }));
+  }, [reveal, play, delay, reducedMotion]);
+  const shown = Math.min(count, MAX_BANKED_PIPS);
   return (
-    <ReanimatedAnimated.View style={[style, { width: `${fraction * 100}%`, transformOrigin: 'left' }, growStyle]} />
+    <View style={pipStyles.row} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      {Array.from({ length: shown }, (_, index) => (
+        <BankedSetPip key={index} index={index} shown={shown} reveal={reveal} />
+      ))}
+      {count > shown ? <Text style={pipStyles.overflow}>+{count - shown}</Text> : null}
+    </View>
   );
 }
+
+function BankedSetPip({ index, shown, reveal }: { index: number; shown: number; reveal: SharedValue<number> }) {
+  // A wipe, not a stagger of separate timers: pip i fades in as the shared
+  // reveal passes its own slot, so a long row takes no longer than a short one.
+  const style = useAnimatedStyle(() => ({ opacity: Math.min(1, Math.max(0, reveal.value * (shown + 2) - index)) }));
+  return <ReanimatedAnimated.View style={[pipStyles.pip, style]} />;
+}
+
+const pipStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 8,
+  },
+  pip: {
+    width: PIP_SIZE,
+    height: PIP_SIZE,
+    borderRadius: 2.5,
+    backgroundColor: '#5FBE84',
+  },
+  overflow: {
+    marginLeft: 2,
+    color: '#5FBE84',
+    fontSize: Type.micro,
+    fontFamily: 'Geist-SemiBold',
+  },
+});
 
 function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], isDark: boolean) {
   return StyleSheet.create({
@@ -1055,21 +1133,6 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], isDark: 
       fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },
-    trendRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      paddingVertical: 12,
-    },
-    trendText: {
-      color: colors.textSecondary,
-      fontSize: Type.body,
-      fontFamily: 'Geist-Medium',
-    },
-    trendValue: {
-      color: colors.text,
-      fontFamily: 'Geist-SemiBold',
-    },
     sparklineWrap: {
       width: '100%',
     },
@@ -1081,33 +1144,26 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], isDark: 
     sparklineWrapPadded: {
       paddingBottom: 12,
     },
-    debtHint: {
-      paddingVertical: 12,
+    bankedArea: {
+      paddingTop: 8,
+    },
+    bankedAreaHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    bankedHint: {
+      marginTop: 14,
       color: colors.textTertiary,
       fontSize: Type.caption,
       lineHeight: 16,
       fontFamily: 'Geist-Medium',
-    },
-    debtRowStacked: {
-      paddingVertical: 6,
     },
     debtRow: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       paddingVertical: 6,
-    },
-    barTrack: {
-      height: 8,
-      borderRadius: 4,
-      backgroundColor: colors.pillBg,
-      overflow: 'hidden',
-      marginBottom: 4,
-    },
-    barFill: {
-      height: '100%',
-      borderRadius: 3,
-      backgroundColor: '#5FBE84',
     },
     debtValue: {
       color: colors.accentText,
