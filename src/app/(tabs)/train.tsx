@@ -1,17 +1,21 @@
+import type { BottomSheetModal } from '@gorhom/bottom-sheet';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AppState, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import ReanimatedAnimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
 import { TodaysTrainingCard } from '@/components/home/todays-training-card';
+import { AdjustPlanSheet } from '@/components/settings/adjust-plan-sheet';
 import { AndroidCardElevation, Type } from '@/constants/theme';
 import { BODY_AREA_LABELS, BODY_AREA_ORDER } from '@/lib/body-area-labels';
+import { PRESSED_DIM } from '@/lib/button-interactions';
 import { getCalibration } from '@/lib/calibration';
 import { DEFAULT_CALIBRATION } from '@/lib/engine/personal-calibration';
 import type { UserCalibration } from '@/lib/engine/types';
 import { getMostNeglectedBodyArea, type TrainingState } from '@/lib/engine/training-state';
+import { hapticSelect } from '@/lib/haptics';
 import { getHealthReadinessModifier, getHealthReadinessReasons } from '@/lib/health-kit';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { computePlanPreview } from '@/lib/plan-preview';
@@ -46,6 +50,7 @@ const WEEKDAY_LABELS: Record<string, string> = {
  * presented as a resolved session, same honesty rule as Summary's card.
  */
 export default function TrainScreen() {
+  const adjustPlanSheetRef = useRef<BottomSheetModal>(null);
   const insets = useSafeAreaInsets();
   const colors = useAppColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -101,38 +106,41 @@ export default function TrainScreen() {
     };
   }, []);
 
+  // Named (not inline in the focus effect) so Adjust My Plan, opened from
+  // the empty state below, can reload the week the moment it closes.
+  const loadTrainData = useCallback(async () => {
+    const [
+      loadedProfile,
+      loadedSession,
+      loadedCalibration,
+      loadedTrainingState,
+      loadedReadinessModifier,
+      loadedReadinessReasons,
+    ] = await Promise.all([
+      getProfile(),
+      getTodaySession(),
+      getCalibration(),
+      getTrainingState(),
+      getHealthReadinessModifier(),
+      getHealthReadinessReasons(),
+    ]);
+    // unlessUnchanged: a focus that finds nothing new keeps every object
+    // as it was, so both plan-engine runs below are skipped and a plain
+    // tab switch doesn't re-render this screen.
+    setProfile(unlessUnchanged(loadedProfile));
+    setTodaySession(unlessUnchanged(loadedSession));
+    setCalibration(unlessUnchanged(loadedCalibration));
+    setTrainingState(unlessUnchanged(loadedTrainingState));
+    setHealthReadinessModifier(loadedReadinessModifier);
+    setHealthReadinessReasons(unlessUnchanged(loadedReadinessReasons));
+    const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
+    setWeekDays(unlessUnchanged((await getWeekActivity(trainingDays)).days));
+    setLoaded(true);
+  }, []);
   useFocusEffect(
     useCallback(() => {
-      (async () => {
-        const [
-          loadedProfile,
-          loadedSession,
-          loadedCalibration,
-          loadedTrainingState,
-          loadedReadinessModifier,
-          loadedReadinessReasons,
-        ] = await Promise.all([
-          getProfile(),
-          getTodaySession(),
-          getCalibration(),
-          getTrainingState(),
-          getHealthReadinessModifier(),
-          getHealthReadinessReasons(),
-        ]);
-        // unlessUnchanged: a focus that finds nothing new keeps every object
-        // as it was, so both plan-engine runs below are skipped and a plain
-        // tab switch doesn't re-render this screen.
-        setProfile(unlessUnchanged(loadedProfile));
-        setTodaySession(unlessUnchanged(loadedSession));
-        setCalibration(unlessUnchanged(loadedCalibration));
-        setTrainingState(unlessUnchanged(loadedTrainingState));
-        setHealthReadinessModifier(loadedReadinessModifier);
-        setHealthReadinessReasons(unlessUnchanged(loadedReadinessReasons));
-        const trainingDays = loadedProfile?.days ? loadedProfile.days.split(',') : null;
-        setWeekDays(unlessUnchanged((await getWeekActivity(trainingDays)).days));
-        setLoaded(true);
-      })();
-    }, [])
+      loadTrainData();
+    }, [loadTrainData])
   );
 
   // Memoized — this now runs the real engine's filtering over the full
@@ -373,16 +381,27 @@ export default function TrainScreen() {
         ) : (
           <View style={styles.section}>
             <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>THIS WEEK&apos;S PLAN</Text>
-            <View style={styles.emptyCard}>
+            {/* Opens Adjust My Plan right here — it used to name the sheet
+                and leave someone to find it on Profile. */}
+            <Pressable
+              style={({ pressed }) => [styles.emptyCard, pressed && PRESSED_DIM]}
+              onPress={() => {
+                hapticSelect();
+                adjustPlanSheetRef.current?.present();
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="No training days set yet. Choose your training days in Adjust My Plan."
+            >
               <SymbolView name="calendar.badge.plus" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />
               <Text style={styles.emptyText} maxFontSizeMultiplier={1.3}>
-                No training days set yet — add some in Adjust My Plan to see your week here.
+                No training days set yet — <Text style={styles.emptyLink}>choose your days</Text> to see your week here.
               </Text>
-            </View>
+            </Pressable>
           </View>
         )}
       </ScrollView>
       </ReanimatedAnimated.View>
+      <AdjustPlanSheet ref={adjustPlanSheetRef} onDismiss={loadTrainData} />
     </View>
   );
 }
@@ -492,6 +511,10 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       fontFamily: 'Geist-Medium',
       lineHeight: 18,
       textAlign: 'center',
+    },
+    emptyLink: {
+      color: colors.accentText,
+      fontFamily: 'Geist-SemiBold',
     },
     planRow: {
       flexDirection: 'row',

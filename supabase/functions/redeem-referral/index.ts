@@ -216,7 +216,14 @@ Deno.serve(async (req: Request) => {
     adminClient,
     referralCode.user_id,
     '🎉 New training partner!',
-    'Someone just joined VerveIn using your invite.'
+    // The reward is the news worth opening the app for — said only when the
+    // grant actually went through, never promised on a failed one.
+    bothGranted
+      ? 'Someone just joined VerveIn using your invite — you both get a week of VerveIn Plus.'
+      : 'Someone just joined VerveIn using your invite.',
+    // Opens the invite screen, where the reward shows, when tapped (the
+    // app's notification-redirect.ts).
+    { url: '/referral' }
   );
 
   return jsonResponse({ success: true, rewardGranted: bothGranted }, 200);

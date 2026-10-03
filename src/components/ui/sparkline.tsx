@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useEffectEvent, useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -149,6 +149,13 @@ export function Sparkline({
     if (index !== null) hapticSelect();
     onScrub?.(index);
   };
+  // A chart that goes away mid-scrub (its card hides, the list reloads)
+  // never sees its gesture finish — release the card anyway, or a parent
+  // that locks scrolling while scrubbing would stay locked.
+  const releaseScrubOnUnmount = useEffectEvent(() => {
+    if (lastScrubIndex.value !== -1) onScrub?.(null);
+  });
+  useEffect(() => () => releaseScrubOnUnmount(), []);
   const scrubGesture = useMemo(
     () =>
       Gesture.Pan()

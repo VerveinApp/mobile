@@ -1,4 +1,4 @@
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Platform,
@@ -185,6 +185,9 @@ export default function ProgressScreen() {
   const [scrub, setScrub] = useState<{ chart: string; index: number } | null>(null);
   const scrubHandler = (chart: string) => (index: number | null) =>
     setScrub(index === null ? null : { chart, index });
+  // Leaving the tab mid-scrub (a second finger on the tab bar) shouldn't
+  // come back to a page that's still locked on a point.
+  useFocusEffect(useCallback(() => () => setScrub(null), []));
   const reducedMotion = useReducedMotion();
   const [revealed, setRevealed] = useState<Record<RevealSection, boolean>>({
     balance: false,
@@ -206,9 +209,33 @@ export default function ProgressScreen() {
       return next;
     });
   };
+  // Summary's Training Load card opens this tab at its own Training Load
+  // section (`?section=load`) rather than at the top. The section's position
+  // is only known once it has laid out, so a link that arrives first waits
+  // for handleSectionLayout. The param is cleared once used, so coming back
+  // to the tab later doesn't jump again.
+  const { section: linkedSection } = useLocalSearchParams<{ section?: string }>();
+  const scrollRef = useRef<ScrollView>(null);
+  const pendingSectionScroll = useRef<RevealSection | null>(null);
+  const scrollToSection = useCallback((section: RevealSection) => {
+    const top = sectionTops.current[section];
+    if (top === undefined) return false;
+    // Clear of the status bar, which the scroll content runs under.
+    scrollRef.current?.scrollTo({ y: Math.max(0, top - insets.top - 12), animated: true });
+    return true;
+  }, [insets.top]);
+  useEffect(() => {
+    if (linkedSection !== 'load') return;
+    router.setParams({ section: undefined });
+    if (!scrollToSection('load')) pendingSectionScroll.current = 'load';
+  }, [linkedSection, scrollToSection]);
   const handleSectionLayout = (section: RevealSection, top: number) => {
     sectionTops.current[section] = top;
     checkReveals();
+    if (pendingSectionScroll.current === section) {
+      pendingSectionScroll.current = null;
+      scrollToSection(section);
+    }
   };
 
   // BUG FIX: this used to await each store one after another, setting state
@@ -398,6 +425,7 @@ export default function ProgressScreen() {
     <View style={styles.root}>
       <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 140 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
         scrollEnabled={scrub === null}
@@ -732,11 +760,28 @@ export default function ProgressScreen() {
             ) : (
               <View style={styles.emptyCard}>
                 <SymbolView name="figure.strengthtraining.traditional" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />
-                <Text style={styles.emptyText} maxFontSizeMultiplier={1.3}>
-                  {balanceRange === 'recent'
-                    ? 'No sessions in the last 7 days yet — switch to All to see your full history.'
-                    : 'Finish a session and check off exercises to see your training balance here.'}
-                </Text>
+                {balanceRange === 'recent' ? (
+                  // "Switch to All" does it, rather than pointing at the
+                  // toggle up in the section header.
+                  <Text style={styles.emptyText} maxFontSizeMultiplier={1.3}>
+                    No sessions in the last 7 days yet —{' '}
+                    <Text
+                      style={styles.emptyLink}
+                      onPress={() => {
+                        hapticSelect();
+                        setBalanceRange('all');
+                      }}
+                      accessibilityRole="button"
+                    >
+                      switch to All
+                    </Text>{' '}
+                    to see your full history.
+                  </Text>
+                ) : (
+                  <Text style={styles.emptyText} maxFontSizeMultiplier={1.3}>
+                    Finish a session and check off exercises to see your training balance here.
+                  </Text>
+                )}
               </View>
             )}
           </PremiumGate>
@@ -1206,6 +1251,10 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], isDark: 
       fontFamily: 'Geist-Medium',
       lineHeight: 18,
       textAlign: 'center',
+    },
+    emptyLink: {
+      color: colors.accentText,
+      fontFamily: 'Geist-SemiBold',
     },
     summaryRow: {
       flexDirection: 'row',

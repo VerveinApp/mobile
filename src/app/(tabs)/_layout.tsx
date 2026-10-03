@@ -3,6 +3,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useRef } from 'react';
 
 import AppTabs from '@/components/app-tabs';
+import { useNotificationRedirect } from '@/lib/notification-redirect';
 import { hasCompletedOnboarding } from '@/lib/onboarding-draft';
 import { supabase } from '@/lib/supabase';
 
@@ -56,6 +57,7 @@ export default function TabsLayout() {
   // delete call site) already close; it must never be the thing that takes
   // the whole app down again if some future edge case slips past it.
   const isFirstFocus = useRef(true);
+  useNotificationRedirect();
   useFocusEffect(
     useCallback(() => {
       if (isFirstFocus.current) {
