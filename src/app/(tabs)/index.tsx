@@ -797,6 +797,11 @@ function YourFitness({
   // took — the same estimates the bars are drawn from — instead of the
   // planned level, which only stands in until there's something to measure.
   const weekKcal = weekActivity.days.reduce((sum, day) => sum + (day.caloriesBurned ?? 0), 0);
+  // The bars are each session's calorie estimate, and that estimate needs a
+  // body weight (check-in.tsx records none without one). Someone who skipped
+  // sharing it would otherwise read "bars fill in as you log sessions" week
+  // after week while logging sessions and never see one.
+  const hasBodyWeight = Number(profile?.weightKg) > 0;
 
   return (
     <View style={styles.section}>
@@ -864,7 +869,9 @@ function YourFitness({
         </View>
         ) : (
           <Text style={styles.loadChartEmptyText} maxFontSizeMultiplier={1.3}>
-            Bars fill in as you log sessions this week.
+            {hasBodyWeight
+              ? 'Bars fill in as you log sessions this week.'
+              : 'Add your weight in Settings → Body & Biometrics to chart each session’s effort.'}
           </Text>
         )}
         <Text style={styles.fitnessCardNote} maxFontSizeMultiplier={1.4}>{readinessNote}</Text>

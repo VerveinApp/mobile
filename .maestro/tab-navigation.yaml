@@ -63,7 +63,11 @@ appId: app.vervein
 - takeScreenshot: tab-train
 
 - tapOn: "Progress"
-- assertVisible: "STRENGTH PROGRESS"
+# Scrolled to, not asserted in place: it's the last section, and how far down
+# it sits depends on what the sections above it show for this account.
+- scrollUntilVisible:
+    element: "STRENGTH PROGRESS"
+    direction: DOWN
 - takeScreenshot: tab-progress
 
 - tapOn: "Profile"

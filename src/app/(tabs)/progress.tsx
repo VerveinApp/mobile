@@ -185,6 +185,9 @@ export default function ProgressScreen() {
   const [scrub, setScrub] = useState<{ chart: string; index: number } | null>(null);
   const scrubHandler = (chart: string) => (index: number | null) =>
     setScrub(index === null ? null : { chart, index });
+  // Leaving the tab mid-scrub (a second finger on the tab bar) shouldn't
+  // come back to a page that's still locked on a point.
+  useFocusEffect(useCallback(() => () => setScrub(null), []));
   const reducedMotion = useReducedMotion();
   const [revealed, setRevealed] = useState<Record<RevealSection, boolean>>({
     balance: false,
