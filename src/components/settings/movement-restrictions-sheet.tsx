@@ -35,11 +35,13 @@ export const MovementRestrictionsSheet = forwardRef<BottomSheetModal>((_props, f
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [selected, setSelected] = useState<Set<MovementRestriction>>(new Set());
   const [noneSelected, setNoneSelected] = useState(false);
+  const [hasConsent, setHasConsent] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const loadFromProfile = useCallback(async () => {
     const profile = await getProfile();
     const stored = profile?.movementRestrictions;
+    setHasConsent(profile?.healthConsent === 'true');
     if (stored === undefined) {
       setSelected(new Set());
       setNoneSelected(false);
@@ -123,6 +125,15 @@ export const MovementRestrictionsSheet = forwardRef<BottomSheetModal>((_props, f
       >
         <Text style={styles.headline} maxFontSizeMultiplier={1.3}>Anything your body just doesn&apos;t do right now?</Text>
         <Text style={styles.hint} maxFontSizeMultiplier={1.4}>No explanation needed — we&apos;ll build around it.</Text>
+        {/* Without health-info consent these stay on this device — the
+            server copy is withheld (see profile-sync.ts) — so say so
+            rather than let someone assume they're backed up with the
+            account. */}
+        {hasConsent ? null : (
+          <Text style={styles.hint} maxFontSizeMultiplier={1.4}>
+            Kept on this device only. To keep it with your account too, share your health info in Body &amp; Biometrics.
+          </Text>
+        )}
 
         <View style={styles.list}>
           {MOVEMENT_RESTRICTIONS.map((restriction, index) => {

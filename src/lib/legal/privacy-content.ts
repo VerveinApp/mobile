@@ -32,8 +32,16 @@ import { CONTACT_EMAIL, MAILING_ADDRESS, OPERATOR_NAME } from '@/lib/legal/terms
  * Sentry was added; and promised consent withdrawal the app didn't offer.
  * Also adds the consumer-health-data, Illinois biometric, Do Not Track and
  * GDPR controller/retention/transfer disclosures.
+ *
+ * Revision 2026-10-02 (policy-vs-code audit): health fields entered without
+ * consent (Weight History, Health Conditions, Movement Restrictions) used to
+ * sync anyway — profile-sync.ts now withholds them, and §2 says where they
+ * go instead. §2 also lists the two profile fields it had left out (where
+ * you train, session length); §7 describes what a crash report actually
+ * carries (recent requests, and possibly the account ID); §9 no longer says
+ * an export holds everything, since progress photos aren't in it.
  */
-export const PRIVACY_EFFECTIVE_DATE = 'September 24, 2026';
+export const PRIVACY_EFFECTIVE_DATE = 'October 2, 2026';
 
 export const PRIVACY_INTRO =
   'This Privacy Policy explains what information VerveIn collects, how it’s used, and the choices you have. ' +
@@ -56,10 +64,13 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
       '- Your account: your email address, and if you use Sign in with Apple or Google, the account identifier ' +
         'that service provides (for Apple, this may be a private relay address if you choose to hide your email). ' +
         'Our authentication provider also keeps sign-in records such as timestamps and IP addresses.',
-      '- Your training profile: your name, goal, experience level, available equipment, weekly schedule, ' +
-        'commitment level, and any target weight or target lift you set.',
+      '- Your training profile: your name, goal, experience level, where you train (home or gym) and the ' +
+        'equipment you have, preferred session length, weekly schedule, commitment level, and any target weight or ' +
+        'target lift you set.',
       '- Health-related information you choose to share, only after you consent: sex, height, weight, age, and ' +
-        'any health conditions or movement restrictions you enter — plus whether and when you consented.',
+        'any health conditions or movement restrictions you enter — plus whether and when you consented. If you ' +
+        'enter any of these without consenting (for example, a weight in Weight History or a condition in ' +
+        'Settings), it stays on your device only.',
       '- Referral records: your referral code and, if you share or redeem one, who referred whom, when, and ' +
         'whether the reward was granted.',
       '- Notification records: if you allow notifications, each of your devices’ push notification tokens and ' +
@@ -124,8 +135,10 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
     heading: '7. Crash Reports and App Updates',
     body: [
       'We use Sentry to receive crash and error reports so we can fix problems. A report includes the error ' +
-        'itself, the part of the App involved, and technical details such as your device model and OS and app ' +
-        'versions. We don’t put your health information into crash reports.',
+        'itself, the part of the App involved, the steps leading up to it (such as which services the App ' +
+        'contacted), and technical details such as your device model and OS and app versions. A report may be ' +
+        'linked to your account identifier, but we don’t put your name, email, or health information into crash ' +
+        'reports.',
       'App updates may be delivered over the air through Expo’s update service, which receives basic technical ' +
         'information (such as your platform and app version) to deliver the right update.',
     ],
@@ -151,7 +164,8 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
   {
     heading: '9. Your Choices',
     body: [
-      '- Export My Data (Settings) — save everything stored on your device.',
+      '- Export My Data (Settings) — save a copy of everything stored on your device, except progress photos ' +
+        '(those stay in the App; device backups such as iCloud Backup include them).',
       '- Import My Data (Settings) — restore from a previous export.',
       '- Delete My Data (Settings) — permanently erase your on-device history and your synced profile.',
       '- Stop sharing health info (Settings → Body & Biometrics) — withdraw your consent and clear your sex, height, ' +

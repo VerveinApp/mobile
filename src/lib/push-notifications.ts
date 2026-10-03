@@ -1,3 +1,5 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import Constants from 'expo-constants';
 
 import { getModule, getNotificationPermissionState } from '@/lib/session-reminders';
@@ -34,6 +36,23 @@ import { getModule, getNotificationPermissionState } from '@/lib/session-reminde
  * session-reminders.ts's shouldOfferReminderPrompt) — and both call this
  * right after a grant so the token doesn't wait for the next cold launch.
  */
+// The token this device last registered, so it can be removed later without
+// asking iOS for it again — which only works while notifications are still
+// allowed, exactly the case where removal matters least.
+const REGISTERED_TOKEN_KEY = 'vervein.pushToken.v1';
+
+/**
+ * Deletes this device's last-registered token from the account's rows. The
+ * local copy is only forgotten once the server delete succeeds, so a failed
+ * attempt (offline) is retried on the next launch or sign-out.
+ */
+async function removeRegisteredToken(supabase: SupabaseClient, userId: string): Promise<void> {
+  const token = await AsyncStorage.getItem(REGISTERED_TOKEN_KEY);
+  if (!token) return;
+  const { error } = await supabase.from('push_tokens').delete().eq('user_id', userId).eq('expo_push_token', token);
+  if (!error) await AsyncStorage.removeItem(REGISTERED_TOKEN_KEY);
+}
+
 export async function registerForRemotePushNotifications(): Promise<void> {
   const Notifications = getModule();
   if (!Notifications) return;
@@ -49,7 +68,14 @@ export async function registerForRemotePushNotifications(): Promise<void> {
     } = await supabase.auth.getSession();
     if (!session) return;
 
-    if ((await getNotificationPermissionState()) !== 'granted') return;
+    // Notifications turned off in iOS Settings since the last launch: the
+    // token stays valid with Apple, so nothing would ever prune it — the
+    // Privacy Policy keeps tokens only until "the device stops accepting
+    // notifications", so it's removed here instead.
+    if ((await getNotificationPermissionState()) !== 'granted') {
+      await removeRegisteredToken(supabase, session.user.id);
+      return;
+    }
 
     const projectId = Constants.expoConfig?.extra?.eas?.projectId;
     if (!projectId) return;
@@ -59,11 +85,12 @@ export async function registerForRemotePushNotifications(): Promise<void> {
     // opened" — sent explicitly, and also maintained by a trigger (see
     // 20260923000000_push_tokens_touch_updated_at.sql, which also adds the
     // UPDATE grant this upsert's conflict path needs).
-    await supabase.from('push_tokens').upsert({
+    const { error } = await supabase.from('push_tokens').upsert({
       user_id: session.user.id,
       expo_push_token: expoPushToken,
       updated_at: new Date().toISOString(),
     });
+    if (!error) await AsyncStorage.setItem(REGISTERED_TOKEN_KEY, expoPushToken);
   } catch {
     // Never a crash — worst case this device just doesn't receive a remote
     // push later, same "under-triggering is the safe failure mode" rule
@@ -87,6 +114,13 @@ export async function unregisterPushTokenForThisDevice(): Promise<void> {
       data: { session },
     } = await supabase.auth.getSession();
     if (!session) return;
+    // The remembered token first: it works even after notifications were
+    // turned off, when iOS won't hand the token out again. Asking iOS is only
+    // the fallback for a device registered before the token was remembered.
+    if (await AsyncStorage.getItem(REGISTERED_TOKEN_KEY)) {
+      await removeRegisteredToken(supabase, session.user.id);
+      return;
+    }
     if ((await getNotificationPermissionState()) !== 'granted') return;
     const projectId = Constants.expoConfig?.extra?.eas?.projectId;
     if (!projectId) return;
