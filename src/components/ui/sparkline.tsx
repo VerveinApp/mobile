@@ -1,5 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { scheduleOnRN } from 'react-native-worklets';
 import ReanimatedAnimated, {
   Easing,
   useAnimatedProps,
@@ -9,6 +11,12 @@ import ReanimatedAnimated, {
   withTiming,
 } from 'react-native-reanimated';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
+
+import { hapticSelect } from '@/lib/haptics';
+
+/** How long a finger rests on a chart before it starts scrubbing — long
+ * enough that a vertical swipe across the chart still just scrolls. */
+const SCRUB_HOLD_MS = 180;
 
 const AnimatedPath = ReanimatedAnimated.createAnimatedComponent(Path);
 const AnimatedCircle = ReanimatedAnimated.createAnimatedComponent(Circle);
@@ -39,6 +47,17 @@ type SparklineProps = {
    * by clamping it to the nearest edge. */
   referenceValue?: number;
   referenceColor?: string;
+  /** Extra wait before the draw-in, in ms — lets a stack of charts trace in
+   * one after another instead of all at once. */
+  delay?: number;
+  /** Holds the draw-in until true — for a chart that mounts below the fold,
+   * so it traces in when it's scrolled to rather than unseen at mount. */
+  play?: boolean;
+  /** Turns on touch-and-hold scrubbing: a hairline and a dot follow the
+   * finger, a selection tick marks each point crossed, and this reports the
+   * point under the finger (null on release) so the card can show that
+   * point's value in its own heading — the chart itself stays label-free. */
+  onScrub?: (index: number | null) => void;
 };
 
 type Point = { x: number; y: number };
@@ -106,6 +125,9 @@ export function Sparkline({
   filled = false,
   referenceValue,
   referenceColor,
+  delay = 0,
+  play = true,
+  onScrub,
 }: SparklineProps) {
   const reducedMotion = useReducedMotion();
   const reveal = useSharedValue(reducedMotion ? 1 : 0);
@@ -114,8 +136,44 @@ export function Sparkline({
       reveal.value = 1;
       return;
     }
-    reveal.value = withDelay(150, withTiming(1, { duration: 900, easing: Easing.out(Easing.cubic) }));
-  }, [reveal, reducedMotion]);
+    if (!play) return;
+    reveal.value = withDelay(150 + delay, withTiming(1, { duration: 900, easing: Easing.out(Easing.cubic) }));
+  }, [reveal, reducedMotion, delay, play]);
+
+  const [scrubIndex, setScrubIndex] = useState<number | null>(null);
+  const lastScrubIndex = useSharedValue(-1);
+  const pointCount = data.length;
+  const scrubStepX = pointCount > 1 ? width / (pointCount - 1) : 0;
+  const reportScrub = (index: number | null) => {
+    setScrubIndex(index);
+    if (index !== null) hapticSelect();
+    onScrub?.(index);
+  };
+  const scrubGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(onScrub !== undefined && pointCount > 1)
+        .activateAfterLongPress(SCRUB_HOLD_MS)
+        .onStart((e) => {
+          const index = Math.max(0, Math.min(pointCount - 1, Math.round(e.x / scrubStepX)));
+          lastScrubIndex.value = index;
+          scheduleOnRN(reportScrub, index);
+        })
+        .onUpdate((e) => {
+          const index = Math.max(0, Math.min(pointCount - 1, Math.round(e.x / scrubStepX)));
+          if (index === lastScrubIndex.value) return;
+          lastScrubIndex.value = index;
+          scheduleOnRN(reportScrub, index);
+        })
+        .onFinalize(() => {
+          if (lastScrubIndex.value === -1) return;
+          lastScrubIndex.value = -1;
+          scheduleOnRN(reportScrub, null);
+        }),
+    // reportScrub closes over onScrub; a new chart identity rebuilds it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [onScrub, pointCount, scrubStepX]
+  );
 
   const values = data.map((d) => d.value);
   let lo = min ?? Math.min(...values);
@@ -160,36 +218,49 @@ export function Sparkline({
 
   if (data.length === 0) return null;
 
+  const scrubPoint = scrubIndex !== null ? points[scrubIndex] : null;
+  // Kept half a pixel inside the canvas so the first and last points'
+  // hairline isn't clipped to half its width at the edge.
+  const scrubLineX = scrubPoint ? Math.max(0.5, Math.min(width - 0.5, scrubPoint.x)) : 0;
+
   return (
-    <View style={{ width, height }}>
-      <Svg width={width} height={height}>
-        {referenceY !== null ? (
-          <Line
-            x1={0}
-            y1={referenceY}
-            x2={width}
-            y2={referenceY}
-            stroke={referenceColor ?? color}
-            strokeWidth={1}
-            strokeDasharray="3,3"
-            opacity={0.5}
+    <GestureDetector gesture={scrubGesture}>
+      <View style={{ width, height }}>
+        <Svg width={width} height={height}>
+          {referenceY !== null ? (
+            <Line
+              x1={0}
+              y1={referenceY}
+              x2={width}
+              y2={referenceY}
+              stroke={referenceColor ?? color}
+              strokeWidth={1}
+              strokeDasharray="3,3"
+              opacity={0.5}
+            />
+          ) : null}
+          {filled && areaPath ? (
+            <AnimatedPath d={areaPath} fill={color} stroke="none" animatedProps={areaAnimatedProps} />
+          ) : null}
+          <AnimatedPath
+            d={linePath}
+            fill="none"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeDasharray={lineLength}
+            animatedProps={lineAnimatedProps}
           />
-        ) : null}
-        {filled && areaPath ? (
-          <AnimatedPath d={areaPath} fill={color} stroke="none" animatedProps={areaAnimatedProps} />
-        ) : null}
-        <AnimatedPath
-          d={linePath}
-          fill="none"
-          stroke={color}
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeDasharray={lineLength}
-          animatedProps={lineAnimatedProps}
-        />
-        <AnimatedCircle cx={lastPoint.x} cy={lastPoint.y} r={3.5} fill={color} animatedProps={dotAnimatedProps} />
-      </Svg>
-    </View>
+          <AnimatedCircle cx={lastPoint.x} cy={lastPoint.y} r={3.5} fill={color} animatedProps={dotAnimatedProps} />
+          {scrubPoint ? (
+            <>
+              <Line x1={scrubLineX} y1={0} x2={scrubLineX} y2={height} stroke={color} strokeOpacity={0.35} strokeWidth={1} />
+              <Circle cx={scrubPoint.x} cy={scrubPoint.y} r={4.5} fill={color} />
+            </>
+          ) : null}
+        </Svg>
+      </View>
+    </GestureDetector>
   );
 }

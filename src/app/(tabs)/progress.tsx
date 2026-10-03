@@ -1,7 +1,25 @@
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
-import { Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
-import ReanimatedAnimated from 'react-native-reanimated';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
+import ReanimatedAnimated, {
+  Easing,
+  FadeIn,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withDelay,
+  withTiming,
+} from 'react-native-reanimated';
 import type { SFSymbol } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -36,6 +54,18 @@ import { PRESSED_DIM } from '@/lib/button-interactions';
 import { openPaywall } from '@/lib/plus-features';
 
 const WEEKDAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+// Sections whose charts sit below the fold. Each one's charts hold their
+// draw-in until the section's top is this far above the bottom of the
+// screen, so they animate when someone actually scrolls to them instead of
+// unseen at mount. The margin covers the floating tab bar (~80pt) plus the
+// kicker and card header between a section's top and its first chart
+// (~170pt), so that chart is in view, not behind the tab bar, when it starts.
+type RevealSection = 'balance' | 'load' | 'strength';
+const REVEAL_MARGIN = 260;
+// The calendar's cells fade in along a diagonal, top-left to bottom-right —
+// a quick settle, not a show: a 4-week grid is done in about 400 ms.
+const GRID_CELL_FADE_MS = 180;
+const GRID_CELL_STAGGER_MS = 24;
 const MONTH_WEEK_COUNT = 4;
 // A rolling trailing cutoff, not a calendar-week reset — see
 // workout-log.ts's sinceDateStr for why a hard reset was rejected (it would
@@ -148,6 +178,37 @@ export default function ProgressScreen() {
   const [balanceView, setBalanceView] = useState<'body-area' | 'pattern'>('body-area');
   const balanceSinceDays = balanceRange === 'recent' ? RECENT_BALANCE_WINDOW_DAYS : undefined;
   const [consistencyMeterWidth, setConsistencyMeterWidth] = useState(0);
+  // Which chart a finger is holding, and the point under it — one at a time,
+  // since there's only one finger on the page. The scroll view stays locked
+  // while it's set so dragging across a chart reads it instead of scrolling.
+  const [scrub, setScrub] = useState<{ chart: string; index: number } | null>(null);
+  const scrubHandler = (chart: string) => (index: number | null) =>
+    setScrub(index === null ? null : { chart, index });
+  const reducedMotion = useReducedMotion();
+  const [revealed, setRevealed] = useState<Record<RevealSection, boolean>>({
+    balance: false,
+    load: false,
+    strength: false,
+  });
+  const sectionTops = useRef<Partial<Record<RevealSection, number>>>({});
+  const scrollMetrics = useRef({ offset: 0, viewport: 0 });
+  const checkReveals = () => {
+    const { offset, viewport } = scrollMetrics.current;
+    if (viewport === 0) return;
+    const nowVisible = (Object.keys(sectionTops.current) as RevealSection[]).filter(
+      (section) => (sectionTops.current[section] ?? Infinity) < offset + viewport - REVEAL_MARGIN
+    );
+    if (nowVisible.every((section) => revealed[section])) return;
+    setRevealed((prev) => {
+      const next = { ...prev };
+      for (const section of nowVisible) next[section] = true;
+      return next;
+    });
+  };
+  const handleSectionLayout = (section: RevealSection, top: number) => {
+    sectionTops.current[section] = top;
+    checkReveals();
+  };
 
   // BUG FIX: this used to await each store one after another, setting state
   // after every step — seven sequential reads and as many re-renders of
@@ -237,9 +298,9 @@ export default function ProgressScreen() {
       const resolved = week.filter((d) => d.isScheduled && d.completed !== null);
       if (resolved.length === 0) return null;
       const completed = resolved.filter((d) => d.completed);
-      return { value: Math.round((completed.length / resolved.length) * 100) };
+      return { value: Math.round((completed.length / resolved.length) * 100), label: formatWeekRange(week) };
     })
-    .filter((point): point is { value: number } => point !== null);
+    .filter((point): point is { value: number; label: string } => point !== null);
   // First-vs-last comparison, not a recent-vs-earlier mean split like
   // training-state.ts's own capacityTrend — that split needs more points
   // than this typically-4-week window ever has. Same honest-default
@@ -258,6 +319,7 @@ export default function ProgressScreen() {
           if (delta < -CONSISTENCY_TREND_DELTA) return 'declining';
           return 'stable';
         })();
+  const scrubbedWeek = scrub?.chart === 'consistency' ? consistencyMeterData[scrub.index] : undefined;
 
   // Gated independently — capacityTrend reads session-history's energy log
   // (real data going back as far as that's been tracked), stimulusDebt reads
@@ -339,6 +401,16 @@ export default function ProgressScreen() {
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 140 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
+        scrollEnabled={scrub === null}
+        onLayout={(e) => {
+          scrollMetrics.current.viewport = e.nativeEvent.layout.height;
+          checkReveals();
+        }}
+        onScroll={(e) => {
+          scrollMetrics.current.offset = e.nativeEvent.contentOffset.y;
+          checkReveals();
+        }}
+        scrollEventThrottle={32}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.textSecondary} />
         }
@@ -399,17 +471,28 @@ export default function ProgressScreen() {
             {consistencyMeterData.length >= 2 ? (
               <View style={styles.card}>
                 <View style={styles.chartCaptionRow}>
-                  <Text style={styles.chartCaption} maxFontSizeMultiplier={1.3}>Weekly completion</Text>
-                  <View style={styles.chartTrendIndicator}>
-                    <SymbolView
-                      name={TREND_ICON[consistencyTrend]}
-                      size={11}
-                      tintColor={consistencyTrend === 'improving' ? '#5FBE84' : colors.textTertiary}
-                    />
-                    <Text style={styles.chartTrendText} maxFontSizeMultiplier={1.2}>
-                      {TREND_LABEL[consistencyTrend]}
-                    </Text>
-                  </View>
+                  {scrubbedWeek ? (
+                    <>
+                      <Text style={styles.chartCaption} maxFontSizeMultiplier={1.3}>{scrubbedWeek.label}</Text>
+                      <Text style={[styles.chartTrendText, TabularNums]} maxFontSizeMultiplier={1.2}>
+                        {scrubbedWeek.value}% completed
+                      </Text>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.chartCaption} maxFontSizeMultiplier={1.3}>Weekly completion</Text>
+                      <View style={styles.chartTrendIndicator}>
+                        <SymbolView
+                          name={TREND_ICON[consistencyTrend]}
+                          size={11}
+                          tintColor={consistencyTrend === 'improving' ? '#5FBE84' : colors.textTertiary}
+                        />
+                        <Text style={styles.chartTrendText} maxFontSizeMultiplier={1.2}>
+                          {TREND_LABEL[consistencyTrend]}
+                        </Text>
+                      </View>
+                    </>
+                  )}
                 </View>
                 <View
                   style={styles.chartCardInner}
@@ -424,6 +507,7 @@ export default function ProgressScreen() {
                       max={100}
                       filled
                       color="#5FBE84"
+                      onScrub={scrubHandler('consistency')}
                     />
                   ) : null}
                 </View>
@@ -450,7 +534,7 @@ export default function ProgressScreen() {
                 const scheduledInWeek = week.filter((d) => d.isScheduled);
                 const completedInWeek = scheduledInWeek.filter((d) => d.completed);
                 return (
-                  <View key={weekIndex} style={styles.gridWeekBlock}>
+                  <View key={week[0].date} style={styles.gridWeekBlock}>
                     {/* A real date reference plus a plain count per row — no
                         fill bar (this app's brand system treats those as
                         permanently off-limits), just the two facts someone
@@ -467,7 +551,15 @@ export default function ProgressScreen() {
                     </View>
                     <View style={styles.gridRow}>
                       {week.map((day, dayIndex) => (
-                        <View key={dayIndex} style={styles.gridCellWrap}>
+                        <ReanimatedAnimated.View
+                          key={dayIndex}
+                          style={styles.gridCellWrap}
+                          entering={
+                            reducedMotion
+                              ? undefined
+                              : FadeIn.duration(GRID_CELL_FADE_MS).delay((weekIndex + dayIndex) * GRID_CELL_STAGGER_MS)
+                          }
+                        >
                           {day.isScheduled ? (
                             <Pressable
                               disabled={day.completed === null}
@@ -517,7 +609,7 @@ export default function ProgressScreen() {
                           ) : (
                             <View style={styles.gridCellEmpty} />
                           )}
-                        </View>
+                        </ReanimatedAnimated.View>
                       ))}
                     </View>
                   </View>
@@ -534,7 +626,7 @@ export default function ProgressScreen() {
           </PremiumGate>
         </View>
 
-        <View style={styles.section}>
+        <View style={styles.section} onLayout={(e) => handleSectionLayout('balance', e.nativeEvent.layout.y)}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TRAINING BALANCE</Text>
             <View style={styles.rangeToggle}>
@@ -565,7 +657,7 @@ export default function ProgressScreen() {
                 {hasMovementData ? (
                   <>
                     <View style={styles.movementRadarWrap}>
-                      <RadarChart size={172} data={movementShapeData} />
+                      <RadarChart size={172} data={movementShapeData} play={revealed.balance} />
                     </View>
                     <Text style={styles.movementShapeCaption} maxFontSizeMultiplier={1.3}>
                       {balanceRange === 'recent'
@@ -651,7 +743,7 @@ export default function ProgressScreen() {
           </PremiumGate>
         </View>
 
-        <View style={styles.section}>
+        <View style={styles.section} onLayout={(e) => handleSectionLayout('load', e.nativeEvent.layout.y)}>
           <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TRAINING LOAD</Text>
           {showTrend || showDebt ? (
             <View style={styles.card}>
@@ -687,7 +779,7 @@ export default function ProgressScreen() {
                             <Text style={styles.debtValue} maxFontSizeMultiplier={1.2}>{debtSets} sets banked</Text>
                           </View>
                           <View style={styles.barTrack}>
-                            <View style={[styles.barFill, { width: `${barFraction * 100}%` }]} />
+                            <BankedBarFill fraction={barFraction} play={revealed.load} style={styles.barFill} />
                           </View>
                         </View>
                       );
@@ -715,7 +807,7 @@ export default function ProgressScreen() {
             opted into logging a weight for AND that showed a real 1RM
             improvement — most people will see the empty state, and that's
             the honest default, not a lesser version of this section. */}
-        <View style={styles.section}>
+        <View style={styles.section} onLayout={(e) => handleSectionLayout('strength', e.nativeEvent.layout.y)}>
           <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>STRENGTH PROGRESS</Text>
           <PremiumGate isPremium={isPremium} label="Strength Progress" feature="strength">
             {improvedExercises.length > 0 ? (
@@ -726,6 +818,7 @@ export default function ProgressScreen() {
                   // dot, not a trend, and not worth its own chart row).
                   const history = exerciseHistories[entry.exerciseName] ?? [];
                   const showChart = history.length >= 2;
+                  const scrubbed = scrub?.chart === `strength:${entry.exerciseName}` ? history[scrub.index] : undefined;
                   return (
                     <View
                       key={entry.exerciseName}
@@ -735,12 +828,16 @@ export default function ProgressScreen() {
                         <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{entry.exerciseName}</Text>
                         <View style={styles.strengthProgressStats}>
                           <View style={styles.strengthProgressValue}>
-                            <SymbolView name="arrow.up.right" size={12} tintColor="#5FBE84" />
+                            {scrubbed ? null : <SymbolView name="arrow.up.right" size={12} tintColor="#5FBE84" />}
                             <Text style={styles.debtValue} maxFontSizeMultiplier={1.2}>
-                              {formatWeight(entry.performance.estimatedOneRepMax, unit)} est. 1RM
+                              {formatWeight((scrubbed ?? entry.performance).estimatedOneRepMax, unit)} est. 1RM
                             </Text>
                           </View>
-                          {weightKg > 0 ? (
+                          {scrubbed ? (
+                            <Text style={styles.strengthProgressRelative} maxFontSizeMultiplier={1.3}>
+                              {formatEntryDateLabel(scrubbed.date)}
+                            </Text>
+                          ) : weightKg > 0 ? (
                             <Text style={styles.strengthProgressRelative} maxFontSizeMultiplier={1.3}>
                               {(entry.performance.estimatedOneRepMax / weightKg).toFixed(2)}× bodyweight
                             </Text>
@@ -758,6 +855,9 @@ export default function ProgressScreen() {
                               width={strengthChartWidth}
                               height={40}
                               color="#5FBE84"
+                              delay={index * 90}
+                              play={revealed.strength}
+                              onScrub={scrubHandler(`strength:${entry.exerciseName}`)}
                             />
                           ) : null}
                         </View>
@@ -796,6 +896,29 @@ function LegendDot({
       <View style={[styles.legendDot, style]} />
       <Text style={styles.legendText} maxFontSizeMultiplier={1.2}>{label}</Text>
     </View>
+  );
+}
+
+/**
+ * One banked-volume bar's fill — grows out from the left the first time its
+ * section scrolls into view, on the same curve and timing as Home's Training
+ * Load bars, then just re-renders in place when its value changes. Instant
+ * under Reduce Motion.
+ */
+function BankedBarFill({ fraction, play, style }: { fraction: number; play: boolean; style: StyleProp<ViewStyle> }) {
+  const reducedMotion = useReducedMotion();
+  const grow = useSharedValue(reducedMotion ? 1 : 0);
+  useEffect(() => {
+    if (reducedMotion) {
+      grow.value = 1;
+      return;
+    }
+    if (!play) return;
+    grow.value = withDelay(150, withTiming(1, { duration: 700, easing: Easing.out(Easing.cubic) }));
+  }, [grow, play, reducedMotion]);
+  const growStyle = useAnimatedStyle(() => ({ transform: [{ scaleX: grow.value }] }));
+  return (
+    <ReanimatedAnimated.View style={[style, { width: `${fraction * 100}%`, transformOrigin: 'left' }, growStyle]} />
   );
 }
 
