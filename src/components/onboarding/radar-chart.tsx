@@ -6,13 +6,19 @@ import { useAppColors } from '@/lib/theme-context';
 import ReanimatedAnimated, {
   Easing,
   FadeIn,
+  useAnimatedProps,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
   withDelay,
   withTiming,
+  type SharedValue,
 } from 'react-native-reanimated';
-import Svg, { Circle, Line, Polygon } from 'react-native-svg';
+import { scheduleOnUI } from 'react-native-worklets';
+import Svg, { Circle, Line, Path, Polygon } from 'react-native-svg';
+
+const AnimatedPath = ReanimatedAnimated.createAnimatedComponent(Path);
+const AnimatedCircle = ReanimatedAnimated.createAnimatedComponent(Circle);
 
 export type RadarDatum = {
   label: string;
@@ -23,6 +29,8 @@ type RadarChartProps = {
   data: RadarDatum[];
   size?: number;
   maxValue?: number;
+  /** Holds the bloom until true — for a chart that mounts below the fold. */
+  play?: boolean;
 };
 
 const RING_FRACTIONS = [0.34, 0.67, 1];
@@ -40,6 +48,12 @@ function pointsToString(points: [number, number][]): string {
   return points.map(([x, y]) => `${x},${y}`).join(' ');
 }
 
+/** Where axis `index` sits mid-morph — `from` eased toward `to` by `t`. */
+function morphedFraction(from: number[], to: number[], t: number, index: number): number {
+  'worklet';
+  return from[index] + (to[index] - from[index]) * t;
+}
+
 /**
  * A 5-axis (or N-axis) radar/spider chart — the visual centerpiece of the
  * estimated-potential screen. The data shape (polygon + dots) blooms out
@@ -49,35 +63,25 @@ function pointsToString(points: [number, number][]): string {
  * point grows outward along its real radial line, not just a generic pop.
  * The grid (rings/spokes/labels) stays static — only the data reads as "new".
  *
+ * New values for the same axes (Progress's Last 7 Days ↔ All toggle) don't
+ * replay that bloom: the shape eases from wherever it currently is to the
+ * new values, each point sliding along its own axis, so the change itself
+ * is what's visible. A different axis set is a different chart, and blooms
+ * in fresh.
+ *
  * Deliberately single-layer only. A second "current progress" layer nested
  * inside this one was tried and reverted — even framed as "observation, not
  * score," an outer shape a smaller one sits inside of reads as a target the
  * user is falling short of, no matter the label. See training-radar.tsx for
  * the honest alternative: a self-normalized shape with no implied ceiling.
  */
-export function RadarChart({ data, size = 220, maxValue = 100 }: RadarChartProps) {
+export function RadarChart({ data, size = 220, maxValue = 100, play = true }: RadarChartProps) {
   const colors = useAppColors();
   const cx = size / 2;
   const cy = size / 2;
   const radius = size / 2 - 34; // leaves room for axis labels around the edge
   const count = data.length;
-
-  const dataPoints = data.map((d, i) =>
-    polarPoint(cx, cy, radius * Math.max(0, Math.min(1, d.value / maxValue)), axisAngle(i, count))
-  );
-
   const reducedMotion = useReducedMotion();
-  const bloom = useSharedValue(reducedMotion ? 1 : 0);
-
-  useEffect(() => {
-    if (reducedMotion) return;
-    bloom.value = withDelay(200, withTiming(1, { duration: 950, easing: Easing.out(Easing.cubic) }));
-  }, [bloom, reducedMotion]);
-
-  const dataLayerStyle = useAnimatedStyle(() => ({
-    opacity: bloom.value,
-    transform: [{ scale: 0.35 + bloom.value * 0.65 }],
-  }));
 
   return (
     <View style={{ width: size, height: size }}>
@@ -99,14 +103,13 @@ export function RadarChart({ data, size = 220, maxValue = 100 }: RadarChartProps
         })}
       </Svg>
 
-      <ReanimatedAnimated.View style={[StyleSheet.absoluteFill, dataLayerStyle]}>
-        <Svg width={size} height={size}>
-          <Polygon points={pointsToString(dataPoints)} fill="rgba(67,140,99,0.28)" stroke="#438C63" strokeWidth={2} />
-          {dataPoints.map(([x, y], i) => (
-            <Circle key={i} cx={x} cy={y} r={3.5} fill="#438C63" />
-          ))}
-        </Svg>
-      </ReanimatedAnimated.View>
+      <RadarDataLayer
+        key={data.map((d) => d.label).join('|')}
+        fractions={data.map((d) => Math.max(0, Math.min(1, d.value / maxValue)))}
+        size={size}
+        radius={radius}
+        play={play}
+      />
 
       {data.map((d, i) => {
         const angle = axisAngle(i, count);
@@ -159,6 +162,106 @@ export function RadarChart({ data, size = 220, maxValue = 100 }: RadarChartProps
       })}
     </View>
   );
+}
+
+type RadarDataLayerProps = {
+  fractions: number[];
+  size: number;
+  radius: number;
+  play: boolean;
+};
+
+/**
+ * The data shape (fill, outline, dots) for one fixed set of axes. Keyed on
+ * the axis labels by RadarChart, so a new axis set remounts it and blooms
+ * fresh, while new values for the same axes morph in place.
+ */
+function RadarDataLayer({ fractions, size, radius, play }: RadarDataLayerProps) {
+  const cx = size / 2;
+  const cy = size / 2;
+  const count = fractions.length;
+  const angles = fractions.map((_, i) => (Math.PI / 180) * axisAngle(i, count));
+
+  const reducedMotion = useReducedMotion();
+  const bloom = useSharedValue(reducedMotion ? 1 : 0);
+  useEffect(() => {
+    if (reducedMotion) {
+      bloom.value = 1;
+      return;
+    }
+    if (!play) return;
+    bloom.value = withDelay(200, withTiming(1, { duration: 950, easing: Easing.out(Easing.cubic) }));
+  }, [bloom, reducedMotion, play]);
+
+  const dataLayerStyle = useAnimatedStyle(() => ({
+    opacity: bloom.value,
+    transform: [{ scale: 0.35 + bloom.value * 0.65 }],
+  }));
+
+  // The shape on screen is always `from` eased toward `to` by `morph`. A new
+  // set of values restarts the ease from wherever the shape is right now —
+  // read on the UI thread, so a quick second toggle mid-morph turns around
+  // smoothly instead of jumping back to the last resting shape first.
+  const from = useSharedValue(fractions);
+  const to = useSharedValue(fractions);
+  const morph = useSharedValue(1);
+  const fractionsKey = fractions.join(',');
+  useEffect(() => {
+    const next = fractionsKey.split(',').map(Number);
+    if (reducedMotion) {
+      from.value = next;
+      to.value = next;
+      morph.value = 1;
+      return;
+    }
+    scheduleOnUI(() => {
+      'worklet';
+      if (next.every((value, i) => value === to.value[i])) return;
+      from.value = to.value.map((_, i) => morphedFraction(from.value, to.value, morph.value, i));
+      to.value = next;
+      morph.value = 0;
+      morph.value = withTiming(1, { duration: MOTION_DURATION.slow, easing: Easing.out(Easing.cubic) });
+    });
+  }, [fractionsKey, reducedMotion, from, to, morph]);
+
+  const shapeProps = useAnimatedProps(() => {
+    let d = '';
+    for (let i = 0; i < count; i++) {
+      const r = radius * morphedFraction(from.value, to.value, morph.value, i);
+      d += `${i === 0 ? 'M' : ' L'} ${cx + r * Math.cos(angles[i])},${cy + r * Math.sin(angles[i])}`;
+    }
+    return { d: `${d} Z` };
+  });
+
+  return (
+    <ReanimatedAnimated.View style={[StyleSheet.absoluteFill, dataLayerStyle]}>
+      <Svg width={size} height={size}>
+        <AnimatedPath animatedProps={shapeProps} fill="rgba(67,140,99,0.28)" stroke="#438C63" strokeWidth={2} />
+        {angles.map((angle, i) => (
+          <RadarDot key={i} index={i} angle={angle} cx={cx} cy={cy} radius={radius} from={from} to={to} morph={morph} />
+        ))}
+      </Svg>
+    </ReanimatedAnimated.View>
+  );
+}
+
+type RadarDotProps = {
+  index: number;
+  angle: number;
+  cx: number;
+  cy: number;
+  radius: number;
+  from: SharedValue<number[]>;
+  to: SharedValue<number[]>;
+  morph: SharedValue<number>;
+};
+
+function RadarDot({ index, angle, cx, cy, radius, from, to, morph }: RadarDotProps) {
+  const dotProps = useAnimatedProps(() => {
+    const r = radius * morphedFraction(from.value, to.value, morph.value, index);
+    return { cx: cx + r * Math.cos(angle), cy: cy + r * Math.sin(angle) };
+  });
+  return <AnimatedCircle animatedProps={dotProps} r={3.5} fill="#438C63" />;
 }
 
 const styles = StyleSheet.create({
