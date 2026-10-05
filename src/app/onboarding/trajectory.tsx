@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { useCanvasScale } from '@/lib/canvas-scale';
+import { canvasHairline, useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, { FadeIn, useReducedMotion } from 'react-native-reanimated';
 import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 
@@ -42,9 +42,10 @@ const isGlassAvailable = isLiquidGlassAvailable();
  */
 export default function OnboardingTrajectoryScreen() {
   const scale = useCanvasScale();
+  const hairline = canvasHairline(scale);
   const { colors, resolvedScheme } = useAppTheme();
   const hoverWashColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
-  const styles = useMemo(() => createStyles(colors, hoverWashColor), [colors, hoverWashColor]);
+  const styles = useMemo(() => createStyles(colors, hoverWashColor, hairline), [colors, hoverWashColor, hairline]);
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   useEffect(() => {
@@ -183,7 +184,7 @@ export default function OnboardingTrajectoryScreen() {
   );
 }
 
-function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWashColor: string) {
+function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWashColor: string, hairline: number) {
   return StyleSheet.create({
     root: {
       flex: 1,
@@ -249,7 +250,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       paddingHorizontal: 18,
       paddingVertical: 4,
       borderRadius: 10,
-      borderWidth: StyleSheet.hairlineWidth,
+      borderWidth: hairline,
       borderColor: colors.surfaceBorder,
       backgroundColor: colors.surface,
       overflow: 'hidden',
@@ -269,7 +270,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       paddingVertical: 12,
     },
     highlightDivider: {
-      height: StyleSheet.hairlineWidth,
+      height: hairline,
       backgroundColor: colors.surfaceDivider,
     },
     highlightLabel: {

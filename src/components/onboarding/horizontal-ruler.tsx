@@ -15,6 +15,9 @@ import { hapticSelect } from '@/lib/haptics';
 import { useAppTheme } from '@/lib/theme-context';
 
 export const RULER_TICK_SPACING = 26;
+// How long a release waits for UIKit to start a momentum phase before the
+// ruler settles onto its nearest tick itself (see handleScrollEndDrag).
+const SETTLE_WAIT_MS = 80;
 export const RULER_HEIGHT = 68;
 export const RULER_TICK_HEIGHT = 24;
 const TICK_HEIGHT = RULER_TICK_HEIGHT;
@@ -135,6 +138,20 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width, accessi
 
   const commitAtOffset = (offsetX: number) => {
     const index = Math.max(0, Math.min(items.length - 1, Math.round(offsetX / RULER_TICK_SPACING)));
+    // BUG FIX (found by the user while recording): a drag released without
+    // a real flick could come to rest between two ticks. snapToInterval only
+    // works by retargeting the deceleration, and a release UIKit doesn't
+    // decelerate has none, so the strip stayed wherever the finger stopped.
+    // The committed value often didn't change in that case either, so
+    // nothing else re-aligned it, and the number stayed off-center and
+    // half-faded (gray) until the ruler was touched again. Pulling the strip
+    // onto the tick here gives every release the same magnetic settle a
+    // native picker has; the animation's own scroll events bring the label
+    // to full opacity.
+    const tickOffset = index * RULER_TICK_SPACING;
+    if (Math.abs(offsetX - tickOffset) > 0.5) {
+      scrollRef.current?.scrollTo({ x: tickOffset, animated: true });
+    }
     if (index !== lastIndex.current) {
       lastIndex.current = index;
       onChange(index);
@@ -144,12 +161,34 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width, accessi
     commitAtOffset(e.nativeEvent.contentOffset.x);
   };
   // BUG FIX: the value only ever committed on onMomentumScrollEnd — but a
-  // slow drag released with no velocity, already sitting on a tick, has no
-  // momentum phase at all, so that event never fired and the ruler showed a
-  // new value while the old one stayed saved. A zero-velocity release
-  // commits right here instead.
+  // slow drag has no momentum phase at all, so that event never fired and
+  // the ruler showed a new value while the old one stayed saved. A release
+  // now commits (and settles onto its tick) unless momentum actually starts.
+  // That used to be guessed from the release velocity (< 0.01), but UIKit
+  // skips deceleration for small nonzero velocities too, and those releases
+  // were left uncommitted and between ticks. onMomentumScrollBegin arrives
+  // right behind onScrollEndDrag when UIKit does decelerate, so a short wait
+  // for it is the reliable signal.
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelSettle = () => {
+    if (settleTimer.current !== null) {
+      clearTimeout(settleTimer.current);
+      settleTimer.current = null;
+    }
+  };
+  useEffect(
+    () => () => {
+      if (settleTimer.current !== null) clearTimeout(settleTimer.current);
+    },
+    []
+  );
   const handleScrollEndDrag = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    if (Math.abs(e.nativeEvent.velocity?.x ?? 0) < 0.01) commitAtOffset(e.nativeEvent.contentOffset.x);
+    const offsetX = e.nativeEvent.contentOffset.x;
+    cancelSettle();
+    settleTimer.current = setTimeout(() => {
+      settleTimer.current = null;
+      commitAtOffset(offsetX);
+    }, SETTLE_WAIT_MS);
   };
 
   // VoiceOver sees the ruler as one adjustable control (swipe up or down to
@@ -204,6 +243,8 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width, accessi
         contentContainerStyle={{ paddingHorizontal: sidePadding }}
         onScroll={handleScroll}
         scrollEventThrottle={16}
+        onScrollBeginDrag={cancelSettle}
+        onMomentumScrollBegin={cancelSettle}
         onMomentumScrollEnd={handleMomentumEnd}
         onScrollEndDrag={handleScrollEndDrag}
         onContentSizeChange={handleContentSizeChange}

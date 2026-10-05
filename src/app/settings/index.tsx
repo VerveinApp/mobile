@@ -120,6 +120,9 @@ export default function SettingsScreen() {
   const [appLockAvailable, setAppLockAvailable] = useState(false);
   const [appLockLabel, setAppLockLabel] = useState('App Lock');
   const [remindersOn, setRemindersOn] = useState(false);
+  // Set when turning reminders on fails because iOS has notifications off
+  // for the app — iOS never re-asks, so the only way forward is Settings.
+  const [remindersBlocked, setRemindersBlocked] = useState(false);
   const [scheduledDaysCount, setScheduledDaysCount] = useState(0);
   const [remindersSupported, setRemindersSupported] = useState(false);
   const [healthKitOn, setHealthKitOn] = useState(false);
@@ -326,13 +329,18 @@ export default function SettingsScreen() {
     const granted = await enableSessionReminders(days);
     if (granted) {
       setRemindersOn(true);
+      setRemindersBlocked(false);
       hapticImpactLight();
       // Same permission covers remote pushes — register now rather than
       // waiting for the next cold launch (see push-notifications.ts).
       registerForRemotePushNotifications();
     } else {
       // Permission denied at the OS prompt — the toggle reverts rather than
-      // showing "on" for something that can't actually fire.
+      // showing "on" for something that can't actually fire. It used to
+      // revert with only an error buzz, which read as a broken switch to
+      // anyone who'd declined the prompt once; the line below the row now
+      // says why and links to where it can be changed.
+      setRemindersBlocked(true);
       hapticError();
     }
   };
@@ -725,6 +733,19 @@ export default function SettingsScreen() {
               unavailableSubtitle={!remindersSupported ? 'Not available in this app build' : 'Set your training days first'}
               last
             />
+            {remindersBlocked ? (
+              <Pressable
+                onPress={() => Linking.openSettings()}
+                accessibilityRole="button"
+                accessibilityLabel="Notifications are turned off for VerveIn. Open Settings to allow them."
+                style={styles.permissionHint}
+              >
+                <Text style={styles.permissionHintText} maxFontSizeMultiplier={1.3}>
+                  Notifications are turned off for VerveIn.{' '}
+                  <Text style={styles.permissionHintLink}>Open Settings</Text> to allow them.
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
         </Section>
 
@@ -1031,6 +1052,7 @@ export default function SettingsScreen() {
                 <Text style={styles.importBody} maxFontSizeMultiplier={1.4}>
                   This permanently clears your profile — on this device and the copy synced to your account —
                   plus your session history, logs, progress photos, and calibration. It can&apos;t be undone.
+                  Your account and any VerveIn Plus subscription stay; you&apos;ll set up your plan again.
                 </Text>
                 <View style={styles.importActions}>
                   <Pressable
@@ -1375,6 +1397,20 @@ function AppLockRow({
 
 function createStyles(colors: Record<string, string>) {
   return StyleSheet.create({
+    permissionHint: {
+      paddingHorizontal: 16,
+      paddingBottom: 14,
+    },
+    permissionHintText: {
+      color: colors.textTertiary,
+      fontSize: Type.caption,
+      lineHeight: 16,
+      fontFamily: 'Geist-Medium',
+    },
+    permissionHintLink: {
+      color: colors.accentText,
+      fontFamily: 'Geist-SemiBold',
+    },
     root: {
       flex: 1,
       backgroundColor: colors.background,
