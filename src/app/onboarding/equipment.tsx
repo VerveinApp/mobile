@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { useCanvasScale } from '@/lib/canvas-scale';
+import { canvasHairline, useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, { FadeIn } from 'react-native-reanimated';
 
 import { PRESSED_DIM, useHoverFade, useLiquidPress } from '@/lib/button-interactions';
@@ -50,9 +50,10 @@ const CANVAS_HEIGHT = 812;
  */
 export default function OnboardingEquipmentScreen() {
   const scale = useCanvasScale();
+  const hairline = canvasHairline(scale);
   const { colors, resolvedScheme } = useAppTheme();
   const washColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
-  const styles = useMemo(() => createStyles(colors, washColor), [colors, washColor]);
+  const styles = useMemo(() => createStyles(colors, washColor, hairline), [colors, washColor, hairline]);
 
   const { mode, name, goal, experience, environment, verifiedEmail, equipment } = useLocalSearchParams<{
     mode?: string;
@@ -241,7 +242,7 @@ const CARD_RADIUS = 10;
 const GRID_GAP = 6;
 const CHIP_WIDTH = (343 - GRID_GAP) / 2;
 
-function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColor: string) {
+function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColor: string, hairline: number) {
   return StyleSheet.create({
     root: {
       flex: 1,
@@ -324,7 +325,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       paddingLeft: 12,
       paddingRight: 8,
       borderRadius: CARD_RADIUS,
-      borderWidth: StyleSheet.hairlineWidth,
+      borderWidth: hairline,
       borderColor: colors.surfaceBorder,
       backgroundColor: colors.surface,
     },

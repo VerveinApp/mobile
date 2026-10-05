@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { useCanvasScale } from '@/lib/canvas-scale';
+import { canvasHairline, useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated from 'react-native-reanimated';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
@@ -59,9 +59,10 @@ function useOptionInteraction() {
  */
 export default function OnboardingScheduleScreen() {
   const scale = useCanvasScale();
+  const hairline = canvasHairline(scale);
   const { colors, resolvedScheme } = useAppTheme();
   const washColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
-  const styles = useMemo(() => createStyles(colors, washColor), [colors, washColor]);
+  const styles = useMemo(() => createStyles(colors, washColor, hairline), [colors, washColor, hairline]);
 
   const {
     name,
@@ -324,7 +325,7 @@ export default function OnboardingScheduleScreen() {
 
 const CARD_RADIUS = 10;
 
-function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColor: string) {
+function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColor: string, hairline: number) {
   return StyleSheet.create({
     root: {
       flex: 1,
@@ -421,7 +422,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       alignItems: 'center',
       justifyContent: 'center',
       borderRadius: CARD_RADIUS,
-      borderWidth: StyleSheet.hairlineWidth,
+      borderWidth: hairline,
       borderColor: colors.surfaceBorder,
       backgroundColor: colors.surface,
     },
@@ -448,7 +449,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       borderRadius: 21,
       alignItems: 'center',
       justifyContent: 'center',
-      borderWidth: StyleSheet.hairlineWidth,
+      borderWidth: hairline,
       borderColor: colors.surfaceBorder,
       backgroundColor: colors.surface,
     },

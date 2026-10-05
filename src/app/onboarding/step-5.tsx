@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { useCanvasScale } from '@/lib/canvas-scale';
+import { canvasHairline, useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated from 'react-native-reanimated';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
@@ -94,9 +94,10 @@ function kgToKgIndex(kg: number): number {
  */
 export default function OnboardingConsentBiometricsScreen() {
   const scale = useCanvasScale();
+  const hairline = canvasHairline(scale);
   const { colors, resolvedScheme } = useAppTheme();
   const washColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
-  const styles = useMemo(() => createStyles(colors, washColor), [colors, washColor]);
+  const styles = useMemo(() => createStyles(colors, washColor, hairline), [colors, washColor, hairline]);
 
   const {
     name,
@@ -486,7 +487,7 @@ export default function OnboardingConsentBiometricsScreen() {
   );
 }
 
-function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColor: string) {
+function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColor: string, hairline: number) {
   return StyleSheet.create({
     root: {
       flex: 1,
@@ -574,7 +575,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       paddingHorizontal: 14,
       paddingVertical: 10,
       borderRadius: 6.69,
-      borderWidth: StyleSheet.hairlineWidth,
+      borderWidth: hairline,
       borderColor: '#BDBDBD',
       backgroundColor: colors.surface,
     },
@@ -651,7 +652,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       alignItems: 'center',
       justifyContent: 'center',
       borderRadius: 6.69,
-      borderWidth: StyleSheet.hairlineWidth,
+      borderWidth: hairline,
       borderColor: '#BDBDBD',
       backgroundColor: colors.surface,
     },
@@ -681,7 +682,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       alignItems: 'center',
       justifyContent: 'center',
       borderRadius: 6,
-      borderWidth: StyleSheet.hairlineWidth,
+      borderWidth: hairline,
       borderColor: colors.pillBorder,
       backgroundColor: colors.surface,
     },

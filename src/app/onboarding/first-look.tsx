@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { useCanvasScale } from '@/lib/canvas-scale';
+import { canvasHairline, useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, { FadeIn, FadeInDown, useReducedMotion } from 'react-native-reanimated';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
@@ -39,13 +39,14 @@ const COUNT_DELAY = GOOD_CARD_DELAY + MOTION_DURATION.slow;
  */
 export default function OnboardingFirstLookScreen() {
   const scale = useCanvasScale();
+  const hairline = canvasHairline(scale);
   const { colors, resolvedScheme } = useAppTheme();
   const isDark = resolvedScheme === 'dark';
   const hoverWashColor = isDark ? '#ffffff' : '#000000';
   const statBlockBorder = isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.25)';
   const styles = useMemo(
-    () => createStyles(colors, hoverWashColor, statBlockBorder),
-    [colors, hoverWashColor, statBlockBorder]
+    () => createStyles(colors, hoverWashColor, statBlockBorder, hairline),
+    [colors, hoverWashColor, statBlockBorder, hairline]
   );
 
   const params = useLocalSearchParams<{
@@ -224,7 +225,7 @@ function GoodDayStat({
   );
 }
 
-function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWashColor: string, statBlockBorder: string) {
+function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWashColor: string, statBlockBorder: string, hairline: number) {
   return StyleSheet.create({
     root: {
       flex: 1,
@@ -298,7 +299,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       width: 343,
       padding: 16,
       borderRadius: 10,
-      borderWidth: StyleSheet.hairlineWidth,
+      borderWidth: hairline,
       borderColor: colors.surfaceBorder,
       backgroundColor: colors.surface,
       overflow: 'hidden',

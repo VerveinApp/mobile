@@ -1,4 +1,4 @@
-import { useWindowDimensions } from 'react-native';
+import { PixelRatio, useWindowDimensions } from 'react-native';
 
 // Every fixed-canvas screen in this app (onboarding, check-in, paywall,
 // auth/verify) was designed against exactly one reference device's real
@@ -28,4 +28,15 @@ const CANVAS_HEIGHT = 812;
 export function useCanvasScale(): number {
   const { width, height } = useWindowDimensions();
   return Math.min(width / CANVAS_WIDTH, height / CANVAS_HEIGHT);
+}
+
+/**
+ * The outline width for a fixed-canvas screen. StyleSheet.hairlineWidth is
+ * one device pixel before the canvas is scaled; scaled ×1.17 on a 6.9" phone
+ * it became 1.17 device pixels, and an outline that lands between pixels
+ * renders unevenly around a curve — the onboarding day circles and option
+ * pills looked jagged. This is exactly one device pixel after scaling.
+ */
+export function canvasHairline(scale: number): number {
+  return 1 / (PixelRatio.get() * scale);
 }

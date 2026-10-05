@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 
-import { useCanvasScale } from '@/lib/canvas-scale';
+import { canvasHairline, useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, { FadeIn } from 'react-native-reanimated';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
@@ -36,9 +36,10 @@ const CANVAS_HEIGHT = 812;
 
 export default function OnboardingNameScreen() {
   const scale = useCanvasScale();
+  const hairline = canvasHairline(scale);
   const { colors, resolvedScheme } = useAppTheme();
   const hoverWashColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
-  const styles = useMemo(() => createStyles(colors, hoverWashColor), [colors, hoverWashColor]);
+  const styles = useMemo(() => createStyles(colors, hoverWashColor, hairline), [colors, hoverWashColor, hairline]);
 
   // Only ever real when this screen was reached via auth/verify.tsx's bare
   // "Sign in" redirect (a device with no local profile that just proved
@@ -198,7 +199,7 @@ export default function OnboardingNameScreen() {
   );
 }
 
-function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWashColor: string) {
+function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWashColor: string, hairline: number) {
   return StyleSheet.create({
     root: {
       flex: 1,
@@ -273,7 +274,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       width: 285,
       height: 40,
       borderRadius: 6,
-      borderWidth: StyleSheet.hairlineWidth,
+      borderWidth: hairline,
       borderColor: '#BDBDBD',
       backgroundColor: colors.surface,
       flexDirection: 'row',
