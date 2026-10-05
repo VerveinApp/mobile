@@ -8,7 +8,7 @@ APP DESCRIPTION / TARGET AUDIENCE
 VerveIn is an adaptive fitness training app. It builds a workout plan from the user's goals and equipment, then adjusts each session to self-reported readiness (energy, soreness, sleep) and, optionally, Apple Health data (steps, resting heart rate, sleep, active energy). It's for general fitness users, beginners to experienced lifters, who want a plan that responds to how they're actually doing instead of a fixed program.
 
 DEVICES / OS VERSIONS TESTED
->>> FILL IN BEFORE SUBMITTING: device model(s) and iOS version(s) <<<
+Physical iPhone 17 Pro Max on iOS 26 (TestFlight build), and the iOS Simulator (iPhone 17 Pro Max, iOS 26).
 
 THIRD-PARTY SERVICES USED
 - Supabase: account authentication and cross-device profile sync
@@ -29,4 +29,4 @@ REGULATED INDUSTRY / PROTECTED MATERIAL
 Not applicable.
 
 SCREEN RECORDING
->>> FILL IN BEFORE SUBMITTING: attached via the Attachment field (or an unlisted link) — recorded on a physical iPhone <<<
+Attached in the Attachment field: recorded on a physical iPhone 17 Pro Max. It shows launch, sign-in, onboarding, the notification, Face ID and Apple Health permission prompts, the VerveIn Plus purchase sheet, and account deletion.
