@@ -323,6 +323,8 @@ export default function SummaryScreen() {
     // Fires the real system permission dialog — banner only disappears on
     // completion (granted or not) so a mid-decision tap can't leave the
     // banner stuck in a stale "still asking" state.
+    // A denial also retires the banner for good (requestHealthKitAccess
+    // does that), since iOS never shows its permission sheet twice.
     const granted = await requestHealthKitAccess();
     setShowHealthKitBanner(false);
     // A user with pre-existing elevated-RHR Health data should see that

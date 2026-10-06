@@ -57,8 +57,20 @@ function RootLayout() {
   // user or one who hasn't granted the permission yet — see
   // push-notifications.ts's own doc comment for the full list of safe
   // no-op cases.
+  //
+  // BUG FIX: signing in didn't register at all — someone who'd allowed
+  // notifications before signing in (or before switching accounts) got no
+  // server pushes until a later cold launch. SIGNED_IN covers that; it's
+  // deferred a tick because Supabase warns that calling its own client from
+  // inside this callback can deadlock (registration reads the session).
   useEffect(() => {
     registerForRemotePushNotifications();
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') setTimeout(registerForRemotePushNotifications, 0);
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
   // Someone who was already signed in when they updated from a version

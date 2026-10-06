@@ -7,11 +7,12 @@ import { localDateStr } from '@/lib/local-date';
 // HealthKit itself never tells an app which individual read permissions
 // were actually granted (Apple deliberately withholds this to prevent
 // permission fingerprinting) — requestAuthorization's resolved boolean only
-// reports whether the request dialog itself completed without error.
-// CONNECTED_KEY tracks "the user went through the connect flow," not "every
-// read type is granted"; every read function below already treats an empty
-// result as the honest default (no data, not an error) rather than
-// assuming denial or fabricating a fallback number.
+// reports whether the request dialog itself completed without error, so it
+// is true after "Don't Allow" too. CONNECTED_KEY is only set once
+// canAccessAnyHealthData confirms access some other way (see there); it
+// still doesn't mean "every read type is granted", and every read function
+// below treats an empty result as the honest default (no data, not an
+// error) rather than assuming denial or fabricating a fallback number.
 const CONNECTED_KEY = 'vervein.healthKitConnected.v1';
 const BANNER_DISMISSED_KEY = 'vervein.healthKitBannerDismissed.v1';
 
@@ -29,6 +30,12 @@ const READ_TYPES = [
 // requested alongside the read types in the same one-time prompt rather
 // than a separate ask later.
 const WRITE_TYPES = ['HKWorkoutTypeIdentifier'] as const;
+
+// HKAuthorizationStatus.sharingAuthorized, per the SDK's own enum — a
+// literal for the same reason as the workout activity types below.
+const SHARING_AUTHORIZED = 2;
+// How far back canAccessAnyHealthData looks for a readable sample.
+const ACCESS_PROBE_DAYS = 30;
 
 // WorkoutActivityType's real numeric values, per the SDK's own generated
 // enum (@kingstinct/react-native-healthkit's healthkit.generated.d.ts) —
@@ -48,6 +55,54 @@ async function getModule() {
   return import('@kingstinct/react-native-healthkit');
 }
 
+type HealthKitModule = NonNullable<Awaited<ReturnType<typeof getModule>>>;
+export type HealthKitAccessProbe = Pick<
+  HealthKitModule,
+  'authorizationStatusFor' | 'queryQuantitySamples' | 'queryCategorySamples'
+>;
+
+/**
+ * Whether Vervein can actually use Apple Health — the check behind the
+ * "connected" state, since the permission prompt's own result can't be
+ * (see this file's header).
+ *
+ * BUG FIX (found by the user on device): the Settings toggle and the Home
+ * banner both treated "the prompt closed" as "connected", so tapping Don't
+ * Allow still turned Apple Health on. Two real signals exist instead:
+ * - Write access for workouts is the one grant iOS does report, and it's
+ *   in the same prompt as the reads — Allow All turns it on.
+ * - Reads are never reported, but a denied type returns no samples at all,
+ *   so any sample of any read type in the last ACCESS_PROBE_DAYS days means
+ *   at least one read was allowed (an iPhone records steps on its own).
+ * Someone who allowed only reads and has no data at all in that window
+ * reads as not connected — accurate in practice, since there's nothing for
+ * Vervein to use either.
+ */
+export async function canAccessAnyHealthData(HealthKit: HealthKitAccessProbe): Promise<boolean> {
+  try {
+    if (HealthKit.authorizationStatusFor('HKWorkoutTypeIdentifier') === SHARING_AUTHORIZED) return true;
+  } catch {
+    // Fall through to the read probes.
+  }
+  const filter = { date: { startDate: new Date(Date.now() - ACCESS_PROBE_DAYS * 24 * 60 * 60 * 1000) } };
+  const hasSample = (query: Promise<readonly unknown[]>) =>
+    query.then(
+      (samples) => samples.length > 0,
+      () => false
+    );
+  const found = await Promise.all([
+    hasSample(HealthKit.queryQuantitySamples('HKQuantityTypeIdentifierStepCount', { filter, limit: 1, unit: 'count' })),
+    hasSample(
+      HealthKit.queryQuantitySamples('HKQuantityTypeIdentifierActiveEnergyBurned', { filter, limit: 1, unit: 'kcal' })
+    ),
+    hasSample(
+      HealthKit.queryQuantitySamples('HKQuantityTypeIdentifierRestingHeartRate', { filter, limit: 1, unit: 'count/min' })
+    ),
+    hasSample(HealthKit.queryCategorySamples('HKCategoryTypeIdentifierSleepAnalysis', { filter, limit: 1 })),
+  ]);
+  return found.some(Boolean);
+}
+
 export async function isHealthKitAvailable(): Promise<boolean> {
   const HealthKit = await getModule();
   if (!HealthKit) return false;
@@ -64,6 +119,48 @@ export async function hasConnectedHealthKit(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * hasConnectedHealthKit, re-checked against what iOS currently allows —
+ * for Settings, which shows the state as a switch. Clears a connected flag
+ * that no longer has any access behind it: one set by the old Don't Allow
+ * bug above, or access since turned off in iOS Settings.
+ */
+export async function refreshHealthKitConnection(): Promise<boolean> {
+  if (!(await hasConnectedHealthKit())) return false;
+  const HealthKit = await getModule();
+  if (HealthKit && (await canAccessAnyHealthData(HealthKit))) return true;
+  await markHealthKitUnreachable();
+  return false;
+}
+
+/**
+ * Connects without asking — for someone who was told to allow access in
+ * the Health app and has just come back. Never shows the permission sheet
+ * (that only ever happens from a tap; see requestHealthKitAccess), so it's
+ * safe to run when the app returns to the foreground.
+ */
+export async function connectHealthKitIfAllowed(): Promise<boolean> {
+  const HealthKit = await getModule();
+  if (!HealthKit || !(await canAccessAnyHealthData(HealthKit))) return false;
+  invalidateReadinessCache();
+  try {
+    await AsyncStorage.setItem(CONNECTED_KEY, 'true');
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Disconnects and retires the Home banner. iOS shows its permission sheet
+ * only once, so after a denial the banner's Connect button could no longer
+ * do anything; Settings' Apple Health row is where access is explained.
+ */
+async function markHealthKitUnreachable(): Promise<void> {
+  await disconnectHealthKit();
+  await dismissHealthKitBanner();
 }
 
 /** Dismissing the Home banner is separate from connecting — a user who says
@@ -98,19 +195,24 @@ export async function requestHealthKitAccess(): Promise<boolean> {
   if (!HealthKit) return false;
   let granted = false;
   try {
-    granted = await HealthKit.requestAuthorization({ toRead: [...READ_TYPES], toShare: [...WRITE_TYPES] });
+    // true only means the prompt completed — Don't Allow included — so the
+    // real answer comes from canAccessAnyHealthData.
+    const completed = await HealthKit.requestAuthorization({ toRead: [...READ_TYPES], toShare: [...WRITE_TYPES] });
+    granted = completed && (await canAccessAnyHealthData(HealthKit));
   } catch {
     granted = false;
   }
-  if (granted) {
-    invalidateReadinessCache();
-    try {
-      await AsyncStorage.setItem(CONNECTED_KEY, 'true');
-    } catch {
-      // Worst case the banner reappears next time — not a crash.
-    }
+  if (!granted) {
+    await markHealthKitUnreachable();
+    return false;
   }
-  return granted;
+  invalidateReadinessCache();
+  try {
+    await AsyncStorage.setItem(CONNECTED_KEY, 'true');
+  } catch {
+    // Worst case the banner reappears next time — not a crash.
+  }
+  return true;
 }
 
 export async function disconnectHealthKit(): Promise<void> {

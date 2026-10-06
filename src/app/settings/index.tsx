@@ -1,8 +1,8 @@
 import type { BottomSheetModal } from '@gorhom/bottom-sheet';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import ReanimatedAnimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
@@ -22,7 +22,8 @@ import { hapticError, hapticImpactLight, hapticSuccess, hapticWarning, isHaptics
 import {
   disconnectHealthKit,
   getLastRestingHeartRateSyncDate,
-  hasConnectedHealthKit,
+  connectHealthKitIfAllowed,
+  refreshHealthKitConnection,
   isHealthKitAvailable,
   requestHealthKitAccess,
 } from '@/lib/health-kit';
@@ -127,6 +128,14 @@ export default function SettingsScreen() {
   const [remindersSupported, setRemindersSupported] = useState(false);
   const [healthKitOn, setHealthKitOn] = useState(false);
   const [healthKitAvailable, setHealthKitAvailable] = useState(false);
+  // Set when connecting found no Apple Health access — iOS never shows its
+  // permission sheet a second time, so the only way forward is the Health
+  // app's own per-app settings.
+  const [healthKitBlocked, setHealthKitBlocked] = useState(false);
+  // Counts taps on the Apple Health switch, so the focus load below (which
+  // now probes HealthKit, not just reads a flag) can't overwrite a tap that
+  // landed while it was still checking.
+  const healthKitToggleCount = useRef(0);
   // Null covers both "not connected" and "connected but no sample in the
   // last 10 days" — see getLastRestingHeartRateSyncDate's own doc comment
   // for why Settings, unlike Home/check-in, answers that gap directly.
@@ -181,6 +190,7 @@ export default function SettingsScreen() {
   useFocusEffect(
     useCallback(() => {
       (async () => {
+        const healthKitTogglesAtLoad = healthKitToggleCount.current;
         setUnit(await getUnitSystem());
         setHapticsOn(isHapticsEnabled());
         setAppLockOn(await isAppLockEnabled());
@@ -220,10 +230,12 @@ export default function SettingsScreen() {
         setRemindersOn(stillPermitted);
         setScheduledDaysCount(remindersProfile?.days ? remindersProfile.days.split(',').filter(Boolean).length : 0);
         setProfileName(remindersProfile?.name ?? null);
-        const [hkAvailable, hkConnected] = await Promise.all([isHealthKitAvailable(), hasConnectedHealthKit()]);
+        const [hkAvailable, hkConnected] = await Promise.all([isHealthKitAvailable(), refreshHealthKitConnection()]);
         setHealthKitAvailable(hkAvailable);
-        setHealthKitOn(hkConnected);
-        if (hkConnected) setHealthKitLastSync(await getLastRestingHeartRateSyncDate());
+        if (healthKitToggleCount.current === healthKitTogglesAtLoad) {
+          setHealthKitOn(hkConnected);
+          if (hkConnected) setHealthKitLastSync(await getLastRestingHeartRateSyncDate());
+        }
         const {
           data: { session },
         } = await supabase.auth.getSession();
@@ -345,8 +357,27 @@ export default function SettingsScreen() {
     }
   };
 
+  // Someone who followed the hint below and allowed access in the Health
+  // app comes back to this same screen — no focus event fires for that, so
+  // the return to the foreground is what re-checks.
+  useEffect(() => {
+    if (!healthKitBlocked) return;
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      const togglesAtCheck = healthKitToggleCount.current;
+      connectHealthKitIfAllowed().then(async (connected) => {
+        if (!connected || healthKitToggleCount.current !== togglesAtCheck) return;
+        setHealthKitOn(true);
+        setHealthKitBlocked(false);
+        setHealthKitLastSync(await getLastRestingHeartRateSyncDate());
+      });
+    });
+    return () => subscription.remove();
+  }, [healthKitBlocked]);
+
   const handleToggleHealthKit = async (value: boolean) => {
     if (!healthKitAvailable) return;
+    healthKitToggleCount.current += 1;
     if (!value) {
       // Clears only Vervein's own "connected" flag — HealthKit itself never
       // lets an app revoke permissions it already granted; the real grant
@@ -355,6 +386,7 @@ export default function SettingsScreen() {
       // rather than a fake one: it's tracking "does Vervein use this data,"
       // not "does iOS still permit it."
       setHealthKitOn(false);
+      setHealthKitBlocked(false);
       setHealthKitLastSync(null);
       await disconnectHealthKit();
       hapticImpactLight();
@@ -363,9 +395,15 @@ export default function SettingsScreen() {
     const granted = await requestHealthKitAccess();
     if (granted) {
       setHealthKitOn(true);
+      setHealthKitBlocked(false);
       setHealthKitLastSync(await getLastRestingHeartRateSyncDate());
       hapticImpactLight();
     } else {
+      // Don't Allow at the prompt, a prompt iOS no longer shows because it
+      // was answered before, or reads allowed with no data to see yet —
+      // the switch stays off and the line below the row says where VerveIn's
+      // access is actually managed.
+      setHealthKitBlocked(true);
       hapticError();
     }
   };
@@ -906,6 +944,14 @@ export default function SettingsScreen() {
               connectedSubtitle={formatLastSync(healthKitLastSync)}
               last
             />
+            {healthKitBlocked ? (
+              <View style={styles.permissionHint}>
+                <Text style={styles.permissionHintText} maxFontSizeMultiplier={1.3}>
+                  VerveIn isn&apos;t getting any Apple Health data. To choose what it can read, open the Health app, tap
+                  your profile picture, then Apps › VerveIn.
+                </Text>
+              </View>
+            ) : null}
           </View>
         </Section>
 
