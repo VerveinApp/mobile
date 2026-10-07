@@ -1,4 +1,6 @@
 import React from 'react';
+
+import { useCanvasUnit } from '@/lib/canvas-scale';
 import { Text as RNText } from 'react-native';
 import Svg, {
   Circle,
@@ -17,8 +19,9 @@ import Svg, {
 
 /** Radial glow behind the header — Ellipse 13 (blurred circle, linear gradient) */
 export function GlowGraphic({ size = 542 }: { size?: number }) {
+  const unit = useCanvasUnit();
   return (
-    <Svg width={size} height={size} viewBox="0 0 542 542">
+    <Svg width={size * unit} height={size * unit} viewBox="0 0 542 542">
       <Defs>
         <LinearGradient id="glowGrad" x1="271" y1="100" x2="271" y2="442" gradientUnits="userSpaceOnUse">
           <Stop offset="0.625" stopColor="#08120B" />
@@ -35,8 +38,9 @@ export function GlowGraphic({ size = 542 }: { size?: number }) {
 
 /** Status bar time — "9:41" */
 export function StatusTimeGraphic({ width = 54, height = 21 }: { width?: number; height?: number }) {
+  const unit = useCanvasUnit();
   return (
-    <Svg width={width} height={height} viewBox="0 0 54 21">
+    <Svg width={width * unit} height={height * unit} viewBox="0 0 54 21">
       <Path
         d="M16.8672 16.0889C19.5552 16.0889 21.1519 13.9868 21.1519 10.4272C21.1519 9.08691 20.8955 7.95898 20.4048 7.0874C19.6943 5.73242 18.4712 5 16.9258 5C14.626 5 13 6.54541 13 8.71338C13 10.7495 14.4648 12.229 16.479 12.229C17.7168 12.229 18.7202 11.6504 19.2183 10.647H19.2402C19.2402 10.647 19.2695 10.647 19.2769 10.647C19.2915 10.647 19.3428 10.647 19.3428 10.647C19.3428 13.064 18.4272 14.5068 16.8818 14.5068C15.9736 14.5068 15.2705 14.0088 15.0288 13.2104H13.1465C13.4614 14.9463 14.9336 16.0889 16.8672 16.0889ZM16.9331 10.7275C15.7173 10.7275 14.853 9.86328 14.853 8.65479C14.853 7.47559 15.7612 6.57471 16.9404 6.57471C18.1196 6.57471 19.0278 7.49023 19.0278 8.68408C19.0278 9.86328 18.1416 10.7275 16.9331 10.7275Z"
         fill="white"
@@ -59,8 +63,9 @@ export function StatusTimeGraphic({ width = 54, height = 21 }: { width?: number;
 
 /** Status bar right side — signal, wifi, battery */
 export function StatusRightGraphic({ width = 66.6614, height = 11.336 }: { width?: number; height?: number }) {
+  const unit = useCanvasUnit();
   return (
-    <Svg width={width} height={height} viewBox="0 0 66.6614 11.336">
+    <Svg width={width * unit} height={height * unit} viewBox="0 0 66.6614 11.336">
       <G opacity={0.4}>
         <Path
           opacity={0.35}
@@ -100,8 +105,9 @@ export function LogoMarkAccentGraphic({
   height?: number;
   color?: string;
 }) {
+  const unit = useCanvasUnit();
   return (
-    <Svg width={width} height={height} viewBox="0 0 28.6525 36.106">
+    <Svg width={width * unit} height={height * unit} viewBox="0 0 28.6525 36.106">
       <Path
         d="M7.02844 0.0696135H0.0106345C7.02571 1.154 11.9137 10.9451 20.612 35.9292L28.5905 20.3297L21.7433 26.4141C16.1804 13.2576 13.0845 5.52209 7.02844 0.0696135Z"
         fill={color}
@@ -124,8 +130,9 @@ export function LogoMarkGraphic({
   height?: number;
   color?: string;
 }) {
+  const unit = useCanvasUnit();
   return (
-    <Svg width={width} height={height} viewBox="0 0 21.8156 30.6813">
+    <Svg width={width * unit} height={height * unit} viewBox="0 0 21.8156 30.6813">
       <Ellipse cx={14.8248} cy={2.65387} rx={2.4412} ry={2.65387} fill={color} />
       <Path
         d="M16.5515 11.6511H12.1455L15.8966 6.92595L21.0767 4.27208H21.553L16.5515 11.6511Z"
@@ -175,7 +182,8 @@ export function WordmarkTextGraphic({
   height?: number;
   color?: string;
 }) {
-  const fontSize = height / WORDMARK_CAP_HEIGHT_RATIO;
+  const unit = useCanvasUnit();
+  const fontSize = (height * unit) / WORDMARK_CAP_HEIGHT_RATIO;
   return (
     <RNText
       style={{
@@ -198,8 +206,9 @@ export function WordmarkTextGraphic({
 }
 
 export function MailIconGraphic({ width = 14, height = 11.1111 }: { width?: number; height?: number }) {
+  const unit = useCanvasUnit();
   return (
-    <Svg width={width} height={height} viewBox="0 0 14 11.1111">
+    <Svg width={width * unit} height={height * unit} viewBox="0 0 14 11.1111">
       <Path
         d="M1.22222 1.22222L5.63356 4.55311L5.635 4.55456C6.12467 4.9135 6.3695 5.09333 6.63817 5.16267C6.87548 5.22407 7.12452 5.22407 7.36183 5.16267C7.6305 5.09333 7.87606 4.9135 8.36717 4.55311C8.36717 4.55311 11.1961 2.38211 12.7778 1.22222M0.5 8.3V2.81111C0.5 2.00222 0.5 1.59778 0.657445 1.28867C0.796112 1.01639 1.01639 0.796112 1.28867 0.657445C1.59778 0.5 2.00222 0.5 2.81111 0.5H11.1889C11.9978 0.5 12.4022 0.5 12.7106 0.657445C12.9829 0.796112 13.2039 1.01639 13.3426 1.28867C13.5 1.59706 13.5 2.0015 13.5 2.80894V8.30289C13.5 9.11033 13.5 9.51334 13.3426 9.82245C13.2039 10.0943 12.9827 10.3153 12.7106 10.4537C12.4022 10.6111 11.9985 10.6111 11.1911 10.6111H2.80894C2.0015 10.6111 1.59706 10.6111 1.28867 10.4537C1.01689 10.3152 0.795927 10.0942 0.657445 9.82245C0.5 9.51334 0.5 9.10889 0.5 8.3Z"
         fill="none"
@@ -212,8 +221,9 @@ export function MailIconGraphic({ width = 14, height = 11.1111 }: { width?: numb
 }
 
 export function ArrowUpIconGraphic({ size = 24, color = '#ffffff' }: { size?: number; color?: string }) {
+  const unit = useCanvasUnit();
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24">
+    <Svg width={size * unit} height={size * unit} viewBox="0 0 24 24">
       <Path
         d="M12 5V19M6 11L12 5L18 11"
         fill="none"
@@ -235,8 +245,9 @@ export function AppleIconGraphic({
   height?: number;
   color?: string;
 }) {
+  const unit = useCanvasUnit();
   return (
-    <Svg width={width} height={height} viewBox="0 0 15.1671 18.0023">
+    <Svg width={width * unit} height={height * unit} viewBox="0 0 15.1671 18.0023">
       <Path
         d="M12.6371 17.28C11.6571 18.23 10.5871 18.08 9.55708 17.63C8.46708 17.17 7.46708 17.15 6.31708 17.63C4.87708 18.25 4.11708 18.07 3.25708 17.28C-1.62292 12.25 -0.902922 4.59 4.63708 4.31C5.98708 4.38 6.92708 5.05 7.71708 5.11C8.89708 4.87 10.0271 4.18 11.2871 4.27C12.7971 4.39 13.9371 4.99 14.6871 6.07C11.5671 7.94 12.3071 12.05 15.1671 13.2C14.5971 14.7 13.8571 16.19 12.6271 17.29L12.6371 17.28ZM7.61708 4.25C7.46708 2.02 9.27708 0.18 11.3571 0C11.6471 2.58 9.01708 4.5 7.61708 4.25Z"
         fill={color}
@@ -247,8 +258,9 @@ export function AppleIconGraphic({
 
 /** Google "G" mark — clip path (letterform) masking the colorful blurred blobs, as authored in Figma. */
 export function GoogleIconGraphic({ size = 16 }: { size?: number }) {
+  const unit = useCanvasUnit();
   return (
-    <Svg width={size} height={size} viewBox="0 0 16 16">
+    <Svg width={size * unit} height={size * unit} viewBox="0 0 16 16">
       <Defs>
         <Mask id="googleMask" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16">
           <Path
@@ -359,8 +371,9 @@ export function CardFrameGraphic({
   fill?: string;
   stroke?: string;
 }) {
+  const unit = useCanvasUnit();
   return (
-    <Svg width={width} height={height} viewBox="0 0 326.4 322.4">
+    <Svg width={width * unit} height={height * unit} viewBox="0 0 326.4 322.4">
       <Rect x={0.1} y={0.1} width={326.2} height={322.2} rx={10.1} opacity={0.79} fill={fill} stroke={stroke} strokeWidth={0.2} />
       {showButtonSlots ? (
         <>
@@ -396,8 +409,9 @@ export function InputFieldGraphic({
   stroke?: string;
   strokeWidth?: number;
 }) {
+  const unit = useCanvasUnit();
   return (
-    <Svg width={width} height={height} viewBox="0 0 285 35">
+    <Svg width={width * unit} height={height * unit} viewBox="0 0 285 35">
       <Path
         d="M6 0.125H279C282.245 0.125004 284.875 2.75533 284.875 6V29C284.875 32.2447 282.245 34.875 279 34.875H6C2.75533 34.875 0.125 32.2447 0.125 29V6L0.132812 5.69727C0.290371 2.59329 2.85686 0.125 6 0.125Z"
         fill={fill}

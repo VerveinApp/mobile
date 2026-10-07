@@ -12,6 +12,7 @@ import {
 
 import { TabularNums, Type } from '@/constants/theme';
 import { hapticSelect } from '@/lib/haptics';
+import { scaleCanvasStyles, useCanvasUnit } from '@/lib/canvas-scale';
 import { useAppTheme } from '@/lib/theme-context';
 
 export const RULER_TICK_SPACING = 26;
@@ -77,14 +78,19 @@ type HorizontalRulerProps = {
  */
 export function HorizontalRuler({ items, selectedIndex, onChange, width, accessibilityLabel }: HorizontalRulerProps) {
   const { colors } = useAppTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
-  const [scrollX] = useState(() => new Animated.Value(selectedIndex * RULER_TICK_SPACING));
+  // Inside a fixed-canvas screen every length below is in canvas units
+  // (see canvas-scale.ts) — the spacing drives layout and scroll math alike,
+  // so both scale together.
+  const unit = useCanvasUnit();
+  const spacing = RULER_TICK_SPACING * unit;
+  const styles = useMemo(() => scaleCanvasStyles(createStyles(colors), unit), [colors, unit]);
+  const [scrollX] = useState(() => new Animated.Value(selectedIndex * spacing));
   const lastIndex = useRef(selectedIndex);
   const scrollRef = useRef<ScrollView>(null);
   const hasSetInitialOffset = useRef(false);
   const [measuredWidth, setMeasuredWidth] = useState(width ?? 0);
   const trackWidth = width ?? measuredWidth;
-  const sidePadding = trackWidth / 2 - RULER_TICK_SPACING / 2;
+  const sidePadding = trackWidth / 2 - spacing / 2;
 
   const handleLayout = (e: LayoutChangeEvent) => {
     if (width == null) setMeasuredWidth(e.nativeEvent.layout.width);
@@ -96,7 +102,7 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width, accessi
   const handleContentSizeChange = () => {
     if (hasSetInitialOffset.current) return;
     hasSetInitialOffset.current = true;
-    scrollRef.current?.scrollTo({ x: selectedIndex * RULER_TICK_SPACING, animated: false });
+    scrollRef.current?.scrollTo({ x: selectedIndex * spacing, animated: false });
   };
 
   // A light selection tick each time a new value passes the center pointer
@@ -112,7 +118,7 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width, accessi
     // A JS listener on the natively-driven value — RN forwards native
     // updates to it whenever one is attached.
     const id = scrollX.addListener(({ value }) => {
-      const index = Math.max(0, Math.min(items.length - 1, Math.round(value / RULER_TICK_SPACING)));
+      const index = Math.max(0, Math.min(items.length - 1, Math.round(value / spacing)));
       if (index === tickIndex.current) return;
       tickIndex.current = index;
       hapticSelect();
@@ -127,7 +133,7 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width, accessi
       }
     });
     return () => scrollX.removeListener(id);
-  }, [scrollX, items.length]);
+  }, [scrollX, items.length, spacing]);
   // Clamped in case the items list ever shrinks under a mounted ruler.
   const lastItemIndex = items.length - 1;
   const mountStart = Math.max(0, Math.min(mountRange[0], lastItemIndex));
@@ -137,7 +143,7 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width, accessi
   });
 
   const commitAtOffset = (offsetX: number) => {
-    const index = Math.max(0, Math.min(items.length - 1, Math.round(offsetX / RULER_TICK_SPACING)));
+    const index = Math.max(0, Math.min(items.length - 1, Math.round(offsetX / spacing)));
     // BUG FIX (found by the user while recording): a drag released without
     // a real flick could come to rest between two ticks. snapToInterval only
     // works by retargeting the deceleration, and a release UIKit doesn't
@@ -148,7 +154,7 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width, accessi
     // onto the tick here gives every release the same magnetic settle a
     // native picker has; the animation's own scroll events bring the label
     // to full opacity.
-    const tickOffset = index * RULER_TICK_SPACING;
+    const tickOffset = index * spacing;
     if (Math.abs(offsetX - tickOffset) > 0.5) {
       scrollRef.current?.scrollTo({ x: tickOffset, animated: true });
     }
@@ -199,7 +205,7 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width, accessi
     const next = Math.max(0, Math.min(items.length - 1, lastIndex.current + delta));
     if (next === lastIndex.current) return;
     lastIndex.current = next;
-    scrollRef.current?.scrollTo({ x: next * RULER_TICK_SPACING, animated: true });
+    scrollRef.current?.scrollTo({ x: next * spacing, animated: true });
     onChange(next);
   };
   const handleAccessibilityAction = (event: AccessibilityActionEvent) => {
@@ -216,15 +222,15 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width, accessi
     const list = [];
     for (let index = mountStart; index <= mountEnd; index++) {
       list.push(
-        <RulerTick key={items[index] + index} label={items[index]} index={index} scrollX={scrollX} styles={styles} />
+        <RulerTick key={items[index] + index} label={items[index]} index={index} scrollX={scrollX} spacing={spacing} styles={styles} />
       );
     }
     return list;
-  }, [items, mountStart, mountEnd, scrollX, styles]);
+  }, [items, mountStart, mountEnd, scrollX, spacing, styles]);
 
   return (
     <View
-      style={[styles.wrap, { height: RULER_HEIGHT }, width != null ? { width } : styles.wrapFill]}
+      style={[styles.wrap, { height: RULER_HEIGHT * unit }, width != null ? { width: width * unit } : styles.wrapFill]}
       onLayout={handleLayout}
       accessible
       accessibilityRole="adjustable"
@@ -238,7 +244,7 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width, accessi
         ref={scrollRef}
         horizontal
         showsHorizontalScrollIndicator={false}
-        snapToInterval={RULER_TICK_SPACING}
+        snapToInterval={spacing}
         decelerationRate="fast"
         contentContainerStyle={{ paddingHorizontal: sidePadding }}
         onScroll={handleScroll}
@@ -248,11 +254,11 @@ export function HorizontalRuler({ items, selectedIndex, onChange, width, accessi
         onMomentumScrollEnd={handleMomentumEnd}
         onScrollEndDrag={handleScrollEndDrag}
         onContentSizeChange={handleContentSizeChange}
-        contentOffset={{ x: selectedIndex * RULER_TICK_SPACING, y: 0 }}
+        contentOffset={{ x: selectedIndex * spacing, y: 0 }}
       >
-        <View style={{ width: mountStart * RULER_TICK_SPACING }} />
+        <View style={{ width: mountStart * spacing }} />
         {ticks}
-        <View style={{ width: (items.length - 1 - mountEnd) * RULER_TICK_SPACING }} />
+        <View style={{ width: (items.length - 1 - mountEnd) * spacing }} />
       </Animated.ScrollView>
       )}
       <View pointerEvents="none" style={styles.pointer} />
@@ -264,6 +270,8 @@ type RulerTickProps = {
   label: string;
   index: number;
   scrollX: Animated.Value;
+  /** RULER_TICK_SPACING in real points (scaled inside a fixed canvas). */
+  spacing: number;
   styles: ReturnType<typeof createStyles>;
 };
 
@@ -272,19 +280,19 @@ type RulerTickProps = {
  * per index, so growing the mounted range (or any parent re-render) never
  * recreates the animated nodes of ticks that are already on screen.
  */
-const RulerTick = memo(function RulerTick({ label, index, scrollX, styles }: RulerTickProps) {
+const RulerTick = memo(function RulerTick({ label, index, scrollX, spacing, styles }: RulerTickProps) {
   const tickOpacity = useMemo(
     () =>
       scrollX.interpolate({
         inputRange: [
-          (index - TICK_FADE_SPAN) * RULER_TICK_SPACING,
-          index * RULER_TICK_SPACING,
-          (index + TICK_FADE_SPAN) * RULER_TICK_SPACING,
+          (index - TICK_FADE_SPAN) * spacing,
+          index * spacing,
+          (index + TICK_FADE_SPAN) * spacing,
         ],
         outputRange: [0.3, 1, 0.3],
         extrapolate: 'clamp',
       }),
-    [index, scrollX]
+    [index, scrollX, spacing]
   );
   // BUG FIX: this used to fade across a full tick spacing on each side, so
   // two neighboring labels (e.g. "5 ft" and "6 ft") were simultaneously
@@ -296,11 +304,11 @@ const RulerTick = memo(function RulerTick({ label, index, scrollX, styles }: Rul
   const labelOpacity = useMemo(
     () =>
       scrollX.interpolate({
-        inputRange: [(index - 0.5) * RULER_TICK_SPACING, index * RULER_TICK_SPACING, (index + 0.5) * RULER_TICK_SPACING],
+        inputRange: [(index - 0.5) * spacing, index * spacing, (index + 0.5) * spacing],
         outputRange: [0, 1, 0],
         extrapolate: 'clamp',
       }),
-    [index, scrollX]
+    [index, scrollX, spacing]
   );
   return (
     <View style={styles.tickSlot}>
