@@ -62,6 +62,12 @@ type SparklineProps = {
 
 type Point = { x: number; y: number };
 
+// Room left around the plotted points for the biggest mark drawn on one —
+// the scrub dot's radius. BUG FIX: the points used to run edge to edge, so
+// the newest point's dot (always at the right edge) and both round line
+// caps were cut in half by the Svg's own bounds.
+const EDGE_INSET = 4.5;
+
 /**
  * Catmull-Rom → cubic Bezier — the standard way to draw a smooth curve
  * that actually passes through every real point, not an approximation that
@@ -143,7 +149,7 @@ export function Sparkline({
   const [scrubIndex, setScrubIndex] = useState<number | null>(null);
   const lastScrubIndex = useSharedValue(-1);
   const pointCount = data.length;
-  const scrubStepX = pointCount > 1 ? width / (pointCount - 1) : 0;
+  const stepX = pointCount > 1 ? (width - EDGE_INSET * 2) / (pointCount - 1) : 0;
   const reportScrub = (index: number | null) => {
     setScrubIndex(index);
     if (index !== null) hapticSelect();
@@ -162,12 +168,12 @@ export function Sparkline({
         .enabled(onScrub !== undefined && pointCount > 1)
         .activateAfterLongPress(SCRUB_HOLD_MS)
         .onStart((e) => {
-          const index = Math.max(0, Math.min(pointCount - 1, Math.round(e.x / scrubStepX)));
+          const index = Math.max(0, Math.min(pointCount - 1, Math.round((e.x - EDGE_INSET) / stepX)));
           lastScrubIndex.value = index;
           scheduleOnRN(reportScrub, index);
         })
         .onUpdate((e) => {
-          const index = Math.max(0, Math.min(pointCount - 1, Math.round(e.x / scrubStepX)));
+          const index = Math.max(0, Math.min(pointCount - 1, Math.round((e.x - EDGE_INSET) / stepX)));
           if (index === lastScrubIndex.value) return;
           lastScrubIndex.value = index;
           scheduleOnRN(reportScrub, index);
@@ -179,7 +185,7 @@ export function Sparkline({
         }),
     // reportScrub closes over onScrub; a new chart identity rebuilds it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [onScrub, pointCount, scrubStepX]
+    [onScrub, pointCount, stepX]
   );
 
   const values = data.map((d) => d.value);
@@ -190,14 +196,13 @@ export function Sparkline({
     if (max === undefined) hi = Math.max(hi, referenceValue);
   }
   const range = hi - lo || 1;
-  // A little vertical inset so a point sitting exactly at min/max isn't
+  // The same inset vertically, so a point sitting exactly at min/max isn't
   // clipped by its own stroke/circle radius at the very edge of the canvas.
-  const inset = 4;
+  const inset = EDGE_INSET;
   const plotHeight = height - inset * 2;
-  const stepX = data.length > 1 ? width / (data.length - 1) : 0;
 
   const points = data.map((d, i) => ({
-    x: data.length > 1 ? i * stepX : width / 2,
+    x: data.length > 1 ? EDGE_INSET + i * stepX : width / 2,
     y: inset + plotHeight - ((d.value - lo) / range) * plotHeight,
   }));
   const linePath = smoothPathD(points);
@@ -226,9 +231,6 @@ export function Sparkline({
   if (data.length === 0) return null;
 
   const scrubPoint = scrubIndex !== null ? points[scrubIndex] : null;
-  // Kept half a pixel inside the canvas so the first and last points'
-  // hairline isn't clipped to half its width at the edge.
-  const scrubLineX = scrubPoint ? Math.max(0.5, Math.min(width - 0.5, scrubPoint.x)) : 0;
 
   return (
     <GestureDetector gesture={scrubGesture}>
@@ -262,7 +264,7 @@ export function Sparkline({
           <AnimatedCircle cx={lastPoint.x} cy={lastPoint.y} r={3.5} fill={color} animatedProps={dotAnimatedProps} />
           {scrubPoint ? (
             <>
-              <Line x1={scrubLineX} y1={0} x2={scrubLineX} y2={height} stroke={color} strokeOpacity={0.35} strokeWidth={1} />
+              <Line x1={scrubPoint.x} y1={0} x2={scrubPoint.x} y2={height} stroke={color} strokeOpacity={0.35} strokeWidth={1} />
               <Circle cx={scrubPoint.x} cy={scrubPoint.y} r={4.5} fill={color} />
             </>
           ) : null}

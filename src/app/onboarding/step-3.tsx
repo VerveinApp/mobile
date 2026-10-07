@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { useCanvasScale } from '@/lib/canvas-scale';
+import { CanvasScaleContext, scaleCanvasStyles, useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated from 'react-native-reanimated';
 
 import { goBack } from '@/lib/onboarding-nav';
@@ -30,7 +30,7 @@ const EXPERIENCE_LEVELS: SelectableCardOption<ExperienceLevelId>[] = [
 export default function OnboardingExperienceScreen() {
   const scale = useCanvasScale();
   const colors = useAppColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => scaleCanvasStyles(createStyles(colors), scale), [colors, scale]);
 
   const { name, goal, verifiedEmail } = useLocalSearchParams<{ name?: string; goal?: string; verifiedEmail?: string }>();
 
@@ -43,8 +43,9 @@ export default function OnboardingExperienceScreen() {
   };
 
   return (
+    <CanvasScaleContext value={scale}>
     <View style={styles.root}>
-      <View style={[styles.canvas, { transform: [{ scale }] }]}>
+      <View style={styles.canvas}>
       <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
         <OnboardingProgress step={3} />
 
@@ -75,6 +76,7 @@ export default function OnboardingExperienceScreen() {
       </ReanimatedAnimated.View>
       </View>
     </View>
+    </CanvasScaleContext>
   );
 }
 

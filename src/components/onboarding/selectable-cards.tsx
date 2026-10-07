@@ -5,6 +5,7 @@ import { useFocusEffect } from 'expo-router';
 
 import { AndroidCardElevation, AndroidRipple, sheenGradient } from '@/constants/theme';
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
+import { scaleCanvasStyles, useCanvasUnit } from '@/lib/canvas-scale';
 import { hapticSelect } from '@/lib/haptics';
 import { MOTION_DURATION, MOTION_EASING } from '@/lib/motion';
 import { useAppTheme } from '@/lib/theme-context';
@@ -56,7 +57,10 @@ export function SingleSelectCards<T extends string>({
   const { colors, resolvedScheme } = useAppTheme();
   const isDark = resolvedScheme === 'dark';
   const washColor = isDark ? '#ffffff' : '#000000';
-  const styles = useMemo(() => createStyles(colors, washColor), [colors, washColor]);
+  // Every length here, cardWidth/cardSpacing and each option's width
+  // included, is in canvas units (see canvas-scale.ts).
+  const unit = useCanvasUnit();
+  const styles = useMemo(() => scaleCanvasStyles(createStyles(colors, washColor), unit), [colors, washColor, unit]);
   const iconColor = isDark ? 'white' : colors.text;
   const [selectedId, setSelectedId] = useState<T | null>(null);
 
@@ -83,6 +87,7 @@ export function SingleSelectCards<T extends string>({
           iconColor={iconColor}
           cardWidth={cardWidth}
           cardSpacing={cardSpacing}
+          unit={unit}
           styles={styles}
           onSelect={handleSelect}
         />
@@ -97,6 +102,8 @@ type SelectableCardProps<T extends string> = {
   iconColor: string;
   cardWidth: number;
   cardSpacing: number;
+  /** The canvas scale (see canvas-scale.ts); 1 outside a fixed canvas. */
+  unit: number;
   styles: ReturnType<typeof createStyles>;
   onSelect: (id: T) => void;
 };
@@ -108,6 +115,7 @@ function SelectableCard<T extends string>({
   iconColor,
   cardWidth,
   cardSpacing,
+  unit,
   styles,
   onSelect,
 }: SelectableCardProps<T>) {
@@ -119,7 +127,7 @@ function SelectableCard<T extends string>({
     <Pressable
       style={[
         hasIcon ? styles.cardIconRow : styles.card,
-        { width: option.width ?? cardWidth, marginBottom: cardSpacing },
+        { width: (option.width ?? cardWidth) * unit, marginBottom: cardSpacing * unit },
       ]}
       onPress={() => onSelect(option.id)}
       onHoverIn={hover.onHoverIn}

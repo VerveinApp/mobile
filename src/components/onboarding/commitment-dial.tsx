@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Platform, View } from 'react-native';
+import { View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Svg, { Circle, Defs, LinearGradient, Path, Stop } from 'react-native-svg';
 import ReanimatedAnimated, {
@@ -11,6 +11,7 @@ import ReanimatedAnimated, {
 } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
+import { useCanvasUnit } from '@/lib/canvas-scale';
 import { hapticSelect } from '@/lib/haptics';
 import { MOTION_DURATION } from '@/lib/motion';
 import { useAppTheme } from '@/lib/theme-context';
@@ -72,15 +73,13 @@ function describeArc(cx: number, cy: number, r: number, startDeg: number, endDeg
 }
 
 type CommitmentDialProps = {
+  /** In canvas units inside a fixed-canvas screen (see canvas-scale.ts). */
   size?: number;
   /**
-   * The screen's own canvas scale factor (windowWidth / 375). Every screen
-   * in this app is authored at a fixed 375pt width and CSS-scaled to fit
-   * the real window. On web that scaling means touch coordinates
-   * (locationX/Y) come back in *rendered* CSS-pixel space — `size` scaled
-   * up by this same factor — rather than `size`'s own unit space; on native
-   * iOS, UIKit already resolves locationX/Y in the view's own local units
-   * regardless of transforms, so no correction is needed there.
+   * @deprecated Ignored. This corrected web touch coordinates for a canvas
+   * drawn under a scale transform; canvases now lay out at their real size
+   * (canvas-scale.ts), so touches arrive in the same real points as the
+   * dial on every platform, and the scale comes from CanvasScaleContext.
    */
   canvasScale?: number;
   /** Selected stop index (0–7), or null before the user has touched the dial. */
@@ -104,8 +103,12 @@ type CommitmentDialProps = {
  * every touch-move through the JS thread, this one never leaves the UI
  * thread while dragging.
  */
-export function CommitmentDial({ size = 220, canvasScale = 1, value, onChange, levelLabel }: CommitmentDialProps) {
+export function CommitmentDial({ size = 220, value, onChange, levelLabel }: CommitmentDialProps) {
   const { resolvedScheme } = useAppTheme();
+  // The ring's geometry stays in canvas units, in the SVG's viewBox; only
+  // the drawn size (and the touch math, which is in real points) scales.
+  const unit = useCanvasUnit();
+  const drawnSize = size * unit;
   // DISCLOSED FIX: previously always useSharedValue(0), regardless of an
   // incoming non-null `value` — step-7.tsx explicitly seeds `value` from a
   // route param when navigating back to this screen ("carries the prior
@@ -121,7 +124,10 @@ export function CommitmentDial({ size = 220, canvasScale = 1, value, onChange, l
   // coming back to a set dial shows it set without replaying the fade.
   const setProgress = useSharedValue(value !== null ? 1 : 0);
 
-  const half = (Platform.OS === 'web' ? size * canvasScale : size) / 2;
+  // Touches arrive in real points, so the center is half the drawn size.
+  // (The old web-only `size * canvasScale` correction for a transformed
+  // canvas is gone with the transform.)
+  const half = drawnSize / 2;
   const angleAt = (x: number, y: number) => {
     'worklet';
     const dx = x - half;
@@ -197,7 +203,7 @@ export function CommitmentDial({ size = 220, canvasScale = 1, value, onChange, l
           }
         }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [onChange]
+    [onChange, half]
   );
 
   const c = size / 2;
@@ -245,7 +251,7 @@ export function CommitmentDial({ size = 220, canvasScale = 1, value, onChange, l
   return (
     <GestureDetector gesture={panGesture}>
       <View
-        style={{ width: size, height: size }}
+        style={{ width: drawnSize, height: drawnSize }}
         accessible
         accessibilityRole="adjustable"
         accessibilityLabel="Commitment level"
@@ -264,10 +270,10 @@ export function CommitmentDial({ size = 220, canvasScale = 1, value, onChange, l
         {/* Subtle glow behind the ring — same restrained accent used elsewhere, not a spotlight. */}
         <View
           pointerEvents="none"
-          style={{ position: 'absolute', width: size, height: size, borderRadius: size / 2, backgroundColor: '#438C63', opacity: 0.05 }}
+          style={{ position: 'absolute', width: drawnSize, height: drawnSize, borderRadius: drawnSize / 2, backgroundColor: '#438C63', opacity: 0.05 }}
         />
 
-        <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} pointerEvents="none">
+        <Svg width={drawnSize} height={drawnSize} viewBox={`0 0 ${size} ${size}`} pointerEvents="none">
           <Defs>
             <LinearGradient id="commitmentArc" x1="0%" y1="100%" x2="100%" y2="0%">
               <Stop offset="0%" stopColor="#1F4A31" />

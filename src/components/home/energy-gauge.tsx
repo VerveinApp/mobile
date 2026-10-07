@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { Platform, type StyleProp, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { type StyleProp, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import ReanimatedAnimated, {
@@ -12,6 +12,7 @@ import ReanimatedAnimated, {
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { Type } from '@/constants/theme';
+import { scaleCanvasStyles, useCanvasUnit } from '@/lib/canvas-scale';
 import { hapticSelect } from '@/lib/haptics';
 import { MOTION_DURATION, MOTION_EASING } from '@/lib/motion';
 import { useAppColors } from '@/lib/theme-context';
@@ -62,8 +63,9 @@ function clamp(n: number, min: number, max: number) {
 }
 
 type EnergyGaugeProps = {
+  /** In canvas units inside a fixed-canvas screen (see canvas-scale.ts). */
   size?: number;
-  /** Same web coordinate-scaling correction CommitmentDial takes — see its own doc comment. */
+  /** @deprecated Ignored, same as CommitmentDial's — see its own doc comment. */
   canvasScale?: number;
   value: EnergyScore | null;
   onChange: (score: EnergyScore) => void;
@@ -90,11 +92,19 @@ type EnergyGaugeProps = {
  * Reduced Motion snaps instead of springing (Reanimated's default). The
  * VoiceOver "adjustable" role + increment/decrement actions are unchanged.
  */
-export function EnergyGauge({ size = 260, canvasScale = 1, value, onChange, previousValue = null }: EnergyGaugeProps) {
+export function EnergyGauge({ size = 260, value, onChange, previousValue = null }: EnergyGaugeProps) {
   const colors = useAppColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
-  const trackHeight = Math.round(size * 0.22);
-  const segmentWidth = (size - SEGMENT_GAP * (SEGMENT_COUNT - 1)) / SEGMENT_COUNT;
+  // Inside a fixed-canvas screen every length is in canvas units (see
+  // canvas-scale.ts): the track's geometry below is worked out in those
+  // units, then converted to real points, so layout and touch math agree.
+  const unit = useCanvasUnit();
+  const styles = useMemo(() => scaleCanvasStyles(createStyles(colors), unit), [colors, unit]);
+  const trackHeightCanvas = Math.round(size * 0.22);
+  const segmentWidthCanvas = (size - SEGMENT_GAP * (SEGMENT_COUNT - 1)) / SEGMENT_COUNT;
+  const trackWidth = size * unit;
+  const trackHeight = trackHeightCanvas * unit;
+  const segmentWidth = segmentWidthCanvas * unit;
+  const segmentGap = SEGMENT_GAP * unit;
 
   const selected = value !== null ? LEVELS[value - 1] : null;
   const isSet = value !== null;
@@ -124,10 +134,10 @@ export function EnergyGauge({ size = 260, canvasScale = 1, value, onChange, prev
     }
     if (!gestureOwnsSelection.get()) lastIndex.set(value - 1);
   }, [value, lastIndex, gestureOwnsSelection]);
-  // Same web coordinate-scaling correction the old dial applied to its own
-  // gesture-origin math (see CommitmentDial's own doc comment) — only ever
-  // exercised on web, a no-op at canvasScale's default of 1 everywhere else.
-  const effectiveWidth = Platform.OS === 'web' ? size * canvasScale : size;
+  // Touches arrive in real points on every platform, the same units as
+  // trackWidth. (This used to be a web-only `size * canvasScale`
+  // correction for a canvas drawn under a scale transform.)
+  const effectiveWidth = trackWidth;
 
   // Gesture path: lastIndex was already set on the UI thread, so this only
   // ticks and reports (writing it here, a beat late, is what used to pull
@@ -201,7 +211,7 @@ export function EnergyGauge({ size = 260, canvasScale = 1, value, onChange, prev
     <View style={styles.container}>
       <GestureDetector gesture={gauge}>
         <View
-          style={[styles.track, { width: size, height: trackHeight }]}
+          style={[styles.track, { width: trackWidth, height: trackHeight }]}
           accessible
           accessibilityRole="adjustable"
           accessibilityLabel="Energy level"
@@ -227,7 +237,7 @@ export function EnergyGauge({ size = 260, canvasScale = 1, value, onChange, prev
                 color={MOOD_COLORS[level.score]}
                 shellStyle={[
                   styles.segment,
-                  { width: segmentWidth, height: trackHeight, marginRight: i < SEGMENT_COUNT - 1 ? SEGMENT_GAP : 0 },
+                  { width: segmentWidth, height: trackHeight, marginRight: i < SEGMENT_COUNT - 1 ? segmentGap : 0 },
                 ]}
                 outlineStyle={styles.segmentOutline}
               >
@@ -259,7 +269,7 @@ export function EnergyGauge({ size = 260, canvasScale = 1, value, onChange, prev
               pointerEvents="none"
               style={[
                 styles.previousMarker,
-                { left: (previousValue - 1) * (segmentWidth + SEGMENT_GAP) + segmentWidth / 2 - PREVIOUS_MARKER_SIZE / 2 },
+                { left: (previousValue - 1) * (segmentWidth + segmentGap) + segmentWidth / 2 - (PREVIOUS_MARKER_SIZE * unit) / 2 },
               ]}
             />
           ) : null}
@@ -364,6 +374,10 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       borderRadius: 14,
       borderWidth: 3,
       borderColor: 'rgba(255,255,255,0.95)',
+      // Clipping (it has no children) makes iOS draw this border as a vector
+      // outline instead of a bitmap, which stays crisp through the
+      // segment's spring.
+      overflow: 'hidden',
     },
     // Yesterday's level. The theme's text colour, not white: once a level is
     // picked the other segments dim toward the background, and a white dot

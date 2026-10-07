@@ -14,7 +14,7 @@ import {
   View,
 } from 'react-native';
 
-import { useCanvasScale } from '@/lib/canvas-scale';
+import { CanvasScaleContext, scaleCanvasStyles, useCanvasScale, useCanvasUnit } from '@/lib/canvas-scale';
 import ReanimatedAnimated, {
   Easing,
   FadeIn,
@@ -252,7 +252,11 @@ export default function EnergyCheckInScreen() {
   const scale = useCanvasScale();
   const { colors, resolvedScheme } = useAppTheme();
   const hoverWashColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
-  const styles = useMemo(() => createStyles(colors, hoverWashColor), [colors, hoverWashColor]);
+  // The canvas is laid out at its real size (see canvas-scale.ts). The two
+  // Modals below present in their own window — never under the canvas — so
+  // they keep the unscaled styles.
+  const rawStyles = useMemo(() => createStyles(colors, hoverWashColor), [colors, hoverWashColor]);
+  const styles = useMemo(() => scaleCanvasStyles(rawStyles, scale), [rawStyles, scale]);
   const isPremium = usePremiumEntitlement();
 
   const [energy, setEnergy] = useState<EnergyScore | null>(null);
@@ -789,7 +793,8 @@ export default function EnergyCheckInScreen() {
   // late-insertion, notification-choice, and mount-timing theories has now
   // been tried and ruled out suggests the real mechanism is something else
   // entirely — plausibly related to this screen's fixed-canvas
-  // `transform: [{ scale }]` wrapper (see the render below), untested by any
+  // `transform: [{ scale }]` wrapper (since removed — the canvas now lays out
+  // at its real size, see canvas-scale.ts), untested by any
   // attempt so far, though other elements on the same transformed canvas
   // (onboarding's own identical convention) are reachable by Maestro fine,
   // so it isn't simply "anything under this transform is unreachable" either.
@@ -1420,8 +1425,9 @@ export default function EnergyCheckInScreen() {
   // original gap between the logo and its first line of content (was baked
   // into checkinFlow/resolvedFlow/doneWrap's paddingTop before those
   // branches scrolled).
+  // `marginBottom` is in canvas units, like the rest of the canvas styles.
   const renderLogoMark = (marginBottom: number) => (
-    <View style={[styles.logoMarkFlow, { marginBottom }]} pointerEvents="none">
+    <View style={[styles.logoMarkFlow, { marginBottom: marginBottom * scale }]} pointerEvents="none">
       <View style={styles.logoAccent}>
         {/* Width derived from the graphic's own viewBox ratio (28.6525:36.106)
             at this fixed height — the previous 57.78 stretched it off-ratio
@@ -1436,11 +1442,12 @@ export default function EnergyCheckInScreen() {
   );
 
   return (
+    <CanvasScaleContext value={scale}>
     <KeyboardAvoidingView
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={[styles.canvas, { transform: [{ scale }] }]}>
+      <View style={styles.canvas}>
       <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
         {showRestDay ? (
           <View style={styles.logoMark} pointerEvents="none">
@@ -1502,7 +1509,6 @@ export default function EnergyCheckInScreen() {
             <View style={styles.checkinGaugeWrap}>
               <EnergyGauge
                 size={260}
-                canvasScale={scale}
                 value={energy}
                 onChange={handleEnergyChange}
                 previousValue={realLastCheckIn?.energy ?? null}
@@ -2120,17 +2126,19 @@ export default function EnergyCheckInScreen() {
               onRequestClose={handleCancelSkip}
               statusBarTranslucent
             >
-              <Pressable style={styles.skipConfirmBackdrop} onPress={handleCancelSkip}>
-                <Pressable style={styles.skipConfirmCard} onPress={() => {}}>
-                  <Text style={styles.skipConfirmTitle} maxFontSizeMultiplier={1.3}>
+              {/* A Modal presents in its own window — it was never under the canvas transform, so it stays unscaled. */}
+              <CanvasScaleContext value={1}>
+              <Pressable style={rawStyles.skipConfirmBackdrop} onPress={handleCancelSkip}>
+                <Pressable style={rawStyles.skipConfirmCard} onPress={() => {}}>
+                  <Text style={rawStyles.skipConfirmTitle} maxFontSizeMultiplier={1.3}>
                     Skip this exercise?
                   </Text>
-                  <Text style={styles.skipConfirmBody} maxFontSizeMultiplier={1.4}>
+                  <Text style={rawStyles.skipConfirmBody} maxFontSizeMultiplier={1.4}>
                     It won&apos;t count as done today — you can always come back to it another time.
                   </Text>
-                  <View style={styles.skipConfirmActions}>
+                  <View style={rawStyles.skipConfirmActions}>
                     <Pressable
-                      style={styles.skipConfirmCancelHit}
+                      style={rawStyles.skipConfirmCancelHit}
                       onPress={handleCancelSkip}
                       hitSlop={8}
                       onHoverIn={skipCancelHover.onHoverIn}
@@ -2140,13 +2148,13 @@ export default function EnergyCheckInScreen() {
                       accessibilityRole="button"
                       accessibilityLabel="Keep going"
                     >
-                      <PillWash hover={skipCancelHover} press={skipCancelPress} radius={14} styles={styles} />
-                      <Text style={styles.skipConfirmCancelText} maxFontSizeMultiplier={1.2}>
+                      <PillWash hover={skipCancelHover} press={skipCancelPress} radius={14} styles={rawStyles} />
+                      <Text style={rawStyles.skipConfirmCancelText} maxFontSizeMultiplier={1.2}>
                         Keep going
                       </Text>
                     </Pressable>
                     <Pressable
-                      style={styles.skipConfirmConfirmHit}
+                      style={rawStyles.skipConfirmConfirmHit}
                       onPress={handleSkipExercise}
                       hitSlop={8}
                       onHoverIn={skipConfirmHover.onHoverIn}
@@ -2157,7 +2165,7 @@ export default function EnergyCheckInScreen() {
                       accessibilityLabel="Skip anyway"
                     >
                       <Animated.Text
-                        style={[styles.skipConfirmConfirmText, textDimStyle(skipConfirmHover, skipConfirmPress)]}
+                        style={[rawStyles.skipConfirmConfirmText, textDimStyle(skipConfirmHover, skipConfirmPress)]}
                         maxFontSizeMultiplier={1.2}
                       >
                         Skip anyway
@@ -2166,6 +2174,7 @@ export default function EnergyCheckInScreen() {
                   </View>
                 </Pressable>
               </Pressable>
+              </CanvasScaleContext>
             </Modal>
 
             <Modal
@@ -2175,17 +2184,19 @@ export default function EnergyCheckInScreen() {
               onRequestClose={handleCloseSwap}
               statusBarTranslucent
             >
-              <Pressable style={styles.skipConfirmBackdrop} onPress={handleCloseSwap}>
-                <Pressable style={styles.swapModalCard} onPress={() => {}}>
-                  <Text style={styles.skipConfirmTitle} maxFontSizeMultiplier={1.3}>
+              {/* A Modal presents in its own window — it was never under the canvas transform, so it stays unscaled. */}
+              <CanvasScaleContext value={1}>
+              <Pressable style={rawStyles.skipConfirmBackdrop} onPress={handleCloseSwap}>
+                <Pressable style={rawStyles.swapModalCard} onPress={() => {}}>
+                  <Text style={rawStyles.skipConfirmTitle} maxFontSizeMultiplier={1.3}>
                     Swap this exercise
                   </Text>
                   {swapModalCandidates.length === 0 ? (
-                    <Text style={styles.skipConfirmBody} maxFontSizeMultiplier={1.4}>
+                    <Text style={rawStyles.skipConfirmBody} maxFontSizeMultiplier={1.4}>
                       No same-category alternative fits today&apos;s plan right now.
                     </Text>
                   ) : (
-                    <ScrollView style={styles.swapModalList} showsVerticalScrollIndicator={false}>
+                    <ScrollView style={rawStyles.swapModalList} showsVerticalScrollIndicator={false}>
                       {swapModalCandidates.map((candidate, index) => {
                         const candidateStat = formatExerciseStat({
                           sets: candidate.base_sets,
@@ -2196,17 +2207,17 @@ export default function EnergyCheckInScreen() {
                           <Pressable
                             key={candidate.id}
                             style={[
-                              styles.swapModalRow,
-                              index < swapModalCandidates.length - 1 && styles.swapModalRowDivider,
+                              rawStyles.swapModalRow,
+                              index < swapModalCandidates.length - 1 && rawStyles.swapModalRowDivider,
                             ]}
                             onPress={() => handleSelectSwap(candidate)}
                             accessibilityRole="button"
                             accessibilityLabel={`${candidate.name}, ${candidateStat}`}
                           >
-                            <Text style={styles.swapModalRowName} maxFontSizeMultiplier={1.3}>
+                            <Text style={rawStyles.swapModalRowName} maxFontSizeMultiplier={1.3}>
                               {candidate.name}
                             </Text>
-                            <Text style={styles.swapModalRowStat} maxFontSizeMultiplier={1.3}>
+                            <Text style={rawStyles.swapModalRowStat} maxFontSizeMultiplier={1.3}>
                               {candidateStat}
                             </Text>
                           </Pressable>
@@ -2215,20 +2226,20 @@ export default function EnergyCheckInScreen() {
                     </ScrollView>
                   )}
                   {swapMissingOptions.length > 0 ? (
-                    <View style={styles.swapMissing}>
-                      <Text style={styles.swapMissingLabel} maxFontSizeMultiplier={1.3}>
+                    <View style={rawStyles.swapMissing}>
+                      <Text style={rawStyles.swapMissingLabel} maxFontSizeMultiplier={1.3}>
                         Missing something? Tap what you don&apos;t have.
                       </Text>
-                      <View style={styles.swapMissingRow}>
+                      <View style={rawStyles.swapMissingRow}>
                         {swapMissingOptions.map((item) => (
                           <Pressable
                             key={item}
-                            style={({ pressed }) => [styles.swapMissingChip, pressed && PRESSED_DIM]}
+                            style={({ pressed }) => [rawStyles.swapMissingChip, pressed && PRESSED_DIM]}
                             onPress={() => handleMissingEquipment(item)}
                             accessibilityRole="button"
                             accessibilityLabel={`I don't have: ${OWNED_EQUIPMENT_LABELS[item]}`}
                           >
-                            <Text style={styles.swapMissingChipText} maxFontSizeMultiplier={1.2}>
+                            <Text style={rawStyles.swapMissingChipText} maxFontSizeMultiplier={1.2}>
                               {OWNED_EQUIPMENT_LABELS[item]}
                             </Text>
                           </Pressable>
@@ -2239,25 +2250,26 @@ export default function EnergyCheckInScreen() {
                   {equipmentRemovedNote ? (
                     <ReanimatedAnimated.Text
                       entering={FadeIn.duration(MOTION_DURATION.base)}
-                      style={styles.swapMissingNote}
+                      style={rawStyles.swapMissingNote}
                       maxFontSizeMultiplier={1.3}
                     >
                       Taken off your equipment — future plans won&apos;t use it.
                     </ReanimatedAnimated.Text>
                   ) : null}
                   <Pressable
-                    style={({ pressed }) => [styles.swapModalCancelHit, pressed && PRESSED_DIM]}
+                    style={({ pressed }) => [rawStyles.swapModalCancelHit, pressed && PRESSED_DIM]}
                     onPress={handleCloseSwap}
                     hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel="Cancel"
                   >
-                    <Text style={styles.swapModalCancelText} maxFontSizeMultiplier={1.2}>
+                    <Text style={rawStyles.swapModalCancelText} maxFontSizeMultiplier={1.2}>
                       Cancel
                     </Text>
                   </Pressable>
                 </Pressable>
               </Pressable>
+              </CanvasScaleContext>
             </Modal>
           </ReanimatedAnimated.ScrollView>
         ) : (
@@ -2536,6 +2548,7 @@ export default function EnergyCheckInScreen() {
       </ReanimatedAnimated.View>
       </View>
     </KeyboardAvoidingView>
+    </CanvasScaleContext>
   );
 }
 
@@ -2560,6 +2573,8 @@ function PillWash({
   radius: number;
   styles: ReturnType<typeof createStyles>;
 }) {
+  // `radius` is in canvas units, like the pill's own borderRadius.
+  const cornerRadius = radius * useCanvasUnit();
   return (
     <>
       <Animated.View
@@ -2567,7 +2582,7 @@ function PillWash({
         style={[
           StyleSheet.absoluteFill,
           styles.hoverWash,
-          { borderRadius: radius, opacity: hover.anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.12] }) },
+          { borderRadius: cornerRadius, opacity: hover.anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.12] }) },
         ]}
       />
       <Animated.View
@@ -2575,7 +2590,7 @@ function PillWash({
         style={[
           StyleSheet.absoluteFill,
           styles.hoverWash,
-          { borderRadius: radius, opacity: press.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
+          { borderRadius: cornerRadius, opacity: press.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
         ]}
       />
     </>

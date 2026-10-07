@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { useCanvasScale } from '@/lib/canvas-scale';
+import { CanvasScaleContext, scaleCanvasStyles, useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, {
   FadeIn,
   FadeOut,
@@ -47,7 +47,10 @@ export default function OnboardingCommitmentScreen() {
   const scale = useCanvasScale();
   const { colors, resolvedScheme } = useAppTheme();
   const hoverWashColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
-  const styles = useMemo(() => createStyles(colors, hoverWashColor), [colors, hoverWashColor]);
+  const styles = useMemo(
+    () => scaleCanvasStyles(createStyles(colors, hoverWashColor), scale),
+    [colors, hoverWashColor, scale]
+  );
 
   const {
     name,
@@ -111,6 +114,8 @@ export default function OnboardingCommitmentScreen() {
   // went, so a reversal mid-drag doesn't roll the old digit the wrong way.
   const rollDir = useSharedValue(1);
   const lastDialIndex = useRef(initialIndex ?? -1);
+  // ROLL_DISTANCE is in canvas units; the roll's translateY is in real points.
+  const rollDistance = ROLL_DISTANCE * scale;
   // Only touches a ref, a shared value and a setter, so it stays one stable
   // function — CommitmentDial rebuilds its pan gesture whenever onChange
   // changes, which would otherwise happen on every stop mid-drag.
@@ -123,7 +128,7 @@ export default function OnboardingCommitmentScreen() {
     'worklet';
     const dir = rollDir.get();
     return {
-      initialValues: { opacity: 0, transform: [{ translateY: ROLL_DISTANCE * dir }] },
+      initialValues: { opacity: 0, transform: [{ translateY: rollDistance * dir }] },
       animations: {
         opacity: withTiming(1, ROLL_TIMING),
         transform: [{ translateY: withTiming(0, ROLL_TIMING) }],
@@ -137,7 +142,7 @@ export default function OnboardingCommitmentScreen() {
       initialValues: { opacity: 1, transform: [{ translateY: 0 }] },
       animations: {
         opacity: withTiming(0, ROLL_TIMING),
-        transform: [{ translateY: withTiming(-ROLL_DISTANCE * dir, ROLL_TIMING) }],
+        transform: [{ translateY: withTiming(-rollDistance * dir, ROLL_TIMING) }],
       },
     };
   };
@@ -171,8 +176,9 @@ export default function OnboardingCommitmentScreen() {
   };
 
   return (
+    <CanvasScaleContext value={scale}>
     <View style={styles.root}>
-      <View style={[styles.canvas, { transform: [{ scale }] }]}>
+      <View style={styles.canvas}>
       <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
 
         <OnboardingProgress step={7} />
@@ -201,8 +207,9 @@ export default function OnboardingCommitmentScreen() {
 
         <View style={styles.dialWrap}>
           <CommitmentDial
+            // No canvasScale: it corrected web touch coordinates for the old
+            // canvas transform, which is gone — touches are real points now.
             size={220}
-            canvasScale={scale}
             value={selectedIndex}
             onChange={handleDialChange}
             levelLabel={selected?.name}
@@ -288,6 +295,7 @@ export default function OnboardingCommitmentScreen() {
       </ReanimatedAnimated.View>
       </View>
     </View>
+    </CanvasScaleContext>
   );
 }
 

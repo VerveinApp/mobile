@@ -3,6 +3,7 @@ import semiBoldWeight from 'expo-symbols/androidWeights/semiBold';
 import { SymbolView as ExpoSymbolView, type SymbolViewProps } from 'expo-symbols';
 
 import { ANDROID_ICON_MAP } from '@/constants/icon-map';
+import { useCanvasUnit } from '@/lib/canvas-scale';
 
 // Only the two SymbolWeight values this app actually passes anywhere —
 // every other weight (including the default, unspecified) falls through to
@@ -22,13 +23,19 @@ const ANDROID_WEIGHT_BY_IOS_WEIGHT: Partial<Record<string, typeof boldWeight>> =
  * why); every call site in this app was written passing a bare SF Symbol
  * string, which is iOS-only. This wraps that lookup once, here, instead of
  * touching every call site individually.
+ *
+ * Inside a fixed-canvas screen `size` is in canvas units (see
+ * canvas-scale.ts), so the symbol is drawn at its real point size rather
+ * than drawn small and magnified; outside a canvas the unit is 1.
  */
 export function SymbolView(props: SymbolViewProps) {
-  const { name, weight, ...rest } = props;
+  const { name, weight, size, ...rest } = props;
+  const unit = useCanvasUnit();
   const resolvedName = typeof name === 'string' ? { ios: name, android: ANDROID_ICON_MAP[name] } : name;
   const resolvedWeight =
     typeof weight === 'string' && ANDROID_WEIGHT_BY_IOS_WEIGHT[weight]
       ? { ios: weight, android: ANDROID_WEIGHT_BY_IOS_WEIGHT[weight]! }
       : weight;
-  return <ExpoSymbolView {...rest} name={resolvedName} weight={resolvedWeight} />;
+  // 24 is expo-symbols' own default size, applied here so it scales too.
+  return <ExpoSymbolView {...rest} size={(size ?? 24) * unit} name={resolvedName} weight={resolvedWeight} />;
 }

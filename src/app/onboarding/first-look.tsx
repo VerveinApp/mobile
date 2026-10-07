@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { canvasHairline, useCanvasScale } from '@/lib/canvas-scale';
+import { CanvasScaleContext, canvasHairline, scaleCanvasStyles, useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, { FadeIn, FadeInDown, useReducedMotion } from 'react-native-reanimated';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
@@ -45,8 +45,8 @@ export default function OnboardingFirstLookScreen() {
   const hoverWashColor = isDark ? '#ffffff' : '#000000';
   const statBlockBorder = isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.25)';
   const styles = useMemo(
-    () => createStyles(colors, hoverWashColor, statBlockBorder, hairline),
-    [colors, hoverWashColor, statBlockBorder, hairline]
+    () => scaleCanvasStyles(createStyles(colors, hoverWashColor, statBlockBorder, hairline), scale),
+    [colors, hoverWashColor, statBlockBorder, hairline, scale]
   );
 
   const params = useLocalSearchParams<{
@@ -67,6 +67,9 @@ export default function OnboardingFirstLookScreen() {
   const reducedMotion = useReducedMotion();
   const ctaHover = useHoverFade();
   const ctaPress = useLiquidPress();
+  // FadeInDown's own 25pt rise is a real-point length; scaled so the cards
+  // travel as far as they did when the whole canvas was magnified.
+  const cardRise = { translateY: 25 * scale };
 
   // No account exists yet at this point in onboarding, so there's no real
   // calibration to read — the neutral default (1.0×, never adjusted) is the
@@ -82,8 +85,9 @@ export default function OnboardingFirstLookScreen() {
   };
 
   return (
+    <CanvasScaleContext value={scale}>
     <View style={styles.root}>
-      <View style={[styles.canvas, { transform: [{ scale }] }]}>
+      <View style={styles.canvas}>
       <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
 
         <Pressable
@@ -109,7 +113,7 @@ export default function OnboardingFirstLookScreen() {
         <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>Same plan, two different days:</Text>
 
         <ReanimatedAnimated.View
-          entering={reducedMotion ? undefined : FadeInDown.duration(MOTION_DURATION.slow).delay(150).easing(MOTION_EASING.standard)}
+          entering={reducedMotion ? undefined : FadeInDown.duration(MOTION_DURATION.slow).delay(150).easing(MOTION_EASING.standard).withInitialValues(cardRise)}
           style={styles.card}
         >
           <View pointerEvents="none" style={styles.cardSheen} />
@@ -124,7 +128,7 @@ export default function OnboardingFirstLookScreen() {
         </ReanimatedAnimated.View>
 
         <ReanimatedAnimated.View
-          entering={reducedMotion ? undefined : FadeInDown.duration(MOTION_DURATION.slow).delay(GOOD_CARD_DELAY).easing(MOTION_EASING.standard)}
+          entering={reducedMotion ? undefined : FadeInDown.duration(MOTION_DURATION.slow).delay(GOOD_CARD_DELAY).easing(MOTION_EASING.standard).withInitialValues(cardRise)}
           style={[styles.card, styles.cardSecond]}
         >
           <View pointerEvents="none" style={styles.cardSheen} />
@@ -185,6 +189,7 @@ export default function OnboardingFirstLookScreen() {
       </ReanimatedAnimated.View>
       </View>
     </View>
+    </CanvasScaleContext>
   );
 }
 

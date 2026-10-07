@@ -9,6 +9,7 @@ import ReanimatedAnimated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { scaleCanvasStyles, useCanvasUnit } from '@/lib/canvas-scale';
 import { useAppColors } from '@/lib/theme-context';
 
 export const ONBOARDING_STEP_COUNT = 7;
@@ -25,7 +26,8 @@ export const ONBOARDING_STEP_COUNT = 7;
  * after step 4): its segment is already full, so it doesn't fill again. */
 export function OnboardingProgress({ step, settled = false }: { step: number; settled?: boolean }) {
   const colors = useAppColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const unit = useCanvasUnit();
+  const styles = useMemo(() => scaleCanvasStyles(createStyles(colors), unit), [colors, unit]);
   return (
     <View style={styles.row} pointerEvents="none">
       {/* Only the segment for THIS step animates. BUG FIX: every step is its

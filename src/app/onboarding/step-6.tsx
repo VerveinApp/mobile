@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { canvasHairline, useCanvasScale } from '@/lib/canvas-scale';
+import { CanvasScaleContext, canvasHairline, scaleCanvasStyles, useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated from 'react-native-reanimated';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
@@ -62,7 +62,10 @@ export default function OnboardingScheduleScreen() {
   const hairline = canvasHairline(scale);
   const { colors, resolvedScheme } = useAppTheme();
   const washColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
-  const styles = useMemo(() => createStyles(colors, washColor, hairline), [colors, washColor, hairline]);
+  const styles = useMemo(
+    () => scaleCanvasStyles(createStyles(colors, washColor, hairline), scale),
+    [colors, washColor, hairline, scale]
+  );
 
   const {
     name,
@@ -156,8 +159,9 @@ export default function OnboardingScheduleScreen() {
   };
 
   return (
+    <CanvasScaleContext value={scale}>
     <View style={styles.root}>
-      <View style={[styles.canvas, { transform: [{ scale }] }]}>
+      <View style={styles.canvas}>
       <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
 
         <OnboardingProgress step={6} />
@@ -320,6 +324,7 @@ export default function OnboardingScheduleScreen() {
       </ReanimatedAnimated.View>
       </View>
     </View>
+    </CanvasScaleContext>
   );
 }
 

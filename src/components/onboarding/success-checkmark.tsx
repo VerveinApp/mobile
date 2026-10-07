@@ -12,6 +12,7 @@ import ReanimatedAnimated, {
 } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
+import { useCanvasUnit } from '@/lib/canvas-scale';
 import { hapticSuccess } from '@/lib/haptics';
 import { useAppColors } from '@/lib/theme-context';
 
@@ -39,6 +40,11 @@ type SuccessCheckmarkProps = {
  */
 export function SuccessCheckmark({ size = 120 }: SuccessCheckmarkProps) {
   const colors = useAppColors();
+  // `size` is in canvas units inside a fixed-canvas screen (see
+  // canvas-scale.ts). The geometry below stays in those units, in the
+  // viewBox; only the drawn size is scaled, so the vector renders crisp.
+  const unit = useCanvasUnit();
+  const drawnSize = size * unit;
   const strokeWidth = size * 0.055;
   const r = size / 2 - strokeWidth;
   const c = size / 2;
@@ -102,8 +108,8 @@ export function SuccessCheckmark({ size = 120 }: SuccessCheckmarkProps) {
   }));
 
   return (
-    <ReanimatedAnimated.View style={[{ width: size, height: size }, groupStyle]}>
-      <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+    <ReanimatedAnimated.View style={[{ width: drawnSize, height: drawnSize }, groupStyle]}>
+      <Svg width={drawnSize} height={drawnSize} viewBox={`0 0 ${size} ${size}`}>
         <Defs>
           <LinearGradient id="successRing" x1="0%" y1="0%" x2="100%" y2="100%">
             <Stop offset="0%" stopColor="#1F4A31" />

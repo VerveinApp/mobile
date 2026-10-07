@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useMemo } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { useCanvasScale } from '@/lib/canvas-scale';
+import { CanvasScaleContext, scaleCanvasStyles, useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, { FadeIn } from 'react-native-reanimated';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
@@ -31,7 +31,10 @@ export default function OnboardingAllSetScreen() {
   const scale = useCanvasScale();
   const { colors, resolvedScheme } = useAppTheme();
   const hoverWashColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
-  const styles = useMemo(() => createStyles(colors, hoverWashColor), [colors, hoverWashColor]);
+  const styles = useMemo(
+    () => scaleCanvasStyles(createStyles(colors, hoverWashColor), scale),
+    [colors, hoverWashColor, scale]
+  );
 
   const entering = useFadeInEntering();
   const ctaHover = useHoverFade();
@@ -43,8 +46,9 @@ export default function OnboardingAllSetScreen() {
   };
 
   return (
+    <CanvasScaleContext value={scale}>
     <View style={styles.root}>
-      <View style={[styles.canvas, { transform: [{ scale }] }]}>
+      <View style={styles.canvas}>
       <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
 
         <View style={styles.logoMark} pointerEvents="none">
@@ -112,6 +116,7 @@ export default function OnboardingAllSetScreen() {
       </ReanimatedAnimated.View>
       </View>
     </View>
+    </CanvasScaleContext>
   );
 }
 

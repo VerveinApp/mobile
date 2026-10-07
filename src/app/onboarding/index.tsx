@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 
-import { canvasHairline, useCanvasScale } from '@/lib/canvas-scale';
+import { CanvasScaleContext, canvasHairline, scaleCanvasStyles, useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, { FadeIn } from 'react-native-reanimated';
 
 import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
@@ -39,7 +39,10 @@ export default function OnboardingNameScreen() {
   const hairline = canvasHairline(scale);
   const { colors, resolvedScheme } = useAppTheme();
   const hoverWashColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
-  const styles = useMemo(() => createStyles(colors, hoverWashColor, hairline), [colors, hoverWashColor, hairline]);
+  const styles = useMemo(
+    () => scaleCanvasStyles(createStyles(colors, hoverWashColor, hairline), scale),
+    [colors, hoverWashColor, hairline, scale]
+  );
 
   // Only ever real when this screen was reached via auth/verify.tsx's bare
   // "Sign in" redirect (a device with no local profile that just proved
@@ -84,8 +87,9 @@ export default function OnboardingNameScreen() {
   };
 
   return (
+    <CanvasScaleContext value={scale}>
     <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={[styles.canvas, { transform: [{ scale }] }]}>
+      <View style={styles.canvas}>
       <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
 
         <OnboardingProgress step={1} />
@@ -196,6 +200,7 @@ export default function OnboardingNameScreen() {
       </ReanimatedAnimated.View>
       </View>
     </KeyboardAvoidingView>
+    </CanvasScaleContext>
   );
 }
 

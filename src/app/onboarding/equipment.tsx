@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { canvasHairline, useCanvasScale } from '@/lib/canvas-scale';
+import { CanvasScaleContext, canvasHairline, scaleCanvasStyles, useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, { FadeIn } from 'react-native-reanimated';
 
 import { PRESSED_DIM, useHoverFade, useLiquidPress } from '@/lib/button-interactions';
@@ -53,7 +53,10 @@ export default function OnboardingEquipmentScreen() {
   const hairline = canvasHairline(scale);
   const { colors, resolvedScheme } = useAppTheme();
   const washColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
-  const styles = useMemo(() => createStyles(colors, washColor, hairline), [colors, washColor, hairline]);
+  const styles = useMemo(
+    () => scaleCanvasStyles(createStyles(colors, washColor, hairline), scale),
+    [colors, washColor, hairline, scale]
+  );
 
   const { mode, name, goal, experience, environment, verifiedEmail, equipment } = useLocalSearchParams<{
     mode?: string;
@@ -120,8 +123,9 @@ export default function OnboardingEquipmentScreen() {
   };
 
   return (
+    <CanvasScaleContext value={scale}>
     <View style={styles.root}>
-      <View style={[styles.canvas, { transform: [{ scale }] }]}>
+      <View style={styles.canvas}>
       <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
 
         {editing ? null : <OnboardingProgress step={4} settled />}
@@ -182,7 +186,7 @@ export default function OnboardingEquipmentScreen() {
                 <View style={styles.checkSlot}>
                   {isSelected ? (
                     <ReanimatedAnimated.View entering={FadeIn.duration(MOTION_DURATION.fast).easing(MOTION_EASING.standard)}>
-                      <SymbolView name="checkmark" size={10} tintColor="#438C63" weight="bold" />
+                      <SymbolView name="checkmark" size={10 * scale} tintColor="#438C63" weight="bold" />
                     </ReanimatedAnimated.View>
                   ) : null}
                 </View>
@@ -233,6 +237,7 @@ export default function OnboardingEquipmentScreen() {
       </ReanimatedAnimated.View>
       </View>
     </View>
+    </CanvasScaleContext>
   );
 }
 
@@ -240,7 +245,11 @@ const CARD_RADIUS = 10;
 // Sixteen options on the fixed 375×812 canvas: eight rows of 38pt end at
 // 612, clear of Continue at 656.
 const GRID_GAP = 6;
-const CHIP_WIDTH = (343 - GRID_GAP) / 2;
+// A thousandth of a point short of an exact half: scaled by a fractional
+// canvas factor, two chips plus the gap can round a hair past the grid's
+// width, and Yoga's wrap check has no tolerance — every row would drop to
+// one chip on some screen sizes.
+const CHIP_WIDTH = (343 - GRID_GAP) / 2 - 0.001;
 
 function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColor: string, hairline: number) {
   return StyleSheet.create({
