@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 
-import { useCanvasScale } from '@/lib/canvas-scale';
+import { CanvasScaleContext, scaleCanvasStyles, useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
 import { useEnabledFadeStyle, useHoverFade, useLiquidPress } from '@/lib/button-interactions';
@@ -66,8 +66,8 @@ export default function VerifyEmailScreen() {
   const otpBorder = isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)';
   const hoverWashColor = isDark ? '#ffffff' : '#000000';
   const styles = useMemo(
-    () => createStyles(colors, { cardFrameBg, hairlineBorder, otpBorder, hoverWashColor }),
-    [colors, cardFrameBg, hairlineBorder, otpBorder, hoverWashColor]
+    () => scaleCanvasStyles(createStyles(colors, { cardFrameBg, hairlineBorder, otpBorder, hoverWashColor }), scale),
+    [colors, cardFrameBg, hairlineBorder, otpBorder, hoverWashColor, scale]
   );
 
   // All onboarding answers ride along here too (create-account forwards
@@ -160,7 +160,7 @@ export default function VerifyEmailScreen() {
 
   // A small horizontal shake on a rejected code, alongside the haptic and
   // the error text (see use-shake.ts).
-  const { shake, shakeStyle: otpRowShakeStyle } = useShake();
+  const { shake, shakeStyle: otpRowShakeStyle } = useShake(scale);
 
   const submitCode = async (code: string) => {
     if (isSubmittingRef.current) return;
@@ -314,8 +314,9 @@ export default function VerifyEmailScreen() {
   };
 
   return (
+    <CanvasScaleContext value={scale}>
     <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={[styles.canvas, { transform: [{ scale }] }]}>
+      <View style={styles.canvas}>
       <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
 
         <Pressable
@@ -511,6 +512,7 @@ export default function VerifyEmailScreen() {
       </ReanimatedAnimated.View>
       </View>
     </KeyboardAvoidingView>
+    </CanvasScaleContext>
   );
 }
 

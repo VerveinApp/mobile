@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 
-import { useCanvasScale } from '@/lib/canvas-scale';
+import { CanvasScaleContext, scaleCanvasStyles, useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, {
   FadeIn,
   FadeOut,
@@ -86,7 +86,10 @@ export default function CreateAccountScreen() {
   const { colors, resolvedScheme } = useAppTheme();
   const isDark = resolvedScheme === 'dark';
   const hoverWashColor = isDark ? '#ffffff' : '#000000';
-  const styles = useMemo(() => createStyles(colors, hoverWashColor), [colors, hoverWashColor]);
+  const styles = useMemo(
+    () => scaleCanvasStyles(createStyles(colors, hoverWashColor), scale),
+    [colors, hoverWashColor, scale]
+  );
 
   const onboardingParams = useLocalSearchParams<Record<string, string>>();
 
@@ -145,7 +148,7 @@ export default function CreateAccountScreen() {
   const ageNudgeTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The red alone, snapping on and off, was easy to miss 100–250pt below
   // the button that was tapped; a shake gives the eye something to find.
-  const ageShake = useShake();
+  const ageShake = useShake(scale);
   const nudgeAgeCheck = () => {
     if (ageNudgeTimeout.current) clearTimeout(ageNudgeTimeout.current);
     setAgeNudge(true);
@@ -384,12 +387,13 @@ export default function CreateAccountScreen() {
   if (checkingVerifiedEmail && !verifiedEmailFinishFailed) return null;
 
   return (
+    <CanvasScaleContext value={scale}>
     <KeyboardAvoidingView
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <View style={[styles.canvas, { transform: [{ scale }] }]}>
+      <View style={styles.canvas}>
         {isDark ? (
           <View style={styles.glow} pointerEvents="none">
             <GlowGraphic />
@@ -512,7 +516,7 @@ export default function CreateAccountScreen() {
                     pointerEvents="none"
                     glassEffectStyle="regular"
                     tintColor="#1c3d29"
-                    style={[StyleSheet.absoluteFill, styles.behindContent, { borderRadius: 6 }]}
+                    style={[StyleSheet.absoluteFill, styles.behindContent, { borderRadius: 6 * scale }]}
                   />
                 ) : null}
                 <Animated.View
@@ -708,6 +712,7 @@ export default function CreateAccountScreen() {
         </Pressable>
       </View>
     </KeyboardAvoidingView>
+    </CanvasScaleContext>
   );
 }
 

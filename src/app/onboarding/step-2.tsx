@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { useCanvasScale } from '@/lib/canvas-scale';
+import { CanvasScaleContext, scaleCanvasStyles, useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated from 'react-native-reanimated';
 
 import { goBack } from '@/lib/onboarding-nav';
@@ -36,7 +36,7 @@ const GOALS: SelectableCardOption<GoalId>[] = [
 export default function OnboardingGoalScreen() {
   const scale = useCanvasScale();
   const colors = useAppColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => scaleCanvasStyles(createStyles(colors), scale), [colors, scale]);
 
   const { name, verifiedEmail } = useLocalSearchParams<{ name?: string; verifiedEmail?: string }>();
   const displayName = name || 'there';
@@ -50,8 +50,9 @@ export default function OnboardingGoalScreen() {
   };
 
   return (
+    <CanvasScaleContext value={scale}>
     <View style={styles.root}>
-      <View style={[styles.canvas, { transform: [{ scale }] }]}>
+      <View style={styles.canvas}>
       <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
         <OnboardingProgress step={2} />
 
@@ -86,6 +87,7 @@ export default function OnboardingGoalScreen() {
       </ReanimatedAnimated.View>
       </View>
     </View>
+    </CanvasScaleContext>
   );
 }
 

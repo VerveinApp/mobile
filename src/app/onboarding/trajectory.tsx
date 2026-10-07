@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { canvasHairline, useCanvasScale } from '@/lib/canvas-scale';
+import { CanvasScaleContext, canvasHairline, scaleCanvasStyles, useCanvasScale } from '@/lib/canvas-scale';
 import ReanimatedAnimated, { FadeIn, useReducedMotion } from 'react-native-reanimated';
 import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 
@@ -45,7 +45,10 @@ export default function OnboardingTrajectoryScreen() {
   const hairline = canvasHairline(scale);
   const { colors, resolvedScheme } = useAppTheme();
   const hoverWashColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
-  const styles = useMemo(() => createStyles(colors, hoverWashColor, hairline), [colors, hoverWashColor, hairline]);
+  const styles = useMemo(
+    () => scaleCanvasStyles(createStyles(colors, hoverWashColor, hairline), scale),
+    [colors, hoverWashColor, hairline, scale]
+  );
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   useEffect(() => {
@@ -78,8 +81,9 @@ export default function OnboardingTrajectoryScreen() {
   };
 
   return (
+    <CanvasScaleContext value={scale}>
     <View style={styles.root}>
-      <View style={[styles.canvas, { transform: [{ scale }] }]}>
+      <View style={styles.canvas}>
       <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
 
         <View style={styles.logoMark} pointerEvents="none">
@@ -153,7 +157,7 @@ export default function OnboardingTrajectoryScreen() {
                 pointerEvents="none"
                 glassEffectStyle="regular"
                 tintColor="#1c3d29"
-                style={[StyleSheet.absoluteFill, { zIndex: -1, borderRadius: 6 }]}
+                style={[StyleSheet.absoluteFill, { zIndex: -1, borderRadius: 6 * scale }]}
               />
             ) : null}
             <Animated.View
@@ -181,6 +185,7 @@ export default function OnboardingTrajectoryScreen() {
       </ReanimatedAnimated.View>
       </View>
     </View>
+    </CanvasScaleContext>
   );
 }
 
