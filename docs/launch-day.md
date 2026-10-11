@@ -36,7 +36,7 @@ the update won't match the build.
    on one launch and applies on the next. Check onboarding step 6 (day circles
    should be smooth) and that a rest timer keeps counting with the phone
    locked.
-4. If anything is wrong: `npx eas-cli update:roll-back-to-embedded --channel production --environment production`
+4. If anything is wrong: `npx eas-cli update:roll-back-to-embedded --channel production --platform ios --runtime-version 1.1`
    puts every install back on the code built into build 23.
 
 ## 3. Switch the website to the App Store
