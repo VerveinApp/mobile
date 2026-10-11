@@ -193,11 +193,23 @@ async function cancelAllReminders(Notifications: typeof import('expo-notificatio
 // the same readiness framing as the original two (see this function's own
 // doc comment above): no "overdue"/"behind"/"neglected" wording sneaking
 // back in through a new variant.
-const AREA_READY_TEMPLATES: ((label: string) => string)[] = [
-  (label) => `${label} is well-rested and ready.`,
-  (label) => `${label} is fresh — good day for it.`,
-  (label) => `${label}'s had time to recover. Ready when you are.`,
-  (label) => `A good day for ${label}, whenever it fits.`,
+//
+// BUG FIX: these used to slot plan-preview's lowercase mid-sentence labels
+// in at the start ("legs is fresh — good day for it.", "full-body work's had
+// time to recover."). A notification body is its own sentence, so it gets
+// its own subject, capitalized and with the right verb.
+type ReminderArea = { subject: string; plural: boolean; dayFor: string };
+const REMINDER_AREA: Record<keyof typeof BODY_AREA_PRIORITY_LABEL, ReminderArea> = {
+  upper: { subject: 'Your upper body', plural: false, dayFor: 'upper body' },
+  lower: { subject: 'Your legs', plural: true, dayFor: 'legs' },
+  core: { subject: 'Your core', plural: false, dayFor: 'core' },
+  full: { subject: 'Your whole body', plural: false, dayFor: 'a full-body session' },
+};
+const AREA_READY_TEMPLATES: ((area: ReminderArea) => string)[] = [
+  (a) => `${a.subject} ${a.plural ? 'are' : 'is'} well-rested and ready.`,
+  (a) => `${a.subject} ${a.plural ? 'are' : 'is'} fresh — good day for it.`,
+  (a) => `${a.subject} ${a.plural ? 'have' : 'has'} had time to recover. Ready when you are.`,
+  (a) => `A good day for ${a.dayFor}, whenever it fits.`,
 ];
 const GENERIC_TEMPLATES: string[] = [
   'Whenever works today.',
@@ -220,7 +232,7 @@ async function buildReminderContent(): Promise<{ title: string; body: string; da
   if (area) {
     return {
       title: 'Training day',
-      body: pickRandom(AREA_READY_TEMPLATES)(BODY_AREA_PRIORITY_LABEL[area]),
+      body: pickRandom(AREA_READY_TEMPLATES)(REMINDER_AREA[area]),
       data: REMINDER_DATA,
     };
   }
@@ -410,7 +422,12 @@ export async function enableSessionReminders(scheduledDays: string[]): Promise<b
  * already has `days` on hand) since this has no natural caller-supplied
  * schedule — it runs from the app root, not a specific settings screen.
  */
-export async function refreshSessionReminders(): Promise<void> {
+/**
+ * `force` skips the once-a-day throttle — for right after a session, when
+ * what the next reminders say has just changed (the area it trained isn't
+ * the well-rested one anymore).
+ */
+export async function refreshSessionReminders({ force = false }: { force?: boolean } = {}): Promise<void> {
   const Notifications = getModule();
   if (!Notifications) return;
   if (!(await isReminderEnabled())) return;
@@ -418,7 +435,7 @@ export async function refreshSessionReminders(): Promise<void> {
   const today = localDateStr();
   try {
     const last = await AsyncStorage.getItem(LAST_RESCHEDULED_KEY);
-    if (last === today) return;
+    if (last === today && !force) return;
   } catch {
     // Storage read failed — fall through and reschedule anyway rather than
     // silently going stale.

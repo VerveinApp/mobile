@@ -33,7 +33,10 @@ describe('withdrawHealthConsent', () => {
     expect(profile?.age).toBeUndefined();
     expect(profile?.conditions).toBeUndefined();
     expect(profile?.movementRestrictions).toBeUndefined();
-    expect(profile?.standingSymptoms).toBeUndefined();
+    // Device-only (privacy policy §10: never received by us), so not part
+    // of what consent covers — and a symptom like joint pain still has to
+    // keep shaping the plan.
+    expect(profile?.standingSymptoms).toEqual(['joint_pain']);
     expect(profile?.name).toBe('Sam');
     expect(profile?.goal).toBe('get-stronger');
     expect(profile?.days).toBe('monday,thursday');

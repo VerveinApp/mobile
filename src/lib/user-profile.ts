@@ -130,7 +130,11 @@ export async function withdrawHealthConsent(): Promise<UserProfile> {
     age: undefined,
     conditions: undefined,
     movementRestrictions: undefined,
-    standingSymptoms: undefined,
+    // Ongoing symptoms stay. BUG FIX: they used to be cleared here too, but
+    // they never leave the device (they aren't in profile-sync.ts's synced
+    // row, and their sheet doesn't ask for consent), the confirmation never
+    // mentioned them, and quietly dropping one like Dizziness ("low-impact
+    // moves only") brought high-impact moves back into the plan.
   });
 }
 

@@ -218,8 +218,11 @@ export default function CreateAccountScreen() {
   // Both branches converge on First Look now (see step-7's handleBuildPlan
   // — the consent-only potential-score payoff was cut), so this is always
   // the same screen regardless of healthConsent.
+  // BUG FIX: after Sign Out this screen has no history and no questionnaire
+  // answers (no name), and back used to drop into First Look's demo and the
+  // whole questionnaire again. With no answers in hand it goes to Welcome.
   const handleBack = () => {
-    goBack('/onboarding/first-look', onboardingParams);
+    goBack(onboardingParams.name ? '/onboarding/first-look' : '/onboarding/welcome', onboardingParams);
   };
 
   // BUG FIX: this and the two social handlers below used to rely entirely

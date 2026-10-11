@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   Animated,
+  AppState,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -67,12 +68,13 @@ import {
   cancelTodaysReminder,
   enableSessionReminders,
   markReminderPromptOffered,
+  refreshSessionReminders,
   shouldOfferReminderPrompt,
 } from '@/lib/session-reminders';
 import { LOCAL_USER_ID } from '@/lib/onboarding-to-engine';
 import { estimateCaloriesBurned } from '@/lib/calorie-estimate';
 import { getHealthReadinessModifier, getHealthReadinessReasons, saveCompletedWorkout } from '@/lib/health-kit';
-import { usePremiumEntitlement } from '@/lib/purchases';
+import { hasPremiumEntitlement, usePremiumEntitlement } from '@/lib/purchases';
 import { BODY_AREA_LABELS, BODY_AREA_ORDER } from '@/lib/body-area-labels';
 import { computePlanPreview, type BodyArea, type PlanExercise } from '@/lib/plan-preview';
 import { ENVIRONMENT_LABELS, ENVIRONMENT_ORDER, WEEKDAY_NAMES } from '@/lib/profile-labels';
@@ -343,6 +345,8 @@ export default function EnergyCheckInScreen() {
   // See TodaySession.planEquipment. undefined = no session started yet, so
   // the live profile's list applies.
   const [frozenEquipment, setFrozenEquipment] = useState<string | undefined>(undefined);
+  // See TodaySession.planDaysSinceLastCheckIn. null = no session started yet.
+  const [frozenGap, setFrozenGap] = useState<{ days: number | undefined } | null>(null);
   const planHealthReadinessModifier = frozenReadiness?.modifier ?? effectiveHealthReadinessModifier;
   const planHealthReadinessReasons = frozenReadiness ? frozenReadiness.reasons : effectiveHealthReadinessReasons;
   // The one post-session question (M14-lite) — null until the user taps one
@@ -578,6 +582,7 @@ export default function EnergyCheckInScreen() {
           setSwappedExercises(loadedTodaySession.swappedExercises ?? {});
           setFrozenReadiness(loadedTodaySession.planHealthReadiness ?? null);
         setFrozenEquipment(loadedTodaySession.planEquipment);
+          setFrozenGap({ days: loadedTodaySession.planDaysSinceLastCheckIn });
           if (loadedTodaySession.startedAt) sessionStartedAtRef.current = new Date(loadedTodaySession.startedAt);
           if (!loadedTodaySession.completed) {
             setCurrentExerciseIndex(loadedTodaySession.currentExerciseIndex ?? 0);
@@ -869,6 +874,11 @@ export default function EnergyCheckInScreen() {
           : null
       : null;
 
+  // A started session keeps the gap it started with (see
+  // TodaySession.planDaysSinceLastCheckIn) — the live value reads 0 once
+  // starting has recorded today's check-in.
+  const planDaysSinceLastCheckIn = frozenGap ? frozenGap.days : daysSinceLastCheckIn;
+
   // The profile the plan is built from: the live one, except that a
   // started session keeps the equipment list it started with (see
   // TodaySession.planEquipment). Same object whenever nothing differs, so
@@ -895,7 +905,7 @@ export default function EnergyCheckInScreen() {
             planHealthReadinessModifier,
             verifiedYesterdayEnergy,
             timeAvailableMin ?? undefined,
-            daysSinceLastCheckIn,
+            planDaysSinceLastCheckIn,
             finisherAccepted,
             planHealthReadinessReasons,
             preferredBodyArea ?? undefined,
@@ -911,7 +921,7 @@ export default function EnergyCheckInScreen() {
       planHealthReadinessModifier,
       verifiedYesterdayEnergy,
       timeAvailableMin,
-      daysSinceLastCheckIn,
+      planDaysSinceLastCheckIn,
       finisherAccepted,
       planHealthReadinessReasons,
       preferredBodyArea,
@@ -1064,7 +1074,16 @@ export default function EnergyCheckInScreen() {
     hapticSuccess();
     const updated = new Set(completedExercises).add(index);
     setCompletedExercises(updated);
-    saveWorkoutLog(localDateStr(), buildWorkoutLogExercises(updated));
+    const exercises = buildWorkoutLogExercises(updated);
+    saveWorkoutLog(localDateStr(), exercises);
+    // BUG FIX: session history kept Start's 'skipped' entry until Finish, so
+    // a session left after a couple of exercises (no Finish tapped) showed
+    // as a missed day everywhere. It's updated alongside the workout log,
+    // with the same status Finish would record.
+    if (energy !== null) {
+      const status = getCompletionStatus(exercises);
+      recordSessionCompletion(status !== 'skipped', energy, status);
+    }
   };
 
   const handleNextExercise = (force = false) => {
@@ -1221,6 +1240,7 @@ export default function EnergyCheckInScreen() {
     swappedExercises,
     planHealthReadiness: frozenReadiness ?? undefined,
     planEquipment: frozenEquipment,
+    planDaysSinceLastCheckIn: frozenGap?.days,
     startedAt: sessionStartedAtRef.current?.toISOString(),
   });
 
@@ -1263,10 +1283,12 @@ export default function EnergyCheckInScreen() {
     setFrozenReadiness(readinessAtStart);
     const equipmentAtStart = profile?.equipment ?? '';
     setFrozenEquipment(equipmentAtStart);
+    setFrozenGap({ days: daysSinceLastCheckIn });
     saveTodaySession({
       ...todaySessionBase(energy, false),
       planHealthReadiness: readinessAtStart,
       planEquipment: equipmentAtStart,
+      planDaysSinceLastCheckIn: daysSinceLastCheckIn,
     });
     // Already showed up today — a "Training day" nudge later would be noise.
     cancelTodaysReminder();
@@ -1288,7 +1310,12 @@ export default function EnergyCheckInScreen() {
     // also includes retroactively-logged past sessions). Pushed after
     // setSessionState so dismissing it lands right back on the resolved
     // session, ready to start — never blocking the workout itself.
-    if (await recordCheckInAndShouldShowPaywall()) router.push('/paywall' as never);
+    // BUG FIX: it opened for people who already subscribe, too (bought from
+    // a locked card before their third check-in). A live entitlement read,
+    // not isPremium, which can still be loading this soon after a purchase.
+    if ((await recordCheckInAndShouldShowPaywall()) && !(await hasPremiumEntitlement())) {
+      router.push('/paywall' as never);
+    }
   };
 
   const handleFinishSession = async (force = false) => {
@@ -1392,7 +1419,10 @@ export default function EnergyCheckInScreen() {
     // The one real showing — see markCoachingInsightShown's own doc comment
     // for why this call doesn't also happen on the reopen-a-completed-
     // session load path below.
-    if (insightNote) markCoachingInsightShown();
+    // Only when it's actually shown (Plus) — BUG FIX: free users spent the
+    // 14-day cooldown on notes they never saw, so someone starting a trial
+    // the next day didn't get one.
+    if (insightNote && isPremium) markCoachingInsightShown();
     setPlanFitNote(fitNote);
     // Awaited (unlike the old fire-and-forget) so today's exercises are
     // already in storage before getBodyAreaInsight reads the breakdown —
@@ -1400,6 +1430,10 @@ export default function EnergyCheckInScreen() {
     await saveWorkoutLog(localDateStr(), finalExercises);
     recordDecisionTrace(localDateStr(), preview.trace);
     setDoneInsight(await getBodyAreaInsight());
+    // Upcoming reminders name a well-rested body area — rebuild them now that
+    // this session changed which one that is (otherwise they waited for the
+    // next day's refresh and could name the area just trained).
+    if (completedSomething) refreshSessionReminders({ force: true });
     // Only after a real session — the moment "remind me next training day"
     // actually means something — and only ever offered once (marked the
     // moment it's shown, not when tapped, so ignoring it counts as an answer).
@@ -2805,15 +2839,37 @@ function ExerciseTimer({
   // instant the next interval actually starts.
   const awaitingNextPhase = secondsLeft === 0 && nextInterval !== null;
 
-  // The tick — a chained setTimeout keyed on secondsLeft itself (rather
-  // than a single setInterval) so it can't drift and self-corrects every
-  // render; setState happens inside the timeout callback, not the effect
-  // body itself. Counts down whichever interval is current and stops dead
-  // at 0 — it never advances phaseIndex itself, see handleStartNextPhase.
+  // The tick — a chained setTimeout keyed on secondsLeft itself; setState
+  // happens inside the timeout callback, not the effect body itself. Counts
+  // down whichever interval is current and stops dead at 0 — it never
+  // advances phaseIndex itself, see handleStartNextPhase.
+  //
+  // BUG FIX (found in a pre-launch audit): it used to subtract one per tick,
+  // and iOS suspends the app while the phone is locked — a rest left
+  // running in a pocket froze, and unlocking showed nearly the whole rest
+  // still to go (a Plank hold, the same). Each running interval now has a
+  // wall-clock end time; every tick, and every return to the foreground,
+  // reads the clock against it. Pausing, finishing early or starting the
+  // next interval drops the end time (secondsLeft is 0 or the clock isn't
+  // active), and the next run re-anchors from whatever secondsLeft is.
+  const endsAtRef = useRef<number | null>(null);
   useEffect(() => {
-    if (!active || secondsLeft <= 0) return;
-    const id = setTimeout(() => setSecondsLeft((s) => Math.max(0, s - 1)), 1000);
-    return () => clearTimeout(id);
+    if (!active || secondsLeft <= 0) {
+      endsAtRef.current = null;
+      return;
+    }
+    if (endsAtRef.current === null) endsAtRef.current = Date.now() + secondsLeft * 1000;
+    const endsAt = endsAtRef.current;
+    const sync = () => setSecondsLeft(Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)));
+    // Wakes when the shown value should next drop (at once if it's behind).
+    const id = setTimeout(sync, Math.max(0, endsAt - Date.now() - (secondsLeft - 1) * 1000));
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') sync();
+    });
+    return () => {
+      clearTimeout(id);
+      subscription.remove();
+    };
   }, [active, secondsLeft]);
 
   // Notifies the parent exactly once, the moment the *last* interval's
@@ -2886,6 +2942,7 @@ function ExerciseTimer({
   const handleStartNextPhase = () => {
     if (!nextInterval) return;
     hapticSelect();
+    endsAtRef.current = null; // the next interval gets its own end time
     setPhaseIndex((i) => i + 1);
     setSecondsLeft(nextInterval.seconds);
     setActive(true);

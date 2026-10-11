@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Type } from '@/constants/theme';
 import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight, hapticSuccess } from '@/lib/haptics';
+import { refreshEntitlement } from '@/lib/purchases';
 import { getOrCreateReferralCode, redeemReferralCode } from '@/lib/referral';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
@@ -97,8 +98,12 @@ export default function ReferralScreen() {
       // Nothing retries a grant that failed server-side (redeem-referral
       // records the redemption either way), so this can't promise it's
       // "on its way" — it says what happened and who can fix it.
-      if (outcome.rewardGranted) hapticSuccess();
-      else hapticError();
+      if (outcome.rewardGranted) {
+        hapticSuccess();
+        refreshEntitlement();
+      } else {
+        hapticError();
+      }
       setRedeemMessage(
         outcome.rewardGranted
           ? { text: "You're both set — a free week of VerveIn Plus just landed on your account.", kind: 'success' }

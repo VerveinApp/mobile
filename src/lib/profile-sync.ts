@@ -150,15 +150,19 @@ export async function pullProfileFromRemote(): Promise<RemoteProfileResult> {
  * other sync call here, and deliberately NOT part of clearAllLocalData,
  * which account-switch.ts also uses while a different account is signed in.
  */
-export async function deleteRemoteProfile(): Promise<void> {
+// BUG FIX: this used to swallow every outcome, so Delete My Data offline
+// cleared the device, reported success, and the next sign-in restored the
+// "deleted" profile from the server. The caller now hears what happened.
+export async function deleteRemoteProfile(): Promise<'deleted' | 'signed-out' | 'failed'> {
   try {
     const { supabase } = await import('@/lib/supabase');
     const {
       data: { session },
     } = await supabase.auth.getSession();
-    if (!session) return;
-    await supabase.from('profiles').delete().eq('user_id', session.user.id);
+    if (!session) return 'signed-out';
+    const { error } = await supabase.from('profiles').delete().eq('user_id', session.user.id);
+    return error ? 'failed' : 'deleted';
   } catch {
-    // Best-effort — see this function's own doc comment.
+    return 'failed';
   }
 }

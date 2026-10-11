@@ -177,6 +177,7 @@ export default function SettingsScreen() {
   // gated behind the same confirm-modal pattern as those.
   const [showDeleteDataModal, setShowDeleteDataModal] = useState(false);
   const [deletingData, setDeletingData] = useState(false);
+  const [deleteDataError, setDeleteDataError] = useState<string | null>(null);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
@@ -444,8 +445,12 @@ export default function SettingsScreen() {
   // always reach the same place through the OS Settings app directly.
   const handleManageSubscription = async () => {
     hapticImpactLight();
-    const url = await getSubscriptionManagementUrl();
-    if (url) Linking.openURL(url);
+    // BUG FIX: RevenueCat has no management URL for Plus that isn't an App
+    // Store subscription (a referral's free week), and the tap used to do
+    // nothing at all. Apple's own subscriptions page is the honest fallback:
+    // it lists anything that bills, and nothing for a week that never will.
+    const url = (await getSubscriptionManagementUrl()) ?? 'https://apps.apple.com/account/subscriptions';
+    Linking.openURL(url);
   };
 
   const handleOpenEditName = () => {
@@ -531,6 +536,7 @@ export default function SettingsScreen() {
 
   const handleOpenDeleteData = () => {
     hapticWarning();
+    setDeleteDataError(null);
     setShowDeleteDataModal(true);
   };
 
@@ -545,8 +551,15 @@ export default function SettingsScreen() {
     setDeletingData(true);
     hapticWarning();
     // The synced copy too — otherwise "permanently clears your profile" left
-    // its health fields on the server (see deleteRemoteProfile).
-    await deleteRemoteProfile();
+    // its health fields on the server (see deleteRemoteProfile). If that
+    // can't be reached, nothing is deleted: clearing only the device would
+    // report success while the next sign-in brought it all back.
+    if ((await deleteRemoteProfile()) === 'failed') {
+      setDeletingData(false);
+      hapticError();
+      setDeleteDataError("Couldn't reach VerveIn, so nothing was deleted. Check your connection and try again.");
+      return;
+    }
     await clearAllLocalData();
     setDeletingData(false);
     router.dismissAll();
@@ -1096,10 +1109,14 @@ export default function SettingsScreen() {
               <Pressable style={styles.importCard} onPress={() => {}}>
                 <Text style={styles.importTitle} maxFontSizeMultiplier={1.3}>Delete all your data?</Text>
                 <Text style={styles.importBody} maxFontSizeMultiplier={1.4}>
-                  This permanently clears your profile — on this device and the copy synced to your account —
-                  plus your session history, logs, progress photos, and calibration. It can&apos;t be undone.
-                  Your account and any VerveIn Plus subscription stay; you&apos;ll set up your plan again.
+                  {accountEmail
+                    ? 'This permanently clears your profile — on this device and the copy synced to your account — plus your session history, logs, progress photos, and calibration. It can’t be undone. Your account and any VerveIn Plus subscription stay; you’ll set up your plan again.'
+                    : // Signed out, there's no account to reach — say only what this can clear.
+                      'This permanently clears everything VerveIn keeps on this device — your profile, session history, logs, progress photos, and calibration. It can’t be undone. A profile synced to an account stays with it; sign in and delete it there.'}
                 </Text>
+                {deleteDataError ? (
+                  <Text style={styles.importErrorText} maxFontSizeMultiplier={1.3}>{deleteDataError}</Text>
+                ) : null}
                 <View style={styles.importActions}>
                   <Pressable
                     style={({ pressed }) => [styles.importCancelHit, pressed && PRESSED_DIM]}
@@ -1310,7 +1327,9 @@ export default function SettingsScreen() {
       </ReanimatedAnimated.View>
       )}
 
-      <BiometricsSheet ref={biometricsSheetRef} />
+      {/* The sheet has its own units toggle, and closing a sheet isn't a
+          screen focus — re-read so the Units row above can't go stale. */}
+      <BiometricsSheet ref={biometricsSheetRef} onDismiss={() => getUnitSystem().then(setUnit)} />
       <AdjustPlanSheet ref={adjustPlanSheetRef} />
       <ConditionsSheet ref={conditionsSheetRef} />
       <GoalsSheet ref={goalsSheetRef} />
