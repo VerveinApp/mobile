@@ -61,9 +61,12 @@ Copy is in `docs/launch-copy.md`. Only post once the App Store link opens.
 - Posts (Instagram/LinkedIn, X/Threads, TikTok/Reels caption).
 - Personal text to friends, family and gym people asking for an honest rating.
   Never tie a rating to the referral code or anything else in return.
-- The website waitlist gets exactly one email (the site promised that). It
-  needs a postal address (CAN-SPAM) before sending, and the list is deleted
-  afterwards (the privacy policy promises that too).
+- Website waitlist: it had 0 signups on 2026-10-11, so there's no email to
+  send. If anyone signs up before launch, they get exactly one email (the site
+  promised that), it needs a postal address (CAN-SPAM), and the list is
+  deleted afterwards (the privacy policy promises that). Check the count with
+  `npx wrangler kv key list --namespace-id aec8f18e7e57461b9a2e3d37d8ed808a --remote`
+  from the site folder.
 
 ## 5. First days
 
