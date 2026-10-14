@@ -1,6 +1,7 @@
 # Launch day: VerveIn 1.1
 
-Everything here happens after Apple approves 1.1 (build 23). Release is set to
+Everything here happens after Apple approves 1.1 (build 23; resubmitted
+2026-10-13 with the corrected description and promo text). Release is set to
 manual, so nothing is public until step 1.
 
 ## 1. Release the app
@@ -70,7 +71,13 @@ Copy is in `docs/launch-copy.md`. Only post once the App Store link opens.
 
 ## 5. First days
 
-- Watch Sentry for new crashes, and App Store Connect → Ratings and Reviews.
+- Crashes: App Store Connect → TestFlight → Crashes, or Xcode → Window →
+  Organizer → Crashes. Sentry is wired in but inactive: `EXPO_PUBLIC_SENTRY_DSN`
+  is blank locally and not set in the EAS production environment, so nothing
+  is sent. Before turning it on, add Diagnostics → Crash Data and Other
+  Diagnostic Data (App Functionality, not linked, no tracking) to the App
+  Privacy label.
+- App Store Connect → Ratings and Reviews.
 - Push notifications: the APNs key is set up and the sign-in hook ships in the
   update, but a real end-to-end push hasn't been seen yet. Sign in on your
   phone with notifications allowed, then send one test push.
@@ -86,6 +93,3 @@ Copy is in `docs/launch-copy.md`. Only post once the App Store link opens.
   Import My Data on a new phone not showing older history on Progress.
 - Product call pending: Summary's Training Load card is Plus-locked while
   Progress's Training Load section is free.
-- The App Store description and review notes say sessions adjust to soreness,
-  sleep and Apple Health; those adjustments are Plus. Make that explicit in
-  the description at the next metadata change.
