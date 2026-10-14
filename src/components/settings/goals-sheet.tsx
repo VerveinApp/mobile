@@ -33,12 +33,16 @@ function kgToLbIndex(kg: number): number {
   return Math.min(WEIGHT_LB_ITEMS.length - 1, Math.max(0, Math.round(kg / 0.453592) - 80));
 }
 
+// BUG FIX: this used to round to a whole kg, so a pound value came back
+// different from what was picked (180 lb was stored as 82 kg, shown as
+// 180.8 lb). Full precision is stored, the same as biometrics-sheet.tsx's
+// lbPartsToKg; rounding happens only when turning kg into a ruler index.
 function lbToKg(lbIndex: number): number {
-  return Math.round((lbIndex + 80) * 0.453592);
+  return (lbIndex + 80) * 0.453592;
 }
 
 function kgToKgIndex(kg: number): number {
-  return Math.min(WEIGHT_KG_ITEMS.length - 1, Math.max(0, kg - 35));
+  return Math.min(WEIGHT_KG_ITEMS.length - 1, Math.max(0, Math.round(kg) - 35));
 }
 
 function kgToLiftLbIndex(kg: number): number {
@@ -46,7 +50,7 @@ function kgToLiftLbIndex(kg: number): number {
 }
 
 function liftLbToKg(lbIndex: number): number {
-  return Math.round(lbIndex * 0.453592);
+  return lbIndex * 0.453592;
 }
 
 function kgToLiftKgIndex(kg: number): number {

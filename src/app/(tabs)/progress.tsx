@@ -86,12 +86,14 @@ const MIN_SESSIONS_FOR_SHAPE = 3;
 const TREND_LABEL: Record<'improving' | 'stable' | 'declining', string> = {
   improving: 'Improving',
   stable: 'Steady',
-  declining: 'Trending down',
+  // A dip reads as a lighter stretch, never as falling behind (the app's
+  // no-guilt rule): same signal, recovery framing.
+  declining: 'Lighter stretch',
 };
 const TREND_ICON: Record<'improving' | 'stable' | 'declining', SFSymbol> = {
   improving: 'arrow.up.right',
   stable: 'arrow.right',
-  declining: 'arrow.down.right',
+  declining: 'leaf',
 };
 
 // Local-date parsing (not `new Date(dateStr)`) to avoid the classic UTC
@@ -308,8 +310,13 @@ export default function ProgressScreen() {
   }
 
   const scheduledPast = weeks.flat().filter((d) => d.isScheduled && d.completed !== null);
-  const completedPast = scheduledPast.filter((d) => d.completed);
-  const completionRate = scheduledPast.length > 0 ? Math.round((completedPast.length / scheduledPast.length) * 100) : null;
+  const completionRate =
+    scheduledPast.length > 0 ? Math.round((scheduledPast.filter((d) => d.completed).length / scheduledPast.length) * 100) : null;
+  // BUG FIX: "Logged Sessions" counted only training days, so a session done
+  // on an unscheduled day (Check in anyway, or a logged past session) went
+  // uncounted. Every completed past day counts here; the completion rate
+  // stays about scheduled days.
+  const loggedSessions = weeks.flat().filter((d) => !d.isFuture && d.completed === true).length;
   // Weeks entirely before the account existed have no scheduled days at all
   // (see session-history.ts's own account-start-date exclusion) — trimming
   // them instead of rendering an empty shell row is what actually fixes a
@@ -471,7 +478,7 @@ export default function ProgressScreen() {
           </View>
           <View style={styles.summaryRow}>
             <View style={styles.summaryCard}>
-              <Text style={styles.summaryValue} maxFontSizeMultiplier={1.15}>{completedPast.length}</Text>
+              <Text style={styles.summaryValue} maxFontSizeMultiplier={1.15}>{loggedSessions}</Text>
               <Text style={styles.summaryLabel} maxFontSizeMultiplier={1.2}>Logged Sessions</Text>
             </View>
             <View style={styles.summaryCard}>
@@ -587,7 +594,8 @@ export default function ProgressScreen() {
                               : FadeIn.duration(GRID_CELL_FADE_MS).delay((weekIndex + dayIndex) * GRID_CELL_STAGGER_MS)
                           }
                         >
-                          {day.isScheduled ? (
+                          {/* A session on an unscheduled day still shows as completed. */}
+                          {day.isScheduled || day.completed === true ? (
                             <Pressable
                               disabled={day.completed === null}
                               android_ripple={{ ...AndroidRipple, borderless: true }}
@@ -608,7 +616,7 @@ export default function ProgressScreen() {
                               accessibilityLabel={
                                 day.completed === null
                                   ? undefined
-                                  : `${formatEntryDateLabel(day.date)}, ${day.completed ? 'completed' : 'missed'}. Tap for detail.`
+                                  : `${formatEntryDateLabel(day.date)}, ${day.completed ? 'completed' : 'rest day'}. Tap for detail.`
                               }
                               style={({ pressed }) => [
                                 styles.gridCell,
@@ -644,7 +652,7 @@ export default function ProgressScreen() {
               })}
               <View style={styles.legendRow}>
                 <LegendDot styles={styles} style={styles.gridCellCompleted} label="Completed" />
-                <LegendDot styles={styles} style={styles.gridCellMissed} label="Missed" />
+                <LegendDot styles={styles} style={styles.gridCellMissed} label="Rest" />
                 <LegendDot styles={styles} style={styles.gridCellPending} label="Upcoming" />
               </View>
                 </>

@@ -216,8 +216,10 @@ export default function SummaryScreen() {
         planHealthReadinessModifier,
         undefined,
         todaySession?.timeAvailableMin,
-        undefined,
-        undefined,
+        // The started session's own frozen inputs, so this card describes
+        // the session check-in is actually running.
+        todaySession?.planDaysSinceLastCheckIn,
+        todaySession?.finisherAccepted,
         planHealthReadinessReasons,
         todaySession?.preferredBodyArea,
         todaySession?.equipmentOverride
@@ -227,6 +229,8 @@ export default function SummaryScreen() {
       todaySession?.energy,
       todaySession?.symptomTags,
       todaySession?.timeAvailableMin,
+      todaySession?.planDaysSinceLastCheckIn,
+      todaySession?.finisherAccepted,
       todaySession?.preferredBodyArea,
       todaySession?.equipmentOverride,
       calibration,

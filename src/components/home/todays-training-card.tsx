@@ -55,7 +55,11 @@ export function TodaysTrainingCard({
     router.push('/home/check-in?anyway=1' as never);
   };
 
-  if (isRestDay) {
+  // Only before anything's started — BUG FIX: an extra session someone
+  // chose to start (or finish) on a rest day still showed "Rest Day — Check
+  // in anyway", right after the workout. Once there's a session, it renders
+  // like any other day's: Continue session or View summary.
+  if (isRestDay && todaySession === null) {
     return (
       <View style={styles.card}>
         <View pointerEvents="none" style={styles.cardSheen} />

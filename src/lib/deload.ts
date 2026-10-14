@@ -1,6 +1,7 @@
 import { checkDeloadPattern } from '@/lib/engine/deload-nudge';
 import type { DeloadNudge } from '@/lib/engine/types';
 import { getRestingHeartRateTrend } from '@/lib/health-kit';
+import { localDateStr } from '@/lib/local-date';
 import { getSessionHistory } from '@/lib/session-history';
 
 /**
@@ -13,6 +14,13 @@ async function getEnergyDeloadNudge(): Promise<DeloadNudge> {
   const history = await getSessionHistory(); // most-recent-first
   const withEnergy = history.filter((e) => e.energy !== undefined);
   const recent = withEnergy.slice(0, 3).map((e) => ({ date: e.date, energy: e.energy as number }));
+  // BUG FIX: the pattern was checked however long ago it happened, so three
+  // low days followed by a week away still opened Summary with "consider
+  // rest" — to someone who'd just rested. It only counts while it's
+  // current: the newest of the three is today or yesterday.
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (recent.length === 0 || recent[0].date < localDateStr(yesterday)) return { triggered: false, message: null };
   return checkDeloadPattern(recent);
 }
 

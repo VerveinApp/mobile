@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CanvasScaleContext, canvasHairline, scaleCanvasStyles, useCanvasScale } from '@/lib/canvas-scale';
@@ -20,6 +20,7 @@ import { BackArrowGraphic } from '@/components/auth/verify-email-graphics';
 import { OnboardingProgress } from '@/components/onboarding/onboarding-progress';
 import { HorizontalRuler } from '@/components/onboarding/horizontal-ruler';
 import { saveOnboardingDraft } from '@/lib/onboarding-draft';
+import { getUnitSystem, setUnitSystem, type UnitSystem } from '@/lib/unit-preference';
 import { asksForEquipment } from '@/lib/owned-equipment';
 
 const CANVAS_WIDTH = 375;
@@ -36,7 +37,6 @@ const CANVAS_HEIGHT = 812;
 const CONSENT_COPY = 'I agree to VerveIn saving these with my account to tailor my training. I can withdraw this in Settings.';
 
 type SexId = 'female' | 'male';
-type UnitSystem = 'imperial' | 'metric';
 
 const SEX_OPTIONS: { id: SexId; label: string }[] = [
   { id: 'female', label: 'Female' },
@@ -72,8 +72,12 @@ function kgToLbIndex(kg: number): number {
   return Math.min(WEIGHT_LB_ITEMS.length - 1, Math.max(0, Math.round(kg / 0.453592) - 80));
 }
 
+// BUG FIX: this used to round to a whole kg, so a pound value came back
+// different from what was picked (180 lb was stored as 82 kg, shown as
+// 180.8 lb). Full precision is stored, the same as biometrics-sheet.tsx's
+// lbPartsToKg; rounding happens only when turning kg into a ruler index.
 function lbToKg(lbIndex: number): number {
-  return Math.round((lbIndex + 80) * 0.453592);
+  return (lbIndex + 80) * 0.453592;
 }
 
 function cmToCmIndex(cm: number): number {
@@ -81,7 +85,7 @@ function cmToCmIndex(cm: number): number {
 }
 
 function kgToKgIndex(kg: number): number {
-  return Math.min(WEIGHT_KG_ITEMS.length - 1, Math.max(0, kg - 35));
+  return Math.min(WEIGHT_KG_ITEMS.length - 1, Math.max(0, Math.round(kg) - 35));
 }
 
 /**
@@ -142,6 +146,11 @@ export default function OnboardingConsentBiometricsScreen() {
   const [consented, setConsented] = useState(incomingConsent === 'true');
   const [sex, setSex] = useState<SexId | null>(incomingSex === 'female' || incomingSex === 'male' ? incomingSex : null);
   const [unit, setUnit] = useState<UnitSystem>('imperial');
+  // Starts from the app-wide preference, so coming back to this step (or
+  // a second run of onboarding) shows what was picked.
+  useEffect(() => {
+    getUnitSystem().then(setUnit);
+  }, []);
   const [heightCmValue, setHeightCmValue] = useState(Number(heightCm) || DEFAULT_HEIGHT_CM);
   const [weightKgValue, setWeightKgValue] = useState(Number(weightKg) || DEFAULT_WEIGHT_KG);
 
@@ -183,6 +192,10 @@ export default function OnboardingConsentBiometricsScreen() {
     if (id === unit) return;
     hapticSelect();
     setUnit(id);
+    // BUG FIX: this choice used to stay on this screen only — someone who
+    // picked cm / kg here saw ft / lb everywhere afterwards. It's the same
+    // app-wide setting as Settings' Units row.
+    setUnitSystem(id);
   };
 
   const { feetIndex, inchesIndex } = cmToFeetInches(heightCmValue);

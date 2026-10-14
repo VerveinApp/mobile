@@ -274,6 +274,24 @@ export async function hasPremiumEntitlement(): Promise<boolean> {
 }
 
 /**
+ * Re-reads the entitlement from RevenueCat's servers instead of the SDK's
+ * cached copy, and tells every gated screen. For grants made server-side —
+ * a referral's free week — which the cache otherwise only notices minutes
+ * later (BUG FIX: Plus stayed locked right after "a free week of VerveIn
+ * Plus just landed").
+ */
+export async function refreshEntitlement(): Promise<void> {
+  if (!configured) return;
+  await identityReady;
+  try {
+    await Purchases.invalidateCustomerInfoCache();
+    publishEntitlement(isEntitled(await Purchases.getCustomerInfo()));
+  } catch {
+    // Worst case the cache catches up on its own a few minutes later.
+  }
+}
+
+/**
  * The store's own subscription-management page (App Store or Play Store,
  * whichever the active subscription is actually on) — RevenueCat's
  * `CustomerInfo.managementURL` already resolves to the right one, so this

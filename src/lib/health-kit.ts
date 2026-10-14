@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import type { Exercise } from '@/lib/engine/types';
 import { localDateStr } from '@/lib/local-date';
 
 // iOS-only, read-only wrapper around @kingstinct/react-native-healthkit.
@@ -49,6 +50,41 @@ const WORKOUT_ACTIVITY_TYPE_BY_GOAL: Record<string, number> = {
   'move-better': 62, // flexibility
 };
 const WORKOUT_ACTIVITY_TYPE_OTHER = 3000; // other — honest fallback for an unrecognized/missing goal
+const WORKOUT_ACTIVITY_TYPE_BY_EXERCISE_TYPE: Record<WorkoutExerciseType, number> = {
+  strength: 50, // traditionalStrengthTraining
+  power: 50, // traditionalStrengthTraining
+  mobility: 62, // flexibility
+  recovery: 62, // flexibility
+  cardio: 73, // mixedCardio
+};
+
+export type WorkoutExerciseType = Exercise['type'];
+
+/**
+ * The HKWorkoutActivityType for a finished session, from what was actually
+ * done: whichever kind most of the completed exercises were (ties go to
+ * strength, then flexibility). The onboarding goal is only the fallback for
+ * a session with no known exercise types, since it says what someone is
+ * training for, not what today was: a "get leaner" lifting day is still a
+ * strength workout in Fitness and Health.
+ */
+export function workoutActivityTypeFor(
+  exerciseTypes: readonly (WorkoutExerciseType | null | undefined)[],
+  goal: string | undefined
+): number {
+  const counts = new Map<number, number>();
+  for (const type of exerciseTypes) {
+    if (!type) continue;
+    const activity = WORKOUT_ACTIVITY_TYPE_BY_EXERCISE_TYPE[type];
+    counts.set(activity, (counts.get(activity) ?? 0) + 1);
+  }
+  let best: number | null = null;
+  for (const activity of [50, 62, 73]) {
+    const count = counts.get(activity) ?? 0;
+    if (count > 0 && (best === null || count > (counts.get(best) ?? 0))) best = activity;
+  }
+  return best ?? (goal ? WORKOUT_ACTIVITY_TYPE_BY_GOAL[goal] : undefined) ?? WORKOUT_ACTIVITY_TYPE_OTHER;
+}
 
 async function getModule() {
   if (Platform.OS !== 'ios') return null;
@@ -622,13 +658,14 @@ export async function getSleepDebtTrend(): Promise<SleepDebtTrend | null> {
  */
 export async function saveCompletedWorkout(
   goal: string | undefined,
+  exerciseTypes: readonly (WorkoutExerciseType | null | undefined)[],
   startedAt: Date,
   endedAt: Date,
   activeEnergyKcal?: number
 ): Promise<void> {
   const HealthKit = await getModule();
   if (!HealthKit || !(await hasConnectedHealthKit())) return;
-  const activityType = (goal && WORKOUT_ACTIVITY_TYPE_BY_GOAL[goal]) ?? WORKOUT_ACTIVITY_TYPE_OTHER;
+  const activityType = workoutActivityTypeFor(exerciseTypes, goal);
   const quantities =
     activeEnergyKcal !== undefined
       ? [

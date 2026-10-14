@@ -88,6 +88,14 @@ export type TodaySession = {
    * item off the list mid-workout ("Missing something?" on the swap sheet)
    * changes future plans, never the session already underway. */
   planEquipment?: string;
+  /** Days since the check-in before this one, as the session was STARTED —
+   * frozen like the two above. BUG FIX: a 5+ day gap makes plan-preview.ts
+   * favour simpler exercises, but starting the session records today's
+   * check-in, so reopening mid-session saw no gap and rebuilt a different
+   * exercise list under the user's completed sets and typed weights.
+   * Undefined when there was no earlier check-in (and on sessions saved
+   * before this field existed). */
+  planDaysSinceLastCheckIn?: number;
   /** Which exercise the session was on, so a resumed session picks up
    * there instead of back at the first exercise. */
   currentExerciseIndex?: number;

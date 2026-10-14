@@ -363,7 +363,7 @@ function HistoryRow({
           </View>
           <View style={styles.entryStatus}>
             <SymbolView
-              name={entry.completed ? 'checkmark.circle.fill' : 'circle.dashed'}
+              name={entry.completed ? 'checkmark.circle.fill' : 'moon.zzz'}
               size={14}
               tintColor={entry.completed ? '#5FBE84' : colors.iconFaint}
             />
@@ -371,7 +371,7 @@ function HistoryRow({
               style={[styles.entryStatusText, entry.completed && styles.entryStatusTextDone]}
               maxFontSizeMultiplier={1.2}
             >
-              {entry.completed ? 'Completed' : 'Missed'}
+              {entry.completed ? 'Completed' : 'Rest day'}
             </Text>
           </View>
         </View>
