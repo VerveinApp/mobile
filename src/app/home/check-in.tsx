@@ -1370,6 +1370,9 @@ export default function EnergyCheckInScreen() {
       setEstimatedCalories(caloriesForSession);
       saveCompletedWorkout(
         profile?.goal,
+        sessionExercises
+          .filter((_, index) => completedExercises.has(index))
+          .map((ex) => exerciseLibrary.getById(ex.id)?.type),
         sessionStartedAtRef.current,
         new Date(),
         caloriesForSession ?? undefined

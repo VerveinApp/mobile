@@ -86,12 +86,14 @@ const MIN_SESSIONS_FOR_SHAPE = 3;
 const TREND_LABEL: Record<'improving' | 'stable' | 'declining', string> = {
   improving: 'Improving',
   stable: 'Steady',
-  declining: 'Trending down',
+  // A dip reads as a lighter stretch, never as falling behind (the app's
+  // no-guilt rule): same signal, recovery framing.
+  declining: 'Lighter stretch',
 };
 const TREND_ICON: Record<'improving' | 'stable' | 'declining', SFSymbol> = {
   improving: 'arrow.up.right',
   stable: 'arrow.right',
-  declining: 'arrow.down.right',
+  declining: 'leaf',
 };
 
 // Local-date parsing (not `new Date(dateStr)`) to avoid the classic UTC
@@ -614,7 +616,7 @@ export default function ProgressScreen() {
                               accessibilityLabel={
                                 day.completed === null
                                   ? undefined
-                                  : `${formatEntryDateLabel(day.date)}, ${day.completed ? 'completed' : 'missed'}. Tap for detail.`
+                                  : `${formatEntryDateLabel(day.date)}, ${day.completed ? 'completed' : 'rest day'}. Tap for detail.`
                               }
                               style={({ pressed }) => [
                                 styles.gridCell,
@@ -650,7 +652,7 @@ export default function ProgressScreen() {
               })}
               <View style={styles.legendRow}>
                 <LegendDot styles={styles} style={styles.gridCellCompleted} label="Completed" />
-                <LegendDot styles={styles} style={styles.gridCellMissed} label="Missed" />
+                <LegendDot styles={styles} style={styles.gridCellMissed} label="Rest" />
                 <LegendDot styles={styles} style={styles.gridCellPending} label="Upcoming" />
               </View>
                 </>

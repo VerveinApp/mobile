@@ -75,7 +75,7 @@ export default function LogScreen() {
             colors={colors}
             icon="figure.strengthtraining.traditional"
             label="Past Session"
-            subtitle="Which areas you trained, for a day you missed"
+            subtitle="Which areas you trained, for a day VerveIn didn't record"
             onPress={handleOpenPastSession}
           />
           <LogRow
