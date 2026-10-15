@@ -36,7 +36,7 @@ import { SymbolView } from '@/components/ui/app-symbol';
 import { openBrowserAsync } from 'expo-web-browser';
 import { postAccessibilityScreenChanged } from 'expo-accessibility-rescan';
 
-import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
+import { useEnabledFadeStyle, useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
 import { getCalibration, submitSessionFeedback } from '@/lib/calibration';
 import { TabularNums, Type, sheenGradient } from '@/constants/theme';
 import { getLastCheckIn, recordCheckIn, type CheckInRecord } from '@/lib/check-in-history';
@@ -57,8 +57,10 @@ import {
 } from '@/lib/owned-equipment';
 import { hapticImpactLight, hapticImpactMedium, hapticSelect, hapticSuccess, hapticWarning } from '@/lib/haptics';
 import { cancelRestOverNotification, scheduleRestOverNotification } from '@/lib/rest-notification';
+import { formatExerciseStat } from '@/lib/exercise-format';
 import { REST_ADJUST_STEP_SECONDS, adjustRest, setsDoneFor } from '@/lib/rest-timer';
 import { BottomFade } from '@/components/session/bottom-fade';
+import { PlanPeek } from '@/components/plan/plan-peek';
 import { TimerRing } from '@/components/session/timer-ring';
 import { useKeepAwakeWhile } from '@/lib/keep-awake';
 import { getCoachingInsightNote, markCoachingInsightShown } from '@/lib/coaching-insights';
@@ -160,25 +162,6 @@ const FEEDBACK_CONFIRM_TEXT: Record<FeedbackResponse, string> = {
   too_hard: "Noted — tomorrow's session eases back slightly.",
   much_too_hard: "Noted — tomorrow's session eases back.",
 };
-
-/**
- * Discrete exercises show "3 × 10". Isometric holds carry a real sets count
- * but no rep count (base_reps is null by design — a plank doesn't have
- * reps), so those fall back to "3 × 1 min" using the real duration instead
- * of fabricating a rep number. Loaded carries can lack a sets count
- * entirely, falling back further to just the duration. Never invents a
- * number plan-preview.ts didn't actually produce — and a duration of
- * exactly 0 is treated the same as no duration at all, since that's volume-
- * scaling.ts's own documented rounding gap (5-minute rounding breaking a
- * short hold down to nothing), a known-wrong value, not real information.
- */
-function formatExerciseStat(exercise: { sets: number | null; reps: number | string | null; durationMin: number | null }): string {
-  if (exercise.sets !== null && exercise.reps !== null) return `${exercise.sets} × ${exercise.reps}`;
-  if (exercise.sets !== null && exercise.durationMin) return `${exercise.sets} × ${exercise.durationMin} min`;
-  if (exercise.sets !== null) return `${exercise.sets} set${exercise.sets === 1 ? '' : 's'}`;
-  if (exercise.durationMin) return `${exercise.durationMin} min`;
-  return '—';
-}
 
 // Friendly framing for M6/Gate 1's exclusion categories — 'inactive' is
 // deliberately omitted: it's a library-data-hygiene fact (an exercise
@@ -487,6 +470,7 @@ export default function EnergyCheckInScreen() {
   // tap a safe no-op, just an invisible one.
   const isStartingSessionRef = useRef(false);
   const [isStartingSession, setIsStartingSession] = useState(false);
+  const startEnabledFade = useEnabledFadeStyle(energy !== null && !isStartingSession);
   // Real wall-clock start time for the HealthKit workout write at Finish —
   // see saveCompletedWorkout's own doc comment. Persisted with today's
   // session (TodaySession.startedAt), so a session resumed after an app
@@ -1077,6 +1061,7 @@ export default function EnergyCheckInScreen() {
   // needed for it either).
   const currentExerciseTimerDone = completedExercises.has(currentExerciseIndex);
   const nextExercise = sessionExercises[currentExerciseIndex + 1] ?? null;
+  const finishEnabledFade = useEnabledFadeStyle(currentExerciseTimerDone && !isFinishingSession);
   // The screen stays on for the whole session — no lock and Face ID
   // between sets. Released at Finish or on leaving.
   useKeepAwakeWhile(sessionState === 'resolved');
@@ -1723,6 +1708,14 @@ export default function EnergyCheckInScreen() {
                   instant={reducedMotion}
                   styles={styles}
                 />
+                {/* The plan rebuilding as the gauge moves — its first
+                    exercises and its length against a Good day (hidden at
+                    Good itself, where it would only compare to itself). */}
+                <PlanPeek
+                  exercises={preview.exercises}
+                  minutes={preview.durationMin}
+                  goodDayMinutes={energy === 4 ? null : baseline.durationMin}
+                />
                 <ExplanationBlock key={energy} explanation={preview.explanation} comparisonText={comparisonText} styles={styles} />
               </ReanimatedAnimated.View>
             ) : null}
@@ -1804,34 +1797,36 @@ export default function EnergyCheckInScreen() {
               accessibilityRole="button"
               accessibilityLabel="Start session"
             >
-              <Animated.View
-                style={[
-                  styles.primaryButtonVisual,
-                  (energy === null || isStartingSession) && styles.primaryButtonDisabled,
-                  { transform: [{ scale: ctaPress.scale }] },
-                ]}
-              >
+              {/* Fades between enabled and dimmed rather than snapping. */}
+              <ReanimatedAnimated.View style={[styles.buttonFadeLayer, startEnabledFade]}>
                 <Animated.View
-                  pointerEvents="none"
                   style={[
-                    StyleSheet.absoluteFill,
-                    styles.hoverWash,
-                    { opacity: ctaHover.anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.12] }) },
+                    styles.primaryButtonVisual,
+                    { transform: [{ scale: ctaPress.scale }] },
                   ]}
-                />
-                <Animated.View
-                  pointerEvents="none"
-                  style={[
-                    StyleSheet.absoluteFill,
-                    styles.hoverWash,
-                    { opacity: ctaPress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
-                  ]}
-                />
-                <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>Start session</Text>
-                <View style={styles.buttonArrow}>
-                  <ArrowUpIconGraphic size={24} />
-                </View>
-              </Animated.View>
+                >
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[
+                      StyleSheet.absoluteFill,
+                      styles.hoverWash,
+                      { opacity: ctaHover.anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.12] }) },
+                    ]}
+                  />
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[
+                      StyleSheet.absoluteFill,
+                      styles.hoverWash,
+                      { opacity: ctaPress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
+                    ]}
+                  />
+                  <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>Start session</Text>
+                  <View style={styles.buttonArrow}>
+                    <ArrowUpIconGraphic size={24} />
+                  </View>
+                </Animated.View>
+              </ReanimatedAnimated.View>
             </Pressable>
             </ReanimatedAnimated.View>
           </ReanimatedAnimated.ScrollView>
@@ -2635,36 +2630,37 @@ export default function EnergyCheckInScreen() {
                     accessibilityRole="button"
                     accessibilityLabel={isLastExercise ? 'Finish session' : 'Next exercise'}
                   >
-                    <Animated.View
-                      style={[
-                        styles.primaryButtonVisual,
-                        (!currentExerciseTimerDone || isFinishingSession) && styles.primaryButtonDisabled,
-                        { transform: [{ scale: finishPress.scale }] },
-                      ]}
-                    >
+                    <ReanimatedAnimated.View style={[styles.buttonFadeLayer, finishEnabledFade]}>
                       <Animated.View
-                        pointerEvents="none"
                         style={[
-                          StyleSheet.absoluteFill,
-                          styles.hoverWash,
-                          { opacity: finishHover.anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.12] }) },
+                          styles.primaryButtonVisual,
+                          { transform: [{ scale: finishPress.scale }] },
                         ]}
-                      />
-                      <Animated.View
-                        pointerEvents="none"
-                        style={[
-                          StyleSheet.absoluteFill,
-                          styles.hoverWash,
-                          { opacity: finishPress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
-                        ]}
-                      />
-                      <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>
-                        {isLastExercise ? 'Finish session' : 'Next exercise'}
-                      </Text>
-                      <View style={styles.buttonArrow}>
-                        <ArrowUpIconGraphic size={24} />
-                      </View>
-                    </Animated.View>
+                      >
+                        <Animated.View
+                          pointerEvents="none"
+                          style={[
+                            StyleSheet.absoluteFill,
+                            styles.hoverWash,
+                            { opacity: finishHover.anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.12] }) },
+                          ]}
+                        />
+                        <Animated.View
+                          pointerEvents="none"
+                          style={[
+                            StyleSheet.absoluteFill,
+                            styles.hoverWash,
+                            { opacity: finishPress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
+                          ]}
+                        />
+                        <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>
+                          {isLastExercise ? 'Finish session' : 'Next exercise'}
+                        </Text>
+                        <View style={styles.buttonArrow}>
+                          <ArrowUpIconGraphic size={24} />
+                        </View>
+                      </Animated.View>
+                    </ReanimatedAnimated.View>
                   </Pressable>
               </ReanimatedAnimated.View>
             ) : (
@@ -4370,8 +4366,12 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       alignItems: 'center',
       justifyContent: 'center',
     },
-    primaryButtonDisabled: {
-      opacity: 0.5,
+    // Holds a primary button's visual and fades it between enabled and
+    // dimmed (useEnabledFadeStyle) — the visual itself animates press scale
+    // on the older Animated API, so the Reanimated fade sits around it.
+    buttonFadeLayer: {
+      width: '100%',
+      height: '100%',
     },
     primaryText: {
       color: '#ffffff',

@@ -13,9 +13,9 @@ import { scheduleOnRN } from 'react-native-worklets';
 
 import { Type } from '@/constants/theme';
 import { scaleCanvasStyles, useCanvasUnit } from '@/lib/canvas-scale';
-import { hapticSelect } from '@/lib/haptics';
+import { hapticForEnergyLevel, hapticSelect } from '@/lib/haptics';
 import { MOTION_DURATION, MOTION_EASING } from '@/lib/motion';
-import { useAppColors } from '@/lib/theme-context';
+import { useAppColors, useAppTheme } from '@/lib/theme-context';
 
 const isGlassAvailable = isLiquidGlassAvailable();
 
@@ -52,6 +52,14 @@ export const MOOD_COLORS: Record<EnergyScore, string> = {
   3: '#D9B23C',
   4: '#8FBF5C',
   5: '#5FBE84',
+};
+
+/** The readout label in the picked level's own color. The light-theme tones
+ * are deeper versions of MOOD_COLORS: Okay's yellow and Good's lime are
+ * unreadable as text on a white page. */
+const MOOD_TEXT_COLORS: Record<'light' | 'dark', Record<EnergyScore, string>> = {
+  dark: MOOD_COLORS,
+  light: { 1: '#C8393E', 2: '#B85A1C', 3: '#8C6D0F', 4: '#4F7F25', 5: '#3A7A55' },
 };
 
 const SEGMENT_COUNT = LEVELS.length;
@@ -94,6 +102,7 @@ type EnergyGaugeProps = {
  */
 export function EnergyGauge({ size = 260, value, onChange, previousValue = null }: EnergyGaugeProps) {
   const colors = useAppColors();
+  const { resolvedScheme } = useAppTheme();
   // Inside a fixed-canvas screen every length is in canvas units (see
   // canvas-scale.ts): the track's geometry below is worked out in those
   // units, then converted to real points, so layout and touch math agree.
@@ -146,6 +155,11 @@ export function EnergyGauge({ size = 260, value, onChange, previousValue = null 
     if (tick) hapticSelect();
     onChange(LEVELS[idx].score);
   };
+  // Letting go lands with a tap weighted by the level (see
+  // hapticForEnergyLevel) — the per-segment ticks above are the drag itself.
+  const releaseFromGesture = (idx: number) => {
+    hapticForEnergyLevel(LEVELS[idx].score);
+  };
 
   // BUG FIX: the pan used to select on onBegin — the instant a finger
   // touched down, before it was known whether this was a drag across the
@@ -177,6 +191,10 @@ export function EnergyGauge({ size = 260, value, onChange, previousValue = null 
             gestureOwnsSelection.set(true);
             scheduleOnRN(reportFromGesture, idx, true);
           }
+        })
+        .onEnd(() => {
+          const idx = lastIndex.get();
+          if (idx >= 0) scheduleOnRN(releaseFromGesture, idx);
         });
       const tap = Gesture.Tap().onEnd((e, success) => {
         if (!success) return;
@@ -184,7 +202,8 @@ export function EnergyGauge({ size = 260, value, onChange, previousValue = null 
         const changed = idx !== lastIndex.get();
         lastIndex.set(idx);
         gestureOwnsSelection.set(true);
-        scheduleOnRN(reportFromGesture, idx, changed);
+        scheduleOnRN(reportFromGesture, idx, false);
+        if (changed) scheduleOnRN(releaseFromGesture, idx);
       });
       return Gesture.Race(pan, tap);
     },
@@ -280,7 +299,10 @@ export function EnergyGauge({ size = 260, value, onChange, previousValue = null 
         <Text style={styles.readoutValue} maxFontSizeMultiplier={1.2}>
           {selected ? selected.score : '—'}
         </Text>
-        <Text style={styles.readoutLabel} maxFontSizeMultiplier={1.3}>
+        <Text
+          style={[styles.readoutLabel, selected && { color: MOOD_TEXT_COLORS[resolvedScheme][selected.score] }]}
+          maxFontSizeMultiplier={1.3}
+        >
           {selected ? selected.label : 'Drag to check in'}
         </Text>
       </View>

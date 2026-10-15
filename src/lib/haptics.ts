@@ -54,6 +54,20 @@ export function hapticImpactMedium() {
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
 }
 
+/** Letting go of the energy gauge: weighted by the level picked, from a soft
+ * touch at Empty to a firm one at Great, so the choice is felt as well as seen. */
+export function hapticForEnergyLevel(level: 1 | 2 | 3 | 4 | 5) {
+  if (Platform.OS === 'web' || !hapticsEnabled) return;
+  const style = [
+    Haptics.ImpactFeedbackStyle.Soft,
+    Haptics.ImpactFeedbackStyle.Light,
+    Haptics.ImpactFeedbackStyle.Medium,
+    Haptics.ImpactFeedbackStyle.Rigid,
+    Haptics.ImpactFeedbackStyle.Heavy,
+  ][level - 1];
+  Haptics.impactAsync(style).catch(() => {});
+}
+
 /** For a validation error (bad email, incomplete code, empty required field). */
 export function hapticError() {
   if (Platform.OS === 'web' || !hapticsEnabled) return;

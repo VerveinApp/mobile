@@ -1,3 +1,4 @@
+import { cleanReps, formatExerciseMinutes } from '@/lib/exercise-format';
 import { getAllExercisePerformances, type ExercisePerformance } from '@/lib/exercise-performance';
 import type { PlanExercise } from '@/lib/plan-preview';
 import type { UnitSystem } from '@/lib/unit-preference';
@@ -165,14 +166,6 @@ function realSets(exercise: SummaryPlanFields): number | null {
   return typeof exercise.sets === 'number' && exercise.sets > 0 ? exercise.sets : null;
 }
 
-/** 481 library entries carry their rep text wrapped in literal quotes
- * ('"8/side"'), some with only the opening one — shown without them. */
-function cleanReps(reps: number | string | null): string | null {
-  if (reps === null) return null;
-  const text = String(reps).replace(/^"+|"+$/g, '').trim();
-  return text === '' ? null : text;
-}
-
 /** Same precedence as check-in.tsx's formatExerciseStat: sets × reps, then
  * sets × a timed hold, then a bare count or duration — never a number the
  * plan didn't produce. A 0-minute duration is volume-scaling's rounding gap,
@@ -181,12 +174,11 @@ function describeVolume(exercise: SummaryPlanFields): { text: string; spoken: st
   const sets = realSets(exercise);
   const reps = cleanReps(exercise.reps);
   const minutes = exercise.durationMin ? exercise.durationMin : null;
+  const time = minutes !== null ? formatExerciseMinutes(minutes) : null;
   if (sets !== null && reps !== null) return { text: `${sets} × ${reps}`, spoken: `${plural(sets, 'set')} of ${reps}` };
-  if (sets !== null && minutes !== null) {
-    return { text: `${sets} × ${minutes} min`, spoken: `${plural(sets, 'set')} of ${plural(minutes, 'minute')}` };
-  }
+  if (sets !== null && time !== null) return { text: `${sets} × ${time}`, spoken: `${plural(sets, 'set')} of ${time}` };
   if (sets !== null) return { text: plural(sets, 'set'), spoken: plural(sets, 'set') };
-  if (minutes !== null) return { text: `${minutes} min`, spoken: plural(minutes, 'minute') };
+  if (time !== null) return { text: time, spoken: time };
   return null;
 }
 
