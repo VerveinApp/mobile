@@ -64,3 +64,12 @@ export const LIST_ROW_EXITING = FadeOut.duration(MOTION_DURATION.fast).easing(MO
 /** The entering half of the pair — a newly revealed option or row fades in
  * while LIST_ROW_LAYOUT springs everything below it out of the way. */
 export const LIST_ROW_ENTERING = FadeIn.duration(MOTION_DURATION.base).easing(MOTION_EASING.standard);
+/** LIST_ROW_ENTERING starting `delayMs` later, for rows revealed one after
+ * another. A fresh builder per call: Reanimated's .delay() sets the delay
+ * on the builder it's called on, so LIST_ROW_ENTERING.delay(n) would delay
+ * every other list using the shared constant too. */
+export function listRowEnteringAfter(delayMs: number) {
+  return FadeIn.duration(MOTION_DURATION.base).easing(MOTION_EASING.standard).delay(delayMs);
+}
+/** The gap between consecutive rows in a staggered reveal. */
+export const LIST_ROW_STAGGER_MS = 50;

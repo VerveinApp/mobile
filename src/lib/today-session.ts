@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { EnergyScore } from '@/components/home/energy-gauge';
 import { localDateStr } from '@/lib/local-date';
+import type { SessionSummary } from '@/lib/session-summary';
 import type { UnitSystem } from '@/lib/unit-preference';
 import type { BodyArea, PlanExercise } from '@/lib/plan-preview';
 
@@ -103,6 +104,12 @@ export type TodaySession = {
    * at Finish needs a real start time, and a resumed session used to skip
    * that write entirely for lack of one. */
   startedAt?: string;
+  /** What the finished session was — time trained and each completed
+   * exercise with what was logged — saved at Finish so reopening the
+   * check-in (Home's "View summary") shows the same done-screen summary,
+   * not just the checkmark. Undefined until Finish, and on sessions
+   * finished before this field existed; see session-summary.ts. */
+  summary?: SessionSummary;
 };
 
 /** Everything but the date, which is always "today" when saving. */

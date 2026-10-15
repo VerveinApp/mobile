@@ -261,7 +261,7 @@ export default function ProfileScreen() {
           onRequestClose={handleCancelEditName}
           statusBarTranslucent
         >
-          <Pressable style={styles.editNameBackdrop} onPress={handleCancelEditName}>
+          <Pressable style={styles.editNameBackdrop} onPress={handleCancelEditName} accessible={false}>
             {/* BUG FIX (found in a later full-app audit): this modal has no
                 keyboard-avoidance at all — the card is vertically centered
                 with an auto-focused TextInput, so the keyboard could
@@ -271,7 +271,16 @@ export default function ProfileScreen() {
               behavior={Platform.OS === 'ios' ? 'padding' : undefined}
               style={styles.editNameKeyboardWrap}
             >
-            <Pressable style={styles.editNameCard} onPress={() => {}}>
+            <Pressable
+              style={styles.editNameCard}
+              onPress={() => {}}
+              // The backdrop and card are only tap targets for closing; without
+              // these, VoiceOver read the whole dialog as one element and its
+              // buttons couldn't be reached on their own.
+              accessible={false}
+              accessibilityViewIsModal
+              onAccessibilityEscape={handleCancelEditName}
+            >
               <Text style={styles.editNameTitle} maxFontSizeMultiplier={1.3}>Edit your name</Text>
               <TextInput
                 style={styles.editNameInput}

@@ -93,6 +93,13 @@ import {
 import { SYMPTOM_TAG_LABELS, SYMPTOM_TAGS, type SymptomTag } from '@/lib/symptom-tags';
 import { TIME_AVAILABLE_LABELS, TIME_AVAILABLE_OPTIONS } from '@/lib/time-available';
 import { getTodaySession, saveTodaySession, type TodaySession, type TodaySessionInput } from '@/lib/today-session';
+import {
+  buildSessionSummary,
+  loadUnsavedSummarySource,
+  summaryFromWorkoutLog,
+  type SessionSummary,
+} from '@/lib/session-summary';
+import { SessionSummaryCard } from '@/components/session/session-summary-card';
 import { getUnitSystem, type UnitSystem } from '@/lib/unit-preference';
 import { useCountTo } from '@/lib/use-count-to';
 import { getProfile, updateProfile, type UserProfile } from '@/lib/user-profile';
@@ -367,6 +374,10 @@ export default function EnergyCheckInScreen() {
   // earned, never a streak" rule.
   const [postSessionNote, setPostSessionNote] = useState<string | null>(null);
   const [estimatedCalories, setEstimatedCalories] = useState<number | null>(null);
+  // The done screen's "what you did" — built at Finish and saved with
+  // today's session, so reopening a finished day (Home's "View summary")
+  // shows it too. See session-summary.ts.
+  const [sessionSummary, setSessionSummary] = useState<SessionSummary | null>(null);
   // Entirely optional, per exercise — most sessions will log none of these.
   // Keyed by exercise index (same indexing preview.exercises/
   // completedExercises already use), raw string from the input so an
@@ -563,6 +574,7 @@ export default function EnergyCheckInScreen() {
           setPreferredBodyArea(loadedTodaySession.preferredBodyArea ?? null);
           setEquipmentOverride(loadedTodaySession.equipmentOverride ?? null);
           setSessionState(loadedTodaySession.completed ? 'done' : 'resolved');
+          setSessionSummary(loadedTodaySession.summary ?? null);
           // Restored regardless of completed/resolved — this feeds preview's
           // computation either way, not just the done-screen display fields.
           // Re-applies the same M4 two-step-disclosure rule handleEnergyChange
@@ -1030,6 +1042,21 @@ export default function EnergyCheckInScreen() {
       setLastPerformanceByName(Object.fromEntries(entries));
     })();
   }, [sessionExercises]);
+  // A day finished before summaries were saved gets one rebuilt from what
+  // was stored anyway (see summaryFromWorkoutLog), so "View summary" never
+  // opens to just a checkmark.
+  const isDoneWithoutSummary = sessionState === 'done' && sessionSummary === null && sessionExercises.length > 0;
+  useEffect(() => {
+    if (!isDoneWithoutSummary) return;
+    let cancelled = false;
+    (async () => {
+      const source = await loadUnsavedSummarySource(localDateStr());
+      if (!cancelled && source) setSessionSummary(summaryFromWorkoutLog(source.log, sessionExercises, source.weightsKgByName));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isDoneWithoutSummary, sessionExercises]);
   const isLastExercise = preview ? currentExerciseIndex >= preview.exercises.length - 1 : false;
   // Derived, not separately tracked — completedExercises is already the
   // real source of truth for "is this one done," so there's no second copy
@@ -1242,6 +1269,7 @@ export default function EnergyCheckInScreen() {
     planEquipment: frozenEquipment,
     planDaysSinceLastCheckIn: frozenGap?.days,
     startedAt: sessionStartedAtRef.current?.toISOString(),
+    summary: sessionSummary ?? undefined,
   });
 
   // BUG FIX (found in a later full-app audit): loggedWeightsKg used to live
@@ -1331,7 +1359,17 @@ export default function EnergyCheckInScreen() {
     // Re-passes the same tags/time/finisher choice picked at Start —
     // saveTodaySession replaces the whole record each call, so omitting any
     // of them would silently wipe them.
-    saveTodaySession(todaySessionBase(energy, true));
+    // Built before anything below clears the typed weights it reads.
+    const summary = buildSessionSummary({
+      exercises: sessionExercises,
+      completed: completedExercises,
+      loggedWeights: loggedWeightsKg,
+      weightUnit,
+      startedAt: sessionStartedAtRef.current,
+      finishedAt: new Date(),
+    });
+    setSessionSummary(summary);
+    saveTodaySession({ ...todaySessionBase(energy, true), summary });
     const finalExercises = buildWorkoutLogExercises(completedExercises);
     const status = getCompletionStatus(finalExercises);
     const completedSomething = status !== 'skipped';
@@ -2165,8 +2203,17 @@ export default function EnergyCheckInScreen() {
             >
               {/* A Modal presents in its own window — it was never under the canvas transform, so it stays unscaled. */}
               <CanvasScaleContext value={1}>
-              <Pressable style={rawStyles.skipConfirmBackdrop} onPress={handleCancelSkip}>
-                <Pressable style={rawStyles.skipConfirmCard} onPress={() => {}}>
+              <Pressable style={rawStyles.skipConfirmBackdrop} onPress={handleCancelSkip} accessible={false}>
+                <Pressable
+                  style={rawStyles.skipConfirmCard}
+                  onPress={() => {}}
+                  // The backdrop and card are only tap targets for closing; without
+                  // these, VoiceOver read the whole dialog as one element and its
+                  // buttons couldn't be reached on their own.
+                  accessible={false}
+                  accessibilityViewIsModal
+                  onAccessibilityEscape={handleCancelSkip}
+                >
                   <Text style={rawStyles.skipConfirmTitle} maxFontSizeMultiplier={1.3}>
                     Skip this exercise?
                   </Text>
@@ -2223,8 +2270,17 @@ export default function EnergyCheckInScreen() {
             >
               {/* A Modal presents in its own window — it was never under the canvas transform, so it stays unscaled. */}
               <CanvasScaleContext value={1}>
-              <Pressable style={rawStyles.skipConfirmBackdrop} onPress={handleCloseSwap}>
-                <Pressable style={rawStyles.swapModalCard} onPress={() => {}}>
+              <Pressable style={rawStyles.skipConfirmBackdrop} onPress={handleCloseSwap} accessible={false}>
+                <Pressable
+                  style={rawStyles.swapModalCard}
+                  onPress={() => {}}
+                  // The backdrop and card are only tap targets for closing; without
+                  // these, VoiceOver read the whole dialog as one element and its
+                  // buttons couldn't be reached on their own.
+                  accessible={false}
+                  accessibilityViewIsModal
+                  onAccessibilityEscape={handleCloseSwap}
+                >
                   <Text style={rawStyles.skipConfirmTitle} maxFontSizeMultiplier={1.3}>
                     Swap this exercise
                   </Text>
@@ -2373,6 +2429,8 @@ export default function EnergyCheckInScreen() {
                 ~{estimatedCalories} cal · estimated
               </Text>
             ) : null}
+
+            {sessionSummary ? <SessionSummaryCard summary={sessionSummary} unit={weightUnit} /> : null}
 
             {/* Same pressable-sentence pattern as the "See Progress" and
                 "Invite a friend" lines — an offer, not a modal. */}

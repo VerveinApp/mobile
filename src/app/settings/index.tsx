@@ -1012,8 +1012,17 @@ export default function SettingsScreen() {
             onRequestClose={handleCancelImport}
             statusBarTranslucent
           >
-            <Pressable style={styles.importBackdrop} onPress={handleCancelImport}>
-              <Pressable style={styles.importCard} onPress={() => {}}>
+            <Pressable style={styles.importBackdrop} onPress={handleCancelImport} accessible={false}>
+              <Pressable
+                style={styles.importCard}
+                onPress={() => {}}
+                // The backdrop and card are only tap targets for closing; without
+                // these, VoiceOver read the whole dialog as one element and its
+                // buttons couldn't be reached on their own.
+                accessible={false}
+                accessibilityViewIsModal
+                onAccessibilityEscape={handleCancelImport}
+              >
                 {importStep === 'paste' ? (
                   <>
                     <Text style={styles.importTitle} maxFontSizeMultiplier={1.3}>Import My Data</Text>
@@ -1105,8 +1114,17 @@ export default function SettingsScreen() {
             onRequestClose={handleCancelDeleteData}
             statusBarTranslucent
           >
-            <Pressable style={styles.importBackdrop} onPress={handleCancelDeleteData}>
-              <Pressable style={styles.importCard} onPress={() => {}}>
+            <Pressable style={styles.importBackdrop} onPress={handleCancelDeleteData} accessible={false}>
+              <Pressable
+                style={styles.importCard}
+                onPress={() => {}}
+                // The backdrop and card are only tap targets for closing; without
+                // these, VoiceOver read the whole dialog as one element and its
+                // buttons couldn't be reached on their own.
+                accessible={false}
+                accessibilityViewIsModal
+                onAccessibilityEscape={handleCancelDeleteData}
+              >
                 <Text style={styles.importTitle} maxFontSizeMultiplier={1.3}>Delete all your data?</Text>
                 <Text style={styles.importBody} maxFontSizeMultiplier={1.4}>
                   {accountEmail
@@ -1192,8 +1210,17 @@ export default function SettingsScreen() {
             onRequestClose={handleCancelDeleteAccount}
             statusBarTranslucent
           >
-            <Pressable style={styles.importBackdrop} onPress={handleCancelDeleteAccount}>
-              <Pressable style={styles.importCard} onPress={() => {}}>
+            <Pressable style={styles.importBackdrop} onPress={handleCancelDeleteAccount} accessible={false}>
+              <Pressable
+                style={styles.importCard}
+                onPress={() => {}}
+                // The backdrop and card are only tap targets for closing; without
+                // these, VoiceOver read the whole dialog as one element and its
+                // buttons couldn't be reached on their own.
+                accessible={false}
+                accessibilityViewIsModal
+                onAccessibilityEscape={handleCancelDeleteAccount}
+              >
                 <Text style={styles.importTitle} maxFontSizeMultiplier={1.3}>Delete your account?</Text>
                 <Text style={styles.importBody} maxFontSizeMultiplier={1.4}>
                   This permanently deletes the sign-in for {accountEmail} — it can&apos;t be undone. Your on-device
@@ -1244,8 +1271,17 @@ export default function SettingsScreen() {
             onRequestClose={handleCancelEditName}
             statusBarTranslucent
           >
-            <Pressable style={styles.importBackdrop} onPress={handleCancelEditName}>
-              <Pressable style={styles.importCard} onPress={() => {}}>
+            <Pressable style={styles.importBackdrop} onPress={handleCancelEditName} accessible={false}>
+              <Pressable
+                style={styles.importCard}
+                onPress={() => {}}
+                // The backdrop and card are only tap targets for closing; without
+                // these, VoiceOver read the whole dialog as one element and its
+                // buttons couldn't be reached on their own.
+                accessible={false}
+                accessibilityViewIsModal
+                onAccessibilityEscape={handleCancelEditName}
+              >
                 <Text style={styles.importTitle} maxFontSizeMultiplier={1.3}>Edit your name</Text>
                 <TextInput
                   style={styles.nameInput}
