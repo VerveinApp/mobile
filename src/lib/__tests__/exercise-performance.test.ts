@@ -5,10 +5,13 @@ import {
   getImprovedExercises,
   getLastPerformance,
   getPerformanceHistory,
+  indexPerformancesByDate,
   recordPerformance,
   recordPerformanceBatch,
   clearExercisePerformance,
   restoreExercisePerformance,
+  selectImprovedExercises,
+  type ExercisePerformance,
 } from '@/lib/exercise-performance';
 
 const KEY = 'vervein.exercisePerformance.v1';
@@ -105,15 +108,74 @@ describe('recordPerformance', () => {
     expect(history[history.length - 1].weightKg).toBe(74);
   });
 
-  it('getImprovedExercises only lists exercises whose most recent record was a real improvement', async () => {
+  it('getImprovedExercises lists exercises with a real improvement and leaves out ones with none', async () => {
     await recordPerformance('Lunge', 20, 10);
     await recordPerformance('Lunge', 25, 10); // improved
     await recordPerformance('Curl', 15, 10);
-    await recordPerformance('Curl', 14, 10); // not improved
+    await recordPerformance('Curl', 14, 10); // not improved, and never was
     const improved = await getImprovedExercises();
     const names = improved.map((e) => e.exerciseName);
     expect(names).toContain('Lunge');
     expect(names).not.toContain('Curl');
+  });
+
+  it('getImprovedExercises keeps a lift listed after a lighter day — REGRESSION GUARD: one easy session used to drop it', async () => {
+    await recordPerformance('Lunge', 20, 10);
+    await recordPerformance('Lunge', 25, 10); // improved
+    await recordPerformance('Lunge', 22, 10); // a lighter day, not a best
+    const [lunge] = await getImprovedExercises();
+    expect(lunge.exerciseName).toBe('Lunge');
+    // `performance` stays the best itself (what Home's recap shares);
+    // `latest` is the lighter day the line ends on.
+    expect(lunge.performance.weightKg).toBe(25);
+    expect(lunge.latest.weightKg).toBe(22);
+  });
+});
+
+function record(date: string, weightKg: number, improved: boolean): ExercisePerformance {
+  return { weightKg, reps: 8, estimatedOneRepMax: weightKg * (1 + 8 / 30), date, improved };
+}
+
+describe('selectImprovedExercises', () => {
+  it('needs 2+ records — a lone record (even a migrated one flagged improved) is not a trend', () => {
+    expect(selectImprovedExercises({ Squat: [record('2026-10-01', 100, true)] })).toEqual([]);
+  });
+
+  it('orders by the most recently trained lift, then by name for a tie', () => {
+    const result = selectImprovedExercises({
+      Bench: [record('2026-10-01', 60, false), record('2026-10-03', 65, true)],
+      Squat: [record('2026-10-02', 100, false), record('2026-10-09', 110, true)],
+      Row: [record('2026-10-05', 50, false), record('2026-10-06', 55, true), record('2026-10-09', 52, false)],
+    });
+    expect(result.map((e) => e.exerciseName)).toEqual(['Row', 'Squat', 'Bench']);
+  });
+
+  it('reports the most recent best, not the first one', () => {
+    const [press] = selectImprovedExercises({
+      Press: [record('2026-10-01', 40, false), record('2026-10-02', 42, true), record('2026-10-04', 45, true), record('2026-10-06', 41, false)],
+    });
+    expect(press.performance.date).toBe('2026-10-04');
+    expect(press.latest.date).toBe('2026-10-06');
+  });
+});
+
+describe('indexPerformancesByDate', () => {
+  it('keys every record by its date, then by exercise', () => {
+    const byDate = indexPerformancesByDate({
+      Squat: [record('2026-10-01', 100, false), record('2026-10-03', 105, true)],
+      Bench: [record('2026-10-03', 60, false)],
+    });
+    expect(byDate.get('2026-10-01')?.get('Squat')?.weightKg).toBe(100);
+    expect(byDate.get('2026-10-03')?.get('Squat')?.improved).toBe(true);
+    expect(byDate.get('2026-10-03')?.get('Bench')?.weightKg).toBe(60);
+    expect(byDate.get('2026-10-02')).toBeUndefined();
+  });
+
+  it('keeps the later record when one day holds the same lift twice', () => {
+    const byDate = indexPerformancesByDate({
+      Curl: [record('2026-10-03', 10, false), record('2026-10-03', 12, true)],
+    });
+    expect(byDate.get('2026-10-03')?.get('Curl')?.weightKg).toBe(12);
   });
 });
 

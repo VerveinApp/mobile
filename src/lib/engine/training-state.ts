@@ -102,6 +102,11 @@ export function tierOf(basis: number): EvidenceTier {
 
 const BODY_AREAS: BodyArea[] = ['full', 'upper', 'lower', 'core'];
 
+/** Check-ins capacityTrend needs before it computes anything (the vault's
+ * own literal 5, named so Progress's Training Load empty state can count
+ * toward the same number instead of a second, driftable copy). */
+export const CAPACITY_TREND_MIN_WINDOW = 5;
+
 /**
  * Vervein addition — the exact "which body area needs attention most"
  * priority score plan-preview.ts's own reorderByBodyAreaPriority (M13-level,
@@ -168,7 +173,7 @@ export function compileTrainingState(history: {
 
   // --- Capacity Trend: mean(last 3) vs mean(prior 4) of the window ---
   let trend: 'improving' | 'stable' | 'declining' = 'stable';
-  if (window.length >= 5) {
+  if (window.length >= CAPACITY_TREND_MIN_WINDOW) {
     const recent = window.slice(-3).map((c) => c.energyScore);
     const earlier = window.slice(0, -3).map((c) => c.energyScore);
     const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
@@ -277,7 +282,7 @@ export function compileTrainingState(history: {
     // UI copy on Progress ("Energy trend: ..."), which the vault itself
     // never did (its own comment: capacityTrend has "no user-facing voice
     // yet").
-    capacityTrend: { value: trend, basis: window.length, tier: window.length >= 5 ? tierOf(window.length) : 'insufficient' },
+    capacityTrend: { value: trend, basis: window.length, tier: window.length >= CAPACITY_TREND_MIN_WINDOW ? tierOf(window.length) : 'insufficient' },
     rollingWindow: {
       value: {
         days: window.map((c) => ({ date: c.date, energyScore: c.energyScore, skipped: c.skipped })),

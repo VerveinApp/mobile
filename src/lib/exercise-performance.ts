@@ -124,20 +124,68 @@ export async function restoreExercisePerformance(all: Record<string, ExercisePer
   await writeAll(trimmed);
 }
 
+export type ImprovedExercise = {
+  exerciseName: string;
+  /** The most recent record that set a personal best — what Home's weekly
+   * recap shares as "a recent improvement," so it must never be a lighter
+   * day logged after it. */
+  performance: ExercisePerformance;
+  /** The most recent record of any kind — where the trend line ends. */
+  latest: ExercisePerformance;
+};
+
 /**
- * Every exercise whose most recently logged record was a real improvement
- * — Progress's "getting stronger" list reads this directly rather than
- * recomputing anything, since the improvement was already decided (and
- * persisted) at the moment it was logged. Sorted by name for a stable,
- * predictable list rather than insertion order (a Record's own key order
- * isn't something to rely on for display).
+ * Pure core of getImprovedExercises, exported for its tests. Keeps a lift
+ * that made real progress anywhere in its retained history (2+ records and
+ * at least one persisted personal best), not only when its LATEST record
+ * was one. BUG FIX: a single lighter day after a best used to drop the lift
+ * from Progress's Strength Progress entirely, so the list read as progress
+ * lost, when the best (and the line showing it) were still real.
+ *
+ * Most recently trained first, so the lift someone just logged leads; ties
+ * fall back to name for a stable order (a Record's own key order isn't
+ * something to rely on for display).
  */
-export async function getImprovedExercises(): Promise<{ exerciseName: string; performance: ExercisePerformance }[]> {
-  const all = await readAll();
-  return Object.entries(all)
-    .map(([exerciseName, history]) => ({ exerciseName, performance: latestOf(history) }))
-    .filter((entry): entry is { exerciseName: string; performance: ExercisePerformance } => entry.performance?.improved === true)
-    .sort((a, b) => a.exerciseName.localeCompare(b.exerciseName));
+export function selectImprovedExercises(all: Record<string, ExercisePerformance[]>): ImprovedExercise[] {
+  const selected: ImprovedExercise[] = [];
+  for (const [exerciseName, history] of Object.entries(all)) {
+    if (history.length < 2) continue;
+    const lastBest = [...history].reverse().find((h) => h.improved);
+    if (!lastBest) continue;
+    selected.push({ exerciseName, performance: lastBest, latest: history[history.length - 1] });
+  }
+  return selected.sort((a, b) => b.latest.date.localeCompare(a.latest.date) || a.exerciseName.localeCompare(b.exerciseName));
+}
+
+/** Every exercise with real progress in its history — see
+ * selectImprovedExercises. Progress's Strength Progress list and Home's
+ * weekly recap read this directly rather than recomputing anything, since
+ * each improvement was already decided (and persisted) when it was logged. */
+export async function getImprovedExercises(): Promise<ImprovedExercise[]> {
+  return selectImprovedExercises(await readAll());
+}
+
+/**
+ * Every logged record, keyed by date and then exercise name — what Progress
+ * & History reads to show a finished day's weight × reps per exercise. One
+ * record per exercise per day; if a day somehow holds two (the same lift in
+ * one batch), the later one wins, same as getLastPerformance.
+ */
+export function indexPerformancesByDate(
+  all: Record<string, ExercisePerformance[]>
+): Map<string, Map<string, ExercisePerformance>> {
+  const byDate = new Map<string, Map<string, ExercisePerformance>>();
+  for (const [exerciseName, history] of Object.entries(all)) {
+    for (const record of history) {
+      let day = byDate.get(record.date);
+      if (!day) {
+        day = new Map();
+        byDate.set(record.date, day);
+      }
+      day.set(exerciseName, record);
+    }
+  }
+  return byDate;
 }
 
 function estimateOneRepMax(weightKg: number, reps: number): number {

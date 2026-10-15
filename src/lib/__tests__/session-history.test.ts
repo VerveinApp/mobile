@@ -186,6 +186,16 @@ describe('session-history', () => {
     expect(await getAccountStartDate()).toBeNull();
   });
 
+  it("getWeekActivity reports each finished day's own energy, and none for a day with no entry", async () => {
+    await recordSessionCompletion(true, 2, 'done');
+    await recordPastSessionCompletion(daysAgoStr(1), true, 5, 'done');
+    const { days } = await getWeekActivity([TODAY_WEEKDAY]);
+    const todayIndex = days.findIndex((d) => d.isToday);
+    expect(days[todayIndex].energy).toBe(2);
+    expect(days[todayIndex - 1].energy).toBe(5);
+    expect(days[todayIndex - 2].energy).toBeUndefined();
+  });
+
   it('getWeekActivity marks future days as completed:null and isFuture:true regardless of scheduling', async () => {
     const { days } = await getWeekActivity(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']);
     const todayIndex = days.findIndex((d) => d.isToday);

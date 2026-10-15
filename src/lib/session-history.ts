@@ -242,6 +242,11 @@ export type WeekDay = {
    * own training-load chart) don't draw a logged rest day and a genuinely
    * unknown day identically. */
   caloriesBurned?: number;
+  /** The energy checked in with that day, if any — Train's "This week's
+   * plan" labels a finished day with it ("Done · Low"). Undefined for a
+   * future day, a day with no entry, or an entry from before energy was
+   * recorded. Only getWeekActivity fills this in. */
+  energy?: EnergyScore;
 };
 
 /**
@@ -258,7 +263,8 @@ export async function getWeekActivity(scheduledDays: string[] | null): Promise<{
   const byDate = new Map(entries.map((e) => [e.date, e.completed]));
   // Full entry too, not just its `completed` flag — Home's training-load
   // chart needs that day's real caloriesBurned, same field
-  // getWeeklyCaloriesBurned already sums across the week.
+  // getWeeklyCaloriesBurned already sums across the week, and Train's week
+  // plan its energy.
   const entryByDate = new Map(entries.map((e) => [e.date, e]));
   // BUG FIX: a day is only real "scheduled" if the account actually existed
   // yet — without this floor, a brand-new account whose weekly pattern
@@ -293,6 +299,7 @@ export async function getWeekActivity(scheduledDays: string[] | null): Promise<{
       isScheduled,
       isFuture,
       caloriesBurned: isFuture ? undefined : entryByDate.get(dateStr)?.caloriesBurned,
+      energy: isFuture ? undefined : entryByDate.get(dateStr)?.energy,
     };
   });
 
