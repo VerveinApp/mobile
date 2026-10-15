@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import ReanimatedAnimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ENERGY_LABELS, MOOD_COLORS } from '@/components/home/energy-gauge';
 import { SymbolView } from '@/components/ui/app-symbol';
 
 import { TodaysTrainingCard } from '@/components/home/todays-training-card';
@@ -366,12 +367,24 @@ export default function TrainScreen() {
                       <Text style={styles.planRowLabel} maxFontSizeMultiplier={1.3}>{sessionLabel}</Text>
                     </View>
                     {isDone ? (
-                      <View style={styles.planRowDone}>
+                      <View
+                        style={styles.planRowDone}
+                        accessible
+                        accessibilityLabel={weekDay.energy ? `Done, at ${ENERGY_LABELS[weekDay.energy]} energy` : 'Done'}
+                      >
                         <SymbolView name="checkmark.circle.fill" size={13} tintColor="#5FBE84" />
-                        <Text style={styles.planRowMeta} maxFontSizeMultiplier={1.3}>Done</Text>
+                        <Text style={styles.planRowMeta} maxFontSizeMultiplier={1.3}>
+                          Done{weekDay.energy ? ` · ${ENERGY_LABELS[weekDay.energy]}` : ''}
+                        </Text>
+                        {/* The level it was trained at, in the gauge's own color. */}
+                        {weekDay.energy ? (
+                          <View style={[styles.planRowEnergyDot, { backgroundColor: MOOD_COLORS[weekDay.energy] }]} />
+                        ) : null}
                       </View>
                     ) : isPast ? (
-                      <Text style={styles.planRowMeta} maxFontSizeMultiplier={1.3}>—</Text>
+                      // A scheduled day that passed without a session reads
+                      // as rest, never as a gap to make up.
+                      <Text style={styles.planRowMeta} maxFontSizeMultiplier={1.3}>Rest</Text>
                     ) : (
                       <Text style={styles.planRowMeta} maxFontSizeMultiplier={1.3}>
                         Est. {rowExerciseCount} exercises · {rowDurationMin} min
@@ -553,6 +566,11 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 5,
+    },
+    planRowEnergyDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
     },
     // A scheduled day that's already passed without a logged session —
     // quieted, not flagged: nothing to act on, no ledger to keep.

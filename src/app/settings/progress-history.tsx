@@ -7,7 +7,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SymbolView } from '@/components/ui/app-symbol';
 
 import { LogPastSessionSheet } from '@/components/settings/log-past-session-sheet';
-import { Type } from '@/constants/theme';
+import { TabularNums, Type } from '@/constants/theme';
+import { ENERGY_LABELS, MOOD_COLORS } from '@/components/home/energy-gauge';
+import type { FeedbackResponse } from '@/lib/engine/types';
+import { getAllExercisePerformances, indexPerformancesByDate, type ExercisePerformance } from '@/lib/exercise-performance';
+import { getUnitSystem, type UnitSystem } from '@/lib/unit-preference';
+import { formatWeight } from '@/lib/weight-units';
 import { useHoverFade, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight, hapticSelect } from '@/lib/haptics';
 import { useFadeInEntering } from '@/lib/screen-transitions';
@@ -86,6 +91,9 @@ export default function ProgressHistoryScreen() {
   // shouldn't silently re-collapse a month the user opened by hand).
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set());
   const hasSetDefaultExpandedMonth = useRef(false);
+  const [unit, setUnit] = useState<UnitSystem>('imperial');
+  // Each day's logged weight × reps per exercise, for the expanded log.
+  const [performancesByDate, setPerformancesByDate] = useState<Map<string, Map<string, ExercisePerformance>>>(new Map());
 
   // Shared by the initial load and the "Log a Past Session" sheet's onSaved
   // callback — a fresh read from storage rather than optimistically
@@ -93,11 +101,14 @@ export default function ProgressHistoryScreen() {
   // existing day's entry (see its own alreadyLogged warning), not only
   // appended a new one.
   const loadHistory = useCallback(async () => {
-    const [history, logs, profile] = await Promise.all([
+    const [history, logs, profile, performances] = await Promise.all([
       getSessionHistory(),
       getAllWorkoutLogs(),
       getProfile(),
+      getAllExercisePerformances(),
     ]);
+    setUnit(await getUnitSystem());
+    setPerformancesByDate(indexPerformancesByDate(performances));
     const trainingDays = profile?.days ? profile.days.split(',') : null;
     setEntries(history);
     setWorkoutLogs(new Map(logs.map((l) => [l.date, l.exercises])));
@@ -281,6 +292,8 @@ export default function ProgressHistoryScreen() {
                               key={entry.date}
                               entry={entry}
                               exercises={workoutLogs.get(entry.date)}
+                              performances={performancesByDate.get(entry.date)}
+                              unit={unit}
                               isLast={index === group.entries.length - 1}
                               isTarget={entry.date === targetDate}
                               styles={styles}
@@ -303,10 +316,21 @@ export default function ProgressHistoryScreen() {
   );
 }
 
+// The post-session answer, as the check-in's own buttons word it.
+const FEEDBACK_LABELS: Record<FeedbackResponse, string> = {
+  much_too_easy: 'Way too easy',
+  too_easy: 'Too easy',
+  just_right: 'Just right',
+  too_hard: 'Too hard',
+  much_too_hard: 'Way too hard',
+};
+
 /** One history row — swipe left to reveal a delete action, matching iOS's native list-row convention. Tapping the row (when a per-exercise log exists for that day) expands the real workout log below it. */
 function HistoryRow({
   entry,
   exercises,
+  performances,
+  unit,
   isLast,
   isTarget,
   styles,
@@ -315,6 +339,9 @@ function HistoryRow({
 }: {
   entry: SessionHistoryEntry;
   exercises: WorkoutLogExercise[] | undefined;
+  /** What was lifted that day, by exercise name. */
+  performances: Map<string, ExercisePerformance> | undefined;
+  unit: UnitSystem;
   isLast: boolean;
   /** True for the one day someone tapped from Progress's own calendar to
    * get here — starts pre-expanded (if it has a real log) and gets a
@@ -379,6 +406,23 @@ function HistoryRow({
             </Text>
           </View>
         </View>
+        {entry.completed && (entry.energy || entry.feedback) ? (
+          <View style={styles.entryMetaRow}>
+            {entry.energy ? (
+              <>
+                <View style={[styles.entryEnergyDot, { backgroundColor: MOOD_COLORS[entry.energy] }]} />
+                <Text style={styles.entryMetaText} maxFontSizeMultiplier={1.2}>
+                  {ENERGY_LABELS[entry.energy]} energy
+                </Text>
+              </>
+            ) : null}
+            {entry.feedback ? (
+              <Text style={styles.entryMetaText} maxFontSizeMultiplier={1.2}>
+                {entry.energy ? ' · ' : ''}Felt {FEEDBACK_LABELS[entry.feedback].toLowerCase()}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
         {entry.notes ? (
           <Text style={styles.entryNote} numberOfLines={2} maxFontSizeMultiplier={1.3}>
             {entry.notes}
@@ -412,6 +456,16 @@ function HistoryRow({
                 >
                   {exercise.name}
                 </Text>
+                {performances?.get(exercise.name) ? (
+                  <Text style={styles.logExerciseLift} maxFontSizeMultiplier={1.2}>
+                    {formatWeight(performances.get(exercise.name)!.weightKg, unit)} × {performances.get(exercise.name)!.reps}
+                  </Text>
+                ) : null}
+                {performances?.get(exercise.name)?.improved ? (
+                  <Text style={styles.logExerciseBest} maxFontSizeMultiplier={1.2}>
+                    Best
+                  </Text>
+                ) : null}
               </View>
             ))}
           </View>
@@ -596,6 +650,34 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       flex: 1,
       color: colors.textSecondary,
       fontSize: Type.secondary,
+      fontFamily: 'Geist-Medium',
+    },
+    logExerciseLift: {
+      color: colors.textTertiary,
+      fontSize: Type.caption,
+      fontFamily: 'Geist-SemiBold',
+      ...TabularNums,
+    },
+    logExerciseBest: {
+      color: colors.accentText,
+      fontSize: Type.micro,
+      fontFamily: 'Geist-SemiBold',
+      letterSpacing: 0.3,
+    },
+    entryMetaRow: {
+      marginTop: 4,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    entryEnergyDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+    },
+    entryMetaText: {
+      color: colors.textTertiary,
+      fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
     },
     logExerciseNameSkipped: {
