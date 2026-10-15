@@ -1,4 +1,4 @@
-import { BACKUP_VERSION, parseBackupPayload, type BackupPayload } from '@/lib/data-backup';
+import { BACKUP_VERSION, parseBackupPayload, restoredStartDate, type BackupPayload } from '@/lib/data-backup';
 
 function makeValidPayload(overrides: Partial<BackupPayload> = {}): BackupPayload {
   return {
@@ -166,5 +166,38 @@ describe('BACKUP_VERSION guard', () => {
         'nutritionLog',
       ].sort()
     );
+  });
+});
+
+describe('restoredStartDate', () => {
+  const session = (date: string) => ({ date, completed: true });
+  const log = (date: string) => ({ date, exercises: [] });
+
+  it("uses the backup's own start date when it's the earliest", () => {
+    const payload = makeValidPayload({ accountStartDate: '2026-08-01', sessionHistory: [session('2026-08-03')] });
+    expect(restoredStartDate(payload)).toBe('2026-08-01');
+  });
+
+  it('falls back to the oldest history day for a backup made before start dates were exported', () => {
+    const payload = makeValidPayload({
+      sessionHistory: [session('2026-09-10'), session('2026-08-20')],
+      workoutLog: [log('2026-08-18')],
+    });
+    expect(restoredStartDate(payload)).toBe('2026-08-18');
+  });
+
+  it('has nothing to say for a backup with no dated history', () => {
+    expect(restoredStartDate(makeValidPayload())).toBeNull();
+  });
+});
+
+describe('parseBackupPayload accountStartDate', () => {
+  it('accepts a backup with or without a start date', () => {
+    expect(parseBackupPayload(JSON.stringify(makeValidPayload({ accountStartDate: '2026-08-01' }))).ok).toBe(true);
+    expect(parseBackupPayload(JSON.stringify(makeValidPayload())).ok).toBe(true);
+  });
+
+  it('rejects a malformed start date', () => {
+    expect(parseBackupPayload(JSON.stringify(makeValidPayload({ accountStartDate: 'yesterday' }))).ok).toBe(false);
   });
 });

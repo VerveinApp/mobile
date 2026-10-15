@@ -152,6 +152,21 @@ export async function restoreOnboardingCompleted(startDate: string | null) {
   }
 }
 
+/**
+ * Moves this device's account start date back to `date` when that's
+ * earlier — an Import My Data restore, whose history can start long before
+ * onboarding finished on this phone. Never moves it later: a start date
+ * only ever widens which past days count as real history.
+ */
+export async function extendAccountStartDate(date: string) {
+  try {
+    const existing = await AsyncStorage.getItem(START_DATE_KEY);
+    if (!existing || date < existing) await AsyncStorage.setItem(START_DATE_KEY, date);
+  } catch {
+    // Worst case imported weeks stay hidden on Progress, as before this fix.
+  }
+}
+
 /** Un-does markOnboardingComplete — used by Profile's "Reset & Restart" action. */
 export async function clearOnboardingCompleted() {
   try {

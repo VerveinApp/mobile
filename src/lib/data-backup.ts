@@ -27,7 +27,12 @@ import {
 } from '@/lib/exercise-performance';
 import { clearNotes, getAllNotes, restoreNotes, type NoteEntry } from '@/lib/notes';
 import { clearNutritionLog, getNutritionLog, restoreNutritionLog, type NutritionLogEntry } from '@/lib/nutrition-log';
-import { clearOnboardingCompleted, clearOnboardingDraft } from '@/lib/onboarding-draft';
+import {
+  clearOnboardingCompleted,
+  clearOnboardingDraft,
+  extendAccountStartDate,
+  getAccountStartDate,
+} from '@/lib/onboarding-draft';
 import { clearProgressPhotos } from '@/lib/progress-photos';
 import { disableSessionReminders } from '@/lib/session-reminders';
 import {
@@ -115,6 +120,10 @@ export type BackupPayload = {
   conditionLog: ConditionLogEntry[];
   sleepLog: SleepLogEntry[];
   nutritionLog: NutritionLogEntry[];
+  /** The exporting device's account start date (YYYY-MM-DD). Optional, so
+   * backups made before it existed (same version 7) still restore; see
+   * restoredStartDate for how those are handled. */
+  accountStartDate?: string;
 };
 
 export async function buildBackupPayload(): Promise<BackupPayload> {
@@ -151,6 +160,7 @@ export async function buildBackupPayload(): Promise<BackupPayload> {
     getSleepLog(),
     getNutritionLog(),
   ]);
+  const accountStartDate = await getAccountStartDate();
   return {
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
@@ -168,7 +178,27 @@ export async function buildBackupPayload(): Promise<BackupPayload> {
     conditionLog,
     sleepLog,
     nutritionLog,
+    ...(accountStartDate ? { accountStartDate } : {}),
   };
+}
+
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The earliest day a restored backup's history covers: its own account
+ * start date, or for a backup made before that was exported, the oldest
+ * session or workout-log day in it. BUG FIX: a restore on a new phone kept
+ * that phone's start date (the day onboarding finished there), and Progress
+ * treats every day before an account's start as not yet existing, so the
+ * restored weeks were hidden. Null when the backup has no dated history.
+ */
+export function restoredStartDate(payload: Pick<BackupPayload, 'accountStartDate' | 'sessionHistory' | 'workoutLog'>): string | null {
+  const dates = [
+    payload.accountStartDate,
+    ...payload.sessionHistory.map((entry) => entry.date),
+    ...payload.workoutLog.map((entry) => entry.date),
+  ].filter((date): date is string => typeof date === 'string' && DATE_PATTERN.test(date));
+  return dates.length > 0 ? dates.reduce((earliest, date) => (date < earliest ? date : earliest)) : null;
 }
 
 export type ParseResult = { ok: true; payload: BackupPayload } | { ok: false; error: string };
@@ -250,6 +280,9 @@ export function parseBackupPayload(raw: string): ParseResult {
   if (!Array.isArray(candidate.conditionLog)) return { ok: false, error: 'Backup condition-log data is malformed.' };
   if (!Array.isArray(candidate.sleepLog)) return { ok: false, error: 'Backup sleep log is malformed.' };
   if (!Array.isArray(candidate.nutritionLog)) return { ok: false, error: 'Backup nutrition log is malformed.' };
+  if (candidate.accountStartDate !== undefined && (typeof candidate.accountStartDate !== 'string' || !DATE_PATTERN.test(candidate.accountStartDate))) {
+    return { ok: false, error: 'Backup start date is malformed.' };
+  }
   return { ok: true, payload: candidate as unknown as BackupPayload };
 }
 
@@ -279,6 +312,8 @@ export async function restoreBackupPayload(payload: BackupPayload): Promise<void
     restoreSleepLog(payload.sleepLog),
     restoreNutritionLog(payload.nutritionLog),
   ]);
+  const startDate = restoredStartDate(payload);
+  if (startDate) await extendAccountStartDate(startDate);
 }
 
 /**
