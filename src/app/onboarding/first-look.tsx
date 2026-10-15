@@ -330,7 +330,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       fontFamily: 'Geist-SemiBold',
     },
     cardLabelAccent: {
-      color: '#438C63',
+      color: colors.accentTextDeep,
     },
     // A hard-edged flat block, not another soft glass surface — the numbers
     // that matter get a deliberately different, neobrutalist treatment so

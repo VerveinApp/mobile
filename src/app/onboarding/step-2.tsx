@@ -146,7 +146,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       fontFamily: 'Geist-SemiBold',
     },
     titleAccent: {
-      color: '#438C63',
+      color: colors.accentTextDeep,
       fontSize: Type.headerTitle,
     },
     cardStack: {

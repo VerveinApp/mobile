@@ -7,7 +7,7 @@ import { SymbolView } from '@/components/ui/app-symbol';
 import { Type } from '@/constants/theme';
 import { useHoverFade, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticImpactLight } from '@/lib/haptics';
-import { deleteNote, getNote, saveNote } from '@/lib/notes';
+import { deleteNote, getNote, saveNote, setNoteArchived } from '@/lib/notes';
 import { useAppColors } from '@/lib/theme-context';
 import { SkeletonBlock } from '@/components/ui/skeleton';
 
@@ -79,11 +79,20 @@ export default function NoteEditorScreen() {
     }, AUTOSAVE_DELAY_MS);
   };
 
-  const handleDelete = () => {
+  // Archive, not delete: one stray tap on the old trash button wiped a note
+  // for good. Archived notes are a swipe away in the Archive list, where
+  // they can still be deleted for real. An empty note has nothing to keep.
+  const handleArchive = async () => {
     hapticImpactLight();
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    textRef.current = '';
-    if (id) deleteNote(id);
+    if (id) {
+      if (textRef.current.trim().length === 0) {
+        await deleteNote(id);
+      } else {
+        await saveNote(id, textRef.current);
+        await setNoteArchived(id, true);
+      }
+    }
     router.back();
   };
 
@@ -108,15 +117,15 @@ export default function NoteEditorScreen() {
           <SymbolView name="chevron.left" size={16} tintColor={colors.text} />
         </Pressable>
         <Pressable
-          onPress={handleDelete}
+          onPress={handleArchive}
           onHoverIn={deleteHover.onHoverIn}
           onHoverOut={deleteHover.onHoverOut}
           hitSlop={10}
           style={({ pressed }) => [styles.headerButton, pressed && PRESSED_DIM]}
           accessibilityRole="button"
-          accessibilityLabel="Delete note"
+          accessibilityLabel="Archive note"
         >
-          <SymbolView name="trash" size={16} tintColor={colors.iconMuted} />
+          <SymbolView name="archivebox" size={16} tintColor={colors.iconMuted} />
         </Pressable>
       </View>
 

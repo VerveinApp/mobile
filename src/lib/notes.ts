@@ -3,6 +3,21 @@ import { clearStoredValue, readJsonList, writeJsonValue } from '@/lib/storage/js
 const KEY = 'vervein.notes.v1';
 const MAX_ENTRIES = 500; // plain text is cheap — generous, not unbounded
 
+// Told after every write lands. BUG FIX: the editor saves on its way out,
+// after the list underneath has already refocused and re-read, so going
+// back could show a note's old words, or a deleted note, until the next
+// visit. The list re-reads when a write actually finishes instead.
+const listeners = new Set<() => void>();
+function notifyChanged() {
+  for (const listener of listeners) listener();
+}
+export function subscribeToNotes(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
 /**
  * Freeform, undated personal notes — deliberately separate from
  * session-history.ts's per-day `notes` field, which is always tied to a
@@ -75,11 +90,13 @@ export async function saveNote(id: string, text: string) {
     { ...existing, id, text, createdAt: existing?.createdAt ?? now, updatedAt: now },
   ].slice(-MAX_ENTRIES);
   await writeJsonValue(KEY, next);
+  notifyChanged();
 }
 
 export async function deleteNote(id: string) {
   const entries = await readJsonList<NoteEntry>(KEY);
   await writeJsonValue(KEY, entries.filter((e) => e.id !== id));
+  notifyChanged();
 }
 
 /** Archives or restores a note in place — same list, same id, just the
@@ -91,6 +108,7 @@ export async function setNoteArchived(id: string, archived: boolean) {
   const now = new Date().toISOString();
   const next = entries.map((e) => (e.id === id ? { ...e, archived, updatedAt: now } : e));
   await writeJsonValue(KEY, next);
+  notifyChanged();
 }
 
 /** Wipes every note — Settings' "Delete My Data"/"Delete Account" flows only. */

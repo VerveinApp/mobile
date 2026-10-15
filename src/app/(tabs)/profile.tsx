@@ -18,7 +18,7 @@ import {
   GOAL_LABELS,
 } from '@/lib/profile-labels';
 import { COMMITMENT_LEVELS } from '@/lib/commitment-levels';
-import { getLastPerformance } from '@/lib/exercise-performance';
+import { getPerformanceHistory } from '@/lib/exercise-performance';
 import { getUnitSystem, type UnitSystem } from '@/lib/unit-preference';
 import { getWeightLog, resolveCurrentWeightKg } from '@/lib/weight-log';
 import { useFadeInEntering } from '@/lib/screen-transitions';
@@ -92,8 +92,10 @@ export default function ProfileScreen() {
     );
     // Which exercise to look up only exists once the profile itself has
     // resolved, so this can't join the Promise.all above.
-    const lastLiftPerformance = p?.targetLiftExercise ? await getLastPerformance(p.targetLiftExercise) : null;
-    setCurrentLiftBestKg(lastLiftPerformance?.estimatedOneRepMax ?? null);
+    // BUG FIX: this read the newest record, so one lighter day shrank the
+    // goal ring as if progress had been lost. It's the best ever logged.
+    const liftHistory = p?.targetLiftExercise ? await getPerformanceHistory(p.targetLiftExercise) : [];
+    setCurrentLiftBestKg(liftHistory.length > 0 ? Math.max(...liftHistory.map((h) => h.estimatedOneRepMax)) : null);
     setLoaded(true);
   }, []);
 
@@ -706,7 +708,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors']) {
       marginBottom: 8,
     },
     goalTrendNote: {
-      color: '#438C63',
+      color: colors.accentTextDeep,
       // Was 11.5, half a pixel off goalRingSub's own 11 for the same "small
       // supporting note" role right above it.
       fontSize: Type.caption,

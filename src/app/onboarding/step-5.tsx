@@ -714,7 +714,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       fontFamily: 'Geist-SemiBold',
     },
     unitPillTextSelected: {
-      color: '#438C63',
+      color: colors.accentTextDeep,
     },
     cardWashSelected: {
       borderRadius: 6.69,

@@ -258,7 +258,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       fontFamily: 'Geist-SemiBold',
     },
     titleAccent: {
-      color: '#438C63',
+      color: colors.accentTextDeep,
       fontSize: 28,
     },
     subtitle: {

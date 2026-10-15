@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import ReanimatedAnimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -8,7 +8,8 @@ import { SymbolView } from '@/components/ui/app-symbol';
 import { Type } from '@/constants/theme';
 import { useHoverFade, PRESSED_DIM } from '@/lib/button-interactions';
 import { hapticError, hapticImpactLight } from '@/lib/haptics';
-import { getArchivedNotes, deleteNote, setNoteArchived, type NoteEntry } from '@/lib/notes';
+import { getArchivedNotes, deleteNote, setNoteArchived, subscribeToNotes, type NoteEntry } from '@/lib/notes';
+import { notePreview, noteTitle } from '@/lib/note-text';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { SkeletonCard } from '@/components/ui/skeleton';
@@ -18,13 +19,6 @@ import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 // The full-swipe action here is Unarchive (putting a note back), not Delete
 // — this is the one place a full swipe shouldn't mean "gone," since
 // everything in this list already survived one swipe gesture to get here.
-
-function noteTitle(text: string): string {
-  return text.split('\n')[0].trim();
-}
-function notePreview(text: string): string {
-  return text.split('\n').slice(1).join(' ').trim();
-}
 
 function formatNoteDate(iso: string): string {
   const d = new Date(iso);
@@ -63,6 +57,9 @@ export default function ArchiveScreen() {
   }, []);
 
   useFocusEffect(reload);
+  // Re-reads when the editor's save on the way out actually lands — see
+  // subscribeToNotes.
+  useEffect(() => subscribeToNotes(reload), [reload]);
 
   const handleDelete = async (id: string) => {
     hapticImpactLight();

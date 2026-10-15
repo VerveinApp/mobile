@@ -3452,7 +3452,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       fontFamily: 'Geist-Bold',
     },
     titleAccent: {
-      color: '#438C63',
+      color: colors.accentTextDeep,
     },
     subtitle: {
       position: 'absolute',
@@ -3491,7 +3491,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     explanationReadMore: {
       marginTop: 4,
-      color: '#438C63',
+      color: colors.accentTextDeep,
       fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
       textAlign: 'center',
@@ -3511,7 +3511,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     comparisonText: {
       marginTop: 6,
-      color: '#438C63',
+      color: colors.accentTextDeep,
       fontSize: Type.caption,
       fontFamily: 'Geist-Medium',
     },
@@ -4078,7 +4078,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       fontFamily: 'Geist-SemiBold',
     },
     plateToggleText: {
-      color: '#438C63',
+      color: colors.accentTextDeep,
       fontSize: Type.caption,
       fontFamily: 'Geist-SemiBold',
       textDecorationLine: 'underline',

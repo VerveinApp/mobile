@@ -590,7 +590,7 @@ function createStyles(
       fontFamily: 'Geist-Medium',
     },
     subtitleEmail: {
-      color: '#438C63',
+      color: colors.accentTextDeep,
     },
     cardFrame: {
       position: 'absolute',

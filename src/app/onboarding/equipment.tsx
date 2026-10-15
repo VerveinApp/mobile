@@ -350,7 +350,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       fontFamily: 'Geist-SemiBold',
     },
     chipTextSelected: {
-      color: '#438C63',
+      color: colors.accentTextDeep,
     },
     checkSlot: {
       width: 14,

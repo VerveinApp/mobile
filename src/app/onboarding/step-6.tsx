@@ -473,7 +473,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], washColo
       backgroundColor: 'rgba(67,140,99,0.18)',
     },
     pillTextSelected: {
-      color: '#438C63',
+      color: colors.accentTextDeep,
     },
     pillWash: {
       borderRadius: CARD_RADIUS,

@@ -75,5 +75,7 @@ export function formatDays(days: string | undefined): string {
   if (!days) return 'Not set';
   const selected = new Set(days.split(',').filter(Boolean));
   const ordered = DAY_ORDER.filter((d) => selected.has(d));
+  // Seven abbreviations don't fit the rows this is shown in.
+  if (ordered.length === DAY_ORDER.length) return 'Every day';
   return ordered.map((d) => DAY_ABBREVIATIONS[d]).join(', ') || 'Not set';
 }

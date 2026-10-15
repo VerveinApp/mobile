@@ -424,7 +424,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     readoutName: {
       marginTop: 2,
-      color: '#438C63',
+      color: colors.accentTextDeep,
       fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
       textAlign: 'center',

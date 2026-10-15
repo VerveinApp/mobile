@@ -243,7 +243,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     // minimum. #438C63 (the app's actual brand green, already used for
     // termsLink in create-account.tsx) computes to ~5.17:1 here instead.
     titleAccent: {
-      color: '#438C63',
+      color: colors.accentTextDeep,
     },
     subtitle: {
       position: 'absolute',
@@ -263,7 +263,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       right: 0,
       top: 492,
       paddingHorizontal: 64,
-      color: '#438C63',
+      color: colors.accentTextDeep,
       fontSize: 11.5,
       lineHeight: 17,
       textAlign: 'center',

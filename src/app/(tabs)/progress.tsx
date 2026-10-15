@@ -1001,7 +1001,9 @@ export default function ProgressScreen() {
                       style={index < improvedExercises.length - 1 ? styles.rowDivider : undefined}
                     >
                       <View style={styles.debtRow}>
-                        <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{entry.exerciseName}</Text>
+                        <Text style={[styles.balanceLabel, styles.strengthName]} numberOfLines={2} maxFontSizeMultiplier={1.3}>
+                          {entry.exerciseName}
+                        </Text>
                         <View style={styles.strengthProgressStats}>
                           <View style={styles.strengthProgressValue}>
                             {scrubbed ? null : <SymbolView name="arrow.up.right" size={12} tintColor="#5FBE84" />}
@@ -1096,6 +1098,7 @@ const PIP_SIZE = 9;
  * Reduce Motion.
  */
 function BankedSetPips({ count, play, delay }: { count: number; play: boolean; delay: number }) {
+  const { colors } = useAppTheme();
   const reducedMotion = useReducedMotion();
   const reveal = useSharedValue(reducedMotion ? 1 : 0);
   useEffect(() => {
@@ -1112,7 +1115,7 @@ function BankedSetPips({ count, play, delay }: { count: number; play: boolean; d
       {Array.from({ length: shown }, (_, index) => (
         <BankedSetPip key={index} index={index} shown={shown} reveal={reveal} />
       ))}
-      {count > shown ? <Text style={pipStyles.overflow}>+{count - shown}</Text> : null}
+      {count > shown ? <Text style={[pipStyles.overflow, { color: colors.accentText }]}>+{count - shown}</Text> : null}
     </View>
   );
 }
@@ -1140,7 +1143,6 @@ const pipStyles = StyleSheet.create({
   },
   overflow: {
     marginLeft: 2,
-    color: '#5FBE84',
     fontSize: Type.micro,
     fontFamily: 'Geist-SemiBold',
   },
@@ -1354,7 +1356,13 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], isDark: 
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
+      gap: 12,
       paddingVertical: 6,
+    },
+    // Library names run long ('1.5 Rep Bulgarian Split Squat'); they wrap
+    // instead of pushing the 1RM off the row.
+    strengthName: {
+      flex: 1,
     },
     debtValue: {
       color: colors.accentText,

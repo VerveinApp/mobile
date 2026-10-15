@@ -51,6 +51,10 @@ export const Colors = {
     // backgrounds/icon tints keep the original #5FBE84 literal, since
     // those aren't subject to the same text-contrast rule.
     accentText: '#358253',
+    // The deeper brand green (#438C63) is what links and labels use for text
+    // in dark mode (4.8:1 on the dark page), but it's 4.1:1 on white — below
+    // AA. Light mode gets the same AA-passing shade as accentText.
+    accentTextDeep: '#358253',
   },
   dark: {
     text: '#ffffff',
@@ -75,6 +79,7 @@ export const Colors = {
     // #0C0C0C) — kept unchanged, so accentText only actually diverges from
     // the shared literal in light mode.
     accentText: '#5FBE84',
+    accentTextDeep: '#438C63',
   },
 } as const;
 

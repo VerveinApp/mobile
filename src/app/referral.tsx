@@ -354,7 +354,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       alignSelf: 'flex-start',
     },
     retryText: {
-      color: '#438C63',
+      color: colors.accentTextDeep,
       fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
     },

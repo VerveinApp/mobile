@@ -800,7 +800,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     // fails the 4.5:1 text threshold. #438C63 (this same file's own
     // termsLink color) computes to ~5.17:1 here instead.
     titleAccent: {
-      color: '#438C63',
+      color: colors.accentTextDeep,
       fontSize: 32,
       letterSpacing: -0.32,
     },
@@ -1050,7 +1050,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       fontFamily: 'Geist-Regular',
     },
     termsLink: {
-      color: '#438C63',
+      color: colors.accentTextDeep,
       fontFamily: 'Geist-Medium',
     },
   });

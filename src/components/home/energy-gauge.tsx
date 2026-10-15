@@ -425,7 +425,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     },
     readoutLabel: {
       marginTop: 2,
-      color: '#438C63',
+      color: colors.accentTextDeep,
       fontSize: Type.caption,
       fontFamily: 'Geist-SemiBold',
     },

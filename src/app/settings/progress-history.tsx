@@ -101,7 +101,11 @@ export default function ProgressHistoryScreen() {
     const trainingDays = profile?.days ? profile.days.split(',') : null;
     setEntries(history);
     setWorkoutLogs(new Map(logs.map((l) => [l.date, l.exercises])));
-    setThisWeekCount((await getWeekActivity(trainingDays)).completedCount);
+    // Every session finished this week, scheduled day or not — the same
+    // count Progress shows. completedCount counts scheduled days only (it's
+    // the "3 of 4" adherence numerator), so a bonus Saturday made the two
+    // screens disagree under the same label.
+    setThisWeekCount((await getWeekActivity(trainingDays)).days.filter((day) => day.completed === true).length);
     setLoaded(true);
   }, []);
 

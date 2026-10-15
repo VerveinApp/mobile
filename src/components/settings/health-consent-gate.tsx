@@ -55,7 +55,7 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       paddingHorizontal: 4,
     },
     backText: {
-      color: '#438C63',
+      color: colors.accentTextDeep,
       fontSize: Type.body,
       fontFamily: 'Geist-SemiBold',
     },
