@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CanvasScaleContext, canvasHairline, scaleCanvasStyles, useCanvasScale } from '@/lib/canvas-scale';
@@ -23,14 +23,20 @@ import {
 } from '@/components/auth/create-account-graphics';
 import { BackArrowGraphic } from '@/components/auth/verify-email-graphics';
 import { saveOnboardingDraft } from '@/lib/onboarding-draft';
+import { EnergyGauge, type EnergyScore } from '@/components/home/energy-gauge';
+import { PlanPeek } from '@/components/plan/plan-peek';
 
 const CANVAS_WIDTH = 375;
 const CANVAS_HEIGHT = 812;
-// The feeling-good card lands this long after the screen, and its numbers
-// only start counting once it has finished arriving — one constant for both
-// so the count can't drift ahead of the card it lives in.
-const GOOD_CARD_DELAY = 380;
-const COUNT_DELAY = GOOD_CARD_DELAY + MOTION_DURATION.slow;
+// The card lands this long after the screen; once it has, the gauge moves
+// itself from Low to Good once, so the plan is seen changing before anyone
+// touches it.
+const CARD_DELAY = 150;
+const DEMO_DELAY = CARD_DELAY + MOTION_DURATION.slow + 400;
+// No account exists yet at this point in onboarding, so there's no real
+// calibration to read — the neutral default (1.0×, never adjusted) is the
+// honest starting point every new user actually has.
+const PREVIEW_CALIBRATION = { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION };
 
 /**
  * The payoff screen the entire flow is built around reaching — differentiation
@@ -71,12 +77,23 @@ export default function OnboardingFirstLookScreen() {
   // travel as far as they did when the whole canvas was magnified.
   const cardRise = { translateY: 25 * scale };
 
-  // No account exists yet at this point in onboarding, so there's no real
-  // calibration to read — the neutral default (1.0×, never adjusted) is the
-  // honest starting point every new user actually has.
-  const previewCalibration = { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION };
-  const lowEnergy = computePlanPreview(params, 2, previewCalibration);
-  const goodEnergy = computePlanPreview(params, 4, previewCalibration);
+  // Their own plan at whatever energy they drag to — the same engine the
+  // daily check-in runs, on the answers they just gave.
+  const [energy, setEnergy] = useState<EnergyScore>(2);
+  const touched = useRef(false);
+  useEffect(() => {
+    if (reducedMotion) return;
+    const id = setTimeout(() => {
+      if (!touched.current) setEnergy(4);
+    }, DEMO_DELAY);
+    return () => clearTimeout(id);
+  }, [reducedMotion]);
+  const handleEnergyChange = (value: EnergyScore) => {
+    touched.current = true;
+    setEnergy(value);
+  };
+  const preview = computePlanPreview(params, energy, PREVIEW_CALIBRATION);
+  const goodDay = computePlanPreview(params, 4, PREVIEW_CALIBRATION);
 
   const handleCreateAccount = () => {
     hapticImpactLight();
@@ -110,38 +127,24 @@ export default function OnboardingFirstLookScreen() {
         </View>
 
         <Text style={styles.title} maxFontSizeMultiplier={1.3}>Here&apos;s the part that&apos;s different</Text>
-        <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>Same plan, two different days:</Text>
+        <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>Drag your energy and watch your plan change:</Text>
 
         <ReanimatedAnimated.View
-          entering={reducedMotion ? undefined : FadeInDown.duration(MOTION_DURATION.slow).delay(150).easing(MOTION_EASING.standard).withInitialValues(cardRise)}
+          entering={reducedMotion ? undefined : FadeInDown.duration(MOTION_DURATION.slow).delay(CARD_DELAY).easing(MOTION_EASING.standard).withInitialValues(cardRise)}
           style={styles.card}
         >
           <View pointerEvents="none" style={styles.cardSheen} />
-          <Text style={styles.cardLabel} maxFontSizeMultiplier={1.2}>Low energy day</Text>
-          <View style={styles.cardStatBlock}>
-            <Text style={styles.cardStat} maxFontSizeMultiplier={1.2}>
-              {lowEnergy.exerciseCount} <Text style={styles.cardStatUnit}>exercises</Text> · {lowEnergy.durationMin}{' '}
-              <Text style={styles.cardStatUnit}>min</Text>
-            </Text>
+          <Text style={[styles.cardLabel, styles.cardLabelAccent]} maxFontSizeMultiplier={1.2}>Try it</Text>
+          <View style={styles.gaugeWrap}>
+            <EnergyGauge size={236} value={energy} onChange={handleEnergyChange} />
           </View>
-          <Text style={styles.cardExplanation} maxFontSizeMultiplier={1.4}>{lowEnergy.explanation}</Text>
-        </ReanimatedAnimated.View>
-
-        <ReanimatedAnimated.View
-          entering={reducedMotion ? undefined : FadeInDown.duration(MOTION_DURATION.slow).delay(GOOD_CARD_DELAY).easing(MOTION_EASING.standard).withInitialValues(cardRise)}
-          style={[styles.card, styles.cardSecond]}
-        >
-          <View pointerEvents="none" style={styles.cardSheen} />
-          <Text style={[styles.cardLabel, styles.cardLabelAccent]} maxFontSizeMultiplier={1.2}>Feeling good day</Text>
-          <GoodDayStat
-            fromCount={lowEnergy.exerciseCount}
-            toCount={goodEnergy.exerciseCount}
-            fromMin={lowEnergy.durationMin}
-            toMin={goodEnergy.durationMin}
-            instant={reducedMotion}
-            styles={styles}
+          <LiveStat count={preview.exerciseCount} minutes={preview.durationMin} instant={reducedMotion} styles={styles} />
+          <PlanPeek
+            exercises={preview.exercises}
+            minutes={preview.durationMin}
+            goodDayMinutes={energy === 4 ? null : goodDay.durationMin}
+            width={311}
           />
-          <Text style={styles.cardExplanation} maxFontSizeMultiplier={1.4}>{goodEnergy.explanation}</Text>
         </ReanimatedAnimated.View>
 
         <ReanimatedAnimated.Text
@@ -194,33 +197,29 @@ export default function OnboardingFirstLookScreen() {
 }
 
 /**
- * The feeling-good day's numbers start at the low-energy day's and count up
- * once the card lands, so the difference is seen happening rather than read
- * off two static blocks. Only this block re-renders per frame. Reduce Motion
- * shows the final numbers straight away; VoiceOver reads the settled values.
+ * The plan's size, counting to each new value as the gauge moves, so the
+ * difference is seen happening. Only this block re-renders per frame. Reduce
+ * Motion shows the final numbers straight away; VoiceOver reads the settled
+ * values.
  */
-function GoodDayStat({
-  fromCount,
-  toCount,
-  fromMin,
-  toMin,
+function LiveStat({
+  count,
+  minutes,
   instant,
   styles,
 }: {
-  fromCount: number;
-  toCount: number;
-  fromMin: number;
-  toMin: number;
+  count: number;
+  minutes: number;
   instant: boolean;
   styles: ReturnType<typeof createStyles>;
 }) {
-  const shownCount = useCountTo(toCount, instant, fromCount, COUNT_DELAY);
-  const shownMin = useCountTo(toMin, instant, fromMin, COUNT_DELAY);
+  const shownCount = useCountTo(count, instant);
+  const shownMin = useCountTo(minutes, instant);
   return (
     <View
       style={[styles.cardStatBlock, styles.cardStatBlockAccent]}
       accessible
-      accessibilityLabel={`${toCount} exercises, ${toMin} minutes`}
+      accessibilityLabel={`${count} exercises, ${minutes} minutes`}
     >
       <Text style={styles.cardStat} maxFontSizeMultiplier={1.2}>
         {shownCount} <Text style={styles.cardStatUnit}>exercises</Text> · {shownMin}{' '}
@@ -319,9 +318,9 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       height: '48%',
       ...sheenGradient(colors.surfaceSheen),
     },
-    cardSecond: {
-      top: 412,
-      borderColor: 'rgba(67,140,99,0.5)',
+    gaugeWrap: {
+      marginTop: 10,
+      alignItems: 'center',
     },
     cardLabel: {
       color: colors.textSecondary,
@@ -373,7 +372,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       position: 'absolute',
       left: 0,
       right: 0,
-      top: 552,
+      top: 672,
       paddingHorizontal: 48,
       color: colors.text,
       fontSize: 12.5,
@@ -384,7 +383,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     primaryButtonHit: {
       position: 'absolute',
       left: 46,
-      top: 656,
+      top: 720,
       width: 285,
       height: 38,
     },

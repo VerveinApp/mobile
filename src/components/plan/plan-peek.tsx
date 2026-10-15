@@ -15,9 +15,8 @@ const SHOWN = 3;
  * A live look at the plan being built: its first exercises, and how long it
  * runs next to a Good-day session. Shown while someone is still choosing
  * their energy, so the adaptation is something they watch happen rather
- * than read about afterwards. Rows are keyed by exercise, so a level change
- * fades out what left the plan and fades in what joined it. Lengths are
- * canvas units (it sits on fixed-canvas screens).
+ * than read about afterwards. A level change fades the new exercise into
+ * each slot. Lengths are canvas units (it sits on fixed-canvas screens).
  */
 export function PlanPeek({
   exercises,
@@ -47,10 +46,10 @@ export function PlanPeek({
   return (
     <View style={[styles.wrap, { width: width * unit }]}>
       {shown.map((exercise, index) => (
+        // Fixed slots, so rows never stack on top of each other mid-change;
+        // a slot's text crossfades when a different exercise lands in it.
         <ReanimatedAnimated.View
-          // Position plus id: the same exercise can sit at a different slot
-          // after a level change, and should glide there rather than refade.
-          key={`${exercise.id}-${index}`}
+          key={index}
           entering={reducedMotion ? undefined : LIST_ROW_ENTERING}
           exiting={reducedMotion ? undefined : LIST_ROW_EXITING}
           layout={reducedMotion ? undefined : LIST_ROW_LAYOUT}
@@ -58,12 +57,18 @@ export function PlanPeek({
           accessible
           accessibilityLabel={`${exercise.name}, ${formatExerciseStat(exercise)}`}
         >
-          <Text style={styles.name} numberOfLines={1} maxFontSizeMultiplier={1.2}>
-            {exercise.name}
-          </Text>
-          <Text style={styles.stat} maxFontSizeMultiplier={1.2}>
-            {formatExerciseStat(exercise)}
-          </Text>
+          <ReanimatedAnimated.View
+            key={exercise.id}
+            entering={reducedMotion ? undefined : LIST_ROW_ENTERING}
+            style={styles.rowContent}
+          >
+            <Text style={styles.name} numberOfLines={1} maxFontSizeMultiplier={1.2}>
+              {exercise.name}
+            </Text>
+            <Text style={styles.stat} maxFontSizeMultiplier={1.2}>
+              {formatExerciseStat(exercise)}
+            </Text>
+          </ReanimatedAnimated.View>
         </ReanimatedAnimated.View>
       ))}
       {more > 0 ? (
@@ -104,11 +109,13 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       marginBottom: 10,
     },
     row: {
+      paddingVertical: 7,
+    },
+    rowContent: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: 12,
-      paddingVertical: 7,
     },
     rowDivider: {
       borderTopWidth: StyleSheet.hairlineWidth,
