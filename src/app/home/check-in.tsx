@@ -61,6 +61,7 @@ import { formatExerciseStat } from '@/lib/exercise-format';
 import { REST_ADJUST_STEP_SECONDS, adjustRest, setsDoneFor } from '@/lib/rest-timer';
 import { BottomFade } from '@/components/session/bottom-fade';
 import { PlanPeek } from '@/components/plan/plan-peek';
+import { PlateDiagram } from '@/components/session/plate-diagram';
 import { TimerRing } from '@/components/session/timer-ring';
 import { useKeepAwakeWhile } from '@/lib/keep-awake';
 import { getCoachingInsightNote, markCoachingInsightShown } from '@/lib/coaching-insights';
@@ -1815,54 +1816,6 @@ export default function EnergyCheckInScreen() {
               </ReanimatedAnimated.View>
             ) : null}
 
-            {/* Glides to its new spot as the sections above come and go,
-                instead of jumping. */}
-            <ReanimatedAnimated.View layout={sectionLayout}>
-            <Pressable
-              style={styles.checkinPrimaryButtonHit}
-              // 38pt tall by design; the slop brings the tap target past 44pt.
-              hitSlop={{ top: 6, bottom: 6 }}
-              onPress={handleStartSession}
-              disabled={energy === null || isStartingSession}
-              onHoverIn={ctaHover.onHoverIn}
-              onHoverOut={ctaHover.onHoverOut}
-              onPressIn={ctaPress.onPressIn}
-              onPressOut={ctaPress.onPressOut}
-              accessibilityRole="button"
-              accessibilityLabel="Start session"
-            >
-              {/* Fades between enabled and dimmed rather than snapping. */}
-              <ReanimatedAnimated.View style={[styles.buttonFadeLayer, startEnabledFade]}>
-                <Animated.View
-                  style={[
-                    styles.primaryButtonVisual,
-                    { transform: [{ scale: ctaPress.scale }] },
-                  ]}
-                >
-                  <Animated.View
-                    pointerEvents="none"
-                    style={[
-                      StyleSheet.absoluteFill,
-                      styles.hoverWash,
-                      { opacity: ctaHover.anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.12] }) },
-                    ]}
-                  />
-                  <Animated.View
-                    pointerEvents="none"
-                    style={[
-                      StyleSheet.absoluteFill,
-                      styles.hoverWash,
-                      { opacity: ctaPress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
-                    ]}
-                  />
-                  <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>Start session</Text>
-                  <View style={styles.buttonArrow}>
-                    <ArrowUpIconGraphic size={24} />
-                  </View>
-                </Animated.View>
-              </ReanimatedAnimated.View>
-            </Pressable>
-            </ReanimatedAnimated.View>
           </ReanimatedAnimated.ScrollView>
         ) : sessionState === 'resolved' && preview && energy !== null ? (
           <ReanimatedAnimated.ScrollView
@@ -1965,6 +1918,11 @@ export default function EnergyCheckInScreen() {
                 {!currentExerciseTimerDone ? (
                   <ExerciseTimer
                     exercise={currentExercise}
+                    lastPerformance={lastPerformanceByName[currentExercise.name] ?? null}
+                    weightUnit={weightUnit}
+                    loadsWeight={
+                      exerciseLibrary.getById(currentExercise.id)?.equipment !== 'none' && typeof currentExercise.reps === 'number'
+                    }
                     onComplete={() => handleExerciseTimerComplete(currentExerciseIndex)}
                     onSwap={() => handleOpenSwap(currentExerciseIndex)}
                     styles={styles}
@@ -2650,6 +2608,58 @@ export default function EnergyCheckInScreen() {
             </Pressable>
           </ReanimatedAnimated.ScrollView>
         )}
+        {/* Start, pinned like the session's Up next bar: the plan preview
+            and options above it can run past the fold, and the one thing to
+            do next should never be under them. */}
+        {!showRestDay && hydrated && sessionState === 'checkin' ? (
+          <View style={[styles.upNextBar, { paddingBottom: upNextBottomInset }]} pointerEvents="box-none">
+            <BottomFade color={colors.background} height={28 * scale} />
+            <Pressable
+              style={[styles.checkinPrimaryButtonHit, styles.upNextButtonHit]}
+              // 38pt tall by design; the slop brings the tap target past 44pt.
+              hitSlop={{ top: 6, bottom: 6 }}
+              onPress={handleStartSession}
+              disabled={energy === null || isStartingSession}
+              onHoverIn={ctaHover.onHoverIn}
+              onHoverOut={ctaHover.onHoverOut}
+              onPressIn={ctaPress.onPressIn}
+              onPressOut={ctaPress.onPressOut}
+              accessibilityRole="button"
+              accessibilityLabel="Start session"
+            >
+              {/* Fades between enabled and dimmed rather than snapping. */}
+              <ReanimatedAnimated.View style={[styles.buttonFadeLayer, startEnabledFade]}>
+                <Animated.View
+                  style={[
+                    styles.primaryButtonVisual,
+                    { transform: [{ scale: ctaPress.scale }] },
+                  ]}
+                >
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[
+                      StyleSheet.absoluteFill,
+                      styles.hoverWash,
+                      { opacity: ctaHover.anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.12] }) },
+                    ]}
+                  />
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[
+                      StyleSheet.absoluteFill,
+                      styles.hoverWash,
+                      { opacity: ctaPress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
+                    ]}
+                  />
+                  <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>Start session</Text>
+                  <View style={styles.buttonArrow}>
+                    <ArrowUpIconGraphic size={24} />
+                  </View>
+                </Animated.View>
+              </ReanimatedAnimated.View>
+            </Pressable>
+          </View>
+        ) : null}
         {/* Pinned "Up next": what comes after this exercise, and the moment
             it's done, the Next exercise / Finish button itself — so the way
             forward is always on screen instead of under the whole list. */}
@@ -2955,12 +2965,22 @@ function CueContent({ cue, styles }: { cue: ExerciseCue; styles: ReturnType<type
  */
 function ExerciseTimer({
   exercise,
+  lastPerformance,
+  weightUnit,
+  loadsWeight,
   onComplete,
   onSwap,
   styles,
   colors,
 }: {
   exercise: PlanExercise;
+  /** What was lifted last time, shown before the first set (with the
+   * plates to load) instead of only after the lifting is done. */
+  lastPerformance: ExercisePerformance | null;
+  weightUnit: UnitSystem;
+  /** Takes external load with countable reps — the same gate the weight
+   * field after the exercise uses. */
+  loadsWeight: boolean;
   onComplete: () => void;
   onSwap: () => void;
   styles: ReturnType<typeof createStyles>;
@@ -2979,6 +2999,7 @@ function ExerciseTimer({
   // it via an obvious tap" call actually matters most: the user is about
   // to position their body, not browsing a list beforehand.
   const [showCue, setShowCue] = useState(false);
+  const [showPlates, setShowPlates] = useState(false);
   const cue = getCueFor(exercise.id);
 
   const currentInterval = intervals[phaseIndex];
@@ -3259,6 +3280,42 @@ function ExerciseTimer({
           <CueContent cue={cue} styles={styles} />
         </ReanimatedAnimated.View>
       ) : null}
+      {loadsWeight && lastPerformance ? (
+        <View style={styles.timerLastRow}>
+          <Text style={[styles.lastPerformanceHint, styles.timerLastHint]} maxFontSizeMultiplier={1.2}>
+            {`Last time: ${formatWeight(lastPerformance.weightKg, weightUnit)} × ${lastPerformance.reps}`}
+          </Text>
+          <Pressable
+            onPress={() => {
+              hapticSelect();
+              setShowPlates((v) => !v);
+            }}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={showPlates ? 'Hide plates' : 'Show plates for last time’s weight'}
+          >
+            <Text style={styles.plateToggleText} maxFontSizeMultiplier={1.2}>
+              {showPlates ? 'Hide plates' : 'Plates'}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {loadsWeight && lastPerformance && showPlates ? (
+        <ReanimatedAnimated.View
+          entering={FadeIn.duration(MOTION_DURATION.fast)}
+          exiting={FadeOut.duration(MOTION_DURATION.fast)}
+          style={styles.timerPlates}
+        >
+          <PlateDiagram
+            breakdown={calculatePlates(
+              kgToDisplayWeight(lastPerformance.weightKg, weightUnit),
+              PLATE_SETUP_BY_UNIT[weightUnit].barbell,
+              PLATE_SETUP_BY_UNIT[weightUnit].plates
+            )}
+            unitLabel={PLATE_SETUP_BY_UNIT[weightUnit].label}
+          />
+        </ReanimatedAnimated.View>
+      ) : null}
       {phaseLabel ? (
         <Text
           style={[styles.timerPhaseLabel, isRest && styles.timerPhaseLabelRest]}
@@ -3535,7 +3592,8 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     checkinFlow: {
       alignItems: 'center',
       paddingTop: 68,
-      paddingBottom: 40,
+      // Clears the pinned Start bar.
+      paddingBottom: 130,
     },
     checkinTitle: {
       paddingHorizontal: 44,
@@ -3963,6 +4021,18 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     timerRingWrap: {
       marginTop: 10,
+    },
+    timerLastRow: {
+      marginTop: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    timerLastHint: {
+      marginTop: 0,
+    },
+    timerPlates: {
+      marginTop: 8,
     },
     // Centered inside the ring, which supplies its own spacing.
     timerClockInRing: {
