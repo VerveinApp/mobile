@@ -66,7 +66,7 @@ import { TimerRing } from '@/components/session/timer-ring';
 import { useKeepAwakeWhile } from '@/lib/keep-awake';
 import { getCoachingInsightNote, markCoachingInsightShown } from '@/lib/coaching-insights';
 import { getPlanFitNote } from '@/lib/plan-fit';
-import { recordCheckInAndShouldShowPaywall } from '@/lib/paywall-trigger';
+import { countCheckInTowardPlusOffer, shouldOfferPaywallAfterSession } from '@/lib/paywall-trigger';
 import { getLoadImprovementNote, getPacingTrendNote, getPostSessionNote } from '@/lib/momentum';
 import {
   evaluatePerformance,
@@ -145,6 +145,8 @@ import { SuccessCheckmark } from '@/components/onboarding/success-checkmark';
 import { PremiumGate } from '@/components/premium-gate';
 import { useAppTheme } from '@/lib/theme-context';
 
+// Lets the done screen's checkmark land before the Plus offer slides up.
+const PAYWALL_AFTER_FINISH_DELAY_MS = 1800;
 const CANVAS_WIDTH = 375;
 const CANVAS_HEIGHT = 812;
 // The rest-day block (logo, "Rest day", its line, "Check in anyway") sat in
@@ -466,7 +468,7 @@ export default function EnergyCheckInScreen() {
   const isFinishingSessionRef = useRef(false);
   const [isFinishingSession, setIsFinishingSession] = useState(false);
   // Same synchronous-ref + state-twin pattern as isFinishingSessionRef above,
-  // for the same reason: recordCheckInAndShouldShowPaywall() unconditionally
+  // for the same reason: countCheckInTowardPlusOffer() unconditionally
   // increments a persistent counter on every call with no idempotency check,
   // so a double-tap landing before the first call's awaits resolve would
   // count one real session start as two toward the 3-check-in paywall
@@ -1369,18 +1371,9 @@ export default function EnergyCheckInScreen() {
     await saveWorkoutLog(localDateStr(), buildWorkoutLogExercises(new Set()));
     await recordSessionCompletion(false, energy, 'skipped');
     setSessionState('resolved');
-    // Fires exactly once, at the real third check-in — see paywall-
-    // trigger.ts's own doc comment for why this counts check-ins
-    // specifically (not completions, not session-history.ts's log, which
-    // also includes retroactively-logged past sessions). Pushed after
-    // setSessionState so dismissing it lands right back on the resolved
-    // session, ready to start — never blocking the workout itself.
-    // BUG FIX: it opened for people who already subscribe, too (bought from
-    // a locked card before their third check-in). A live entitlement read,
-    // not isPremium, which can still be loading this soon after a purchase.
-    if ((await recordCheckInAndShouldShowPaywall()) && !(await hasPremiumEntitlement())) {
-      router.push('/paywall' as never);
-    }
+    // Counted here, offered after Finish — see paywall-trigger.ts for why
+    // this counts check-ins specifically, and why the offer waits.
+    await countCheckInTowardPlusOffer();
   };
 
   const handleFinishSession = async (force = false) => {
@@ -1515,11 +1508,25 @@ export default function EnergyCheckInScreen() {
     // Only after a real session — the moment "remind me next training day"
     // actually means something — and only ever offered once (marked the
     // moment it's shown, not when tapped, so ignoring it counts as an answer).
-    if (completedSomething && (await shouldOfferReminderPrompt(trainingDaysList))) {
+    const offeringReminder = completedSomething && (await shouldOfferReminderPrompt(trainingDaysList));
+    if (offeringReminder) {
       setReminderOffer('pending');
       markReminderPromptOffered();
     }
     setSessionState('done');
+    // VerveIn Plus is offered once, after a finished session (never at
+    // Start, in front of the workout), and never on the same finish as the
+    // reminder offer — one ask at a time. Opens once the checkmark has
+    // landed. A live entitlement read, not isPremium, which can still be
+    // loading this soon after a purchase.
+    if (
+      completedSomething &&
+      !offeringReminder &&
+      (await shouldOfferPaywallAfterSession()) &&
+      !(await hasPremiumEntitlement())
+    ) {
+      setTimeout(() => router.push('/paywall' as never), PAYWALL_AFTER_FINISH_DELAY_MS);
+    }
   };
 
   const handleAcceptReminderOffer = async () => {

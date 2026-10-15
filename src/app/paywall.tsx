@@ -68,7 +68,10 @@ import {
 } from '@/lib/paywall-plans';
 import { supabase } from '@/lib/supabase';
 import { useAppTheme } from '@/lib/theme-context';
-import { getLoggedSessionCount } from '@/lib/workout-log';
+import { getImprovedExercises, getPerformanceHistory } from '@/lib/exercise-performance';
+import { hasConnectedHealthKit } from '@/lib/health-kit';
+import { getRecentWeeks } from '@/lib/session-history';
+import { getProfile } from '@/lib/user-profile';
 
 type Colors = ReturnType<typeof useAppTheme>['colors'];
 type Styles = ReturnType<typeof createStyles>;
@@ -250,9 +253,27 @@ export default function PaywallScreen() {
     return () => sub.remove();
   }, [loadOffering]);
 
-  const [loggedSessionCount, setLoggedSessionCount] = useState<number | null>(null);
+  // The person's own data for the preview — never example curves (see
+  // PreviewCard): their last four weeks, their best-moving lift, and
+  // whether Apple Health is connected for readiness.
+  const [ownPreview, setOwnPreview] = useState<OwnPreview | null>(null);
   useEffect(() => {
-    getLoggedSessionCount().then(setLoggedSessionCount);
+    (async () => {
+      const profile = await getProfile();
+      const [weeks, improved, healthConnected] = await Promise.all([
+        getRecentWeeks(profile?.days ? profile.days.split(',') : null, 4),
+        getImprovedExercises(),
+        hasConnectedHealthKit(),
+      ]);
+      const lift = improved[0] ?? null;
+      const liftHistory = lift ? await getPerformanceHistory(lift.exerciseName) : [];
+      setOwnPreview({
+        weeks: weeks.map((week) => week.map((day) => day.completed === true)),
+        strength: liftHistory.length >= 2 ? liftHistory.map((h) => ({ value: h.estimatedOneRepMax })) : null,
+        strengthLift: lift?.exerciseName ?? null,
+        healthConnected,
+      });
+    })();
   }, []);
 
   // Closes THIS sheet, whatever sits above it. An untargeted router.back()
@@ -509,7 +530,7 @@ export default function PaywallScreen() {
 
             <ReanimatedAnimated.View layout={LIST_ROW_LAYOUT} style={styles.section}>
               <PreviewCard
-                loggedSessionCount={loggedSessionCount}
+                own={ownPreview}
                 styles={styles}
                 colors={colors}
                 reducedMotion={reducedMotion}
@@ -960,17 +981,19 @@ function PlanRowPlaceholder({ styles }: { styles: Styles }) {
   );
 }
 
-// Clearly labelled example data: the page sells charts, so it shows them —
-// not the person's own (that's the Plus feature itself), and never dressed
-// up as theirs.
-const EXAMPLE_STRENGTH = [100, 101, 103, 102, 105, 107, 106, 109, 112, 111, 114, 117].map((value) => ({ value }));
-const EXAMPLE_WEEKS: boolean[][] = [
-  [true, false, true, false, true, false, false],
-  [true, false, true, false, false, true, false],
-  [true, false, true, false, true, false, false],
-  [true, true, false, false, true, false, true],
-];
-const EXAMPLE_READINESS = 0.82;
+// The preview shows the person's OWN data, never example curves (the app's
+// rule: charts only ever draw what was really logged). What hasn't been
+// logged yet is an outline that says what fills it, not a made-up line.
+type OwnPreview = {
+  /** Last four weeks, Monday-first, true where a session was finished. */
+  weeks: boolean[][];
+  /** Estimated 1RM over time for the lift that's moved most — null until
+   * a lift has 2+ logged weights. */
+  strength: { value: number }[] | null;
+  strengthLift: string | null;
+  healthConnected: boolean;
+};
+const EMPTY_WEEKS: boolean[][] = Array.from({ length: 4 }, () => Array.from({ length: 7 }, () => false));
 const GRID_CELL = 9;
 const GRID_GAP = 3;
 const GRID_WIDTH = 7 * GRID_CELL + 6 * GRID_GAP;
@@ -981,15 +1004,15 @@ const PREVIEW_PADDING = 16;
 // and ProgressRing both draw over 150 + 900ms), one day at a time.
 const GRID_FILL_DELAY_MS = 900;
 const GRID_FILL_PER_CELL_MS = 35;
-const GRID_CELLS = EXAMPLE_WEEKS.length * 7;
+const GRID_CELLS = 4 * 7;
 
 function PreviewCard({
-  loggedSessionCount,
+  own,
   styles,
   colors,
   reducedMotion,
 }: {
-  loggedSessionCount: number | null;
+  own: OwnPreview | null;
   styles: Styles;
   colors: Colors;
   reducedMotion: boolean;
@@ -1011,30 +1034,43 @@ function PreviewCard({
   // on the calendar, but a strength trend needs weights logged on a lift
   // (most people's Strength Progress starts empty, see progress.tsx), and
   // readiness needs Apple Health.
+  const weeks = own?.weeks ?? EMPTY_WEEKS;
+  const sessionsShown = weeks.flat().filter(Boolean).length;
+  // Counts what the calendar actually shows (finished sessions in these four
+  // weeks), so the sentence and the grid beside it never disagree.
   const caption =
-    loggedSessionCount !== null && loggedSessionCount > 0
-      ? `You've logged ${loggedSessionCount} session${loggedSessionCount === 1 ? '' : 's'} — ${loggedSessionCount === 1 ? "it's" : "they're"} already on your calendar. Strength needs logged weights; readiness needs Apple Health.`
-      : 'The calendar fills from every session you log. Strength needs logged weights; readiness needs Apple Health.';
+    sessionsShown > 0
+      ? `${sessionsShown} finished session${sessionsShown === 1 ? ' is' : 's are'} already on your calendar. Strength needs logged weights; readiness needs Apple Health.`
+      : 'The calendar fills from every session you finish. Strength needs logged weights; readiness needs Apple Health.';
   return (
     <View
       style={styles.previewCard}
       onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
       accessible
-      accessibilityLabel={`Example charts: a rising strength trend, a four-week consistency calendar and a readiness score. ${caption}`}
+      accessibilityLabel={`Your charts so far: ${sessionsShown} session${sessionsShown === 1 ? '' : 's'} in the last four weeks${
+        own?.strength && own.strengthLift ? `, a strength line for ${own.strengthLift}` : ''
+      }. ${caption}`}
     >
       <View style={styles.previewHeader}>
         <Text style={styles.previewEyebrow} maxFontSizeMultiplier={1.3}>
           WHAT YOU&apos;LL SEE
         </Text>
         <Text style={styles.previewTag} maxFontSizeMultiplier={1.3}>
-          Example
+          Yours so far
         </Text>
       </View>
       <View style={styles.previewCharts}>
         <View style={styles.previewTile}>
           <View style={[styles.previewChartBox, { width: sparkWidth }]}>
-            {sparkWidth > 0 ? (
-              <Sparkline data={EXAMPLE_STRENGTH} width={sparkWidth} height={46} color={BRAND_GREEN} filled />
+            {sparkWidth > 0 && own?.strength ? (
+              <Sparkline data={own.strength} width={sparkWidth} height={46} color={BRAND_GREEN} filled />
+            ) : sparkWidth > 0 ? (
+              // Nothing logged to draw yet — an outline, not a made-up line.
+              <View style={[styles.previewEmptyBox, { width: sparkWidth }]}>
+                <Text style={styles.previewEmptyText} maxFontSizeMultiplier={1.1}>
+                  Log a weight twice
+                </Text>
+              </View>
             ) : null}
           </View>
           <Text style={styles.previewTileLabel} maxFontSizeMultiplier={1.3}>
@@ -1043,7 +1079,7 @@ function PreviewCard({
         </View>
         <View style={styles.previewTile}>
           <View style={[styles.previewChartBox, styles.previewGrid]}>
-            {EXAMPLE_WEEKS.map((week, w) => (
+            {weeks.map((week, w) => (
               <View key={w} style={styles.previewGridRow}>
                 {week.map((done, d) => (
                   <GridCell
@@ -1064,17 +1100,21 @@ function PreviewCard({
         </View>
         <View style={styles.previewTile}>
           <View style={styles.previewChartBox}>
+            {/* No score is invented here: readiness comes from Apple Health
+                once it's connected, so the ring is just its outline. */}
             <ProgressRing
               size={RING_SIZE}
               strokeWidth={5}
-              progress={EXAMPLE_READINESS}
+              progress={0}
               color={BRAND_GREEN}
               trackColor={colors.backgroundSelected}
             />
             <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.previewRingCenter]}>
-              <Text style={styles.previewRingValue} maxFontSizeMultiplier={1}>
-                {Math.round(EXAMPLE_READINESS * 100)}
-              </Text>
+              <SymbolView
+                name="heart.fill"
+                size={15}
+                tintColor={own?.healthConnected ? BRAND_GREEN : colors.textTertiary}
+              />
             </View>
           </View>
           <Text style={styles.previewTileLabel} maxFontSizeMultiplier={1.3}>
@@ -1369,6 +1409,20 @@ function createStyles(colors: Colors, isDark: boolean) {
       height: 46,
       alignItems: 'center',
       justifyContent: 'flex-end',
+    },
+    previewEmptyBox: {
+      height: 46,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderStyle: 'dashed',
+      borderColor: colors.backgroundSelected,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    previewEmptyText: {
+      color: colors.textTertiary,
+      fontSize: Type.micro,
+      fontFamily: 'Geist-Medium',
     },
     previewTileLabel: {
       marginTop: 6,
