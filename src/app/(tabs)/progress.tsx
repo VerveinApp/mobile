@@ -36,6 +36,8 @@ import { usePremiumEntitlement } from '@/lib/purchases';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { getRecentWeeks, type WeekDay } from '@/lib/session-history';
 import { useAppTheme } from '@/lib/theme-context';
+import { Donut } from '@/components/ui/donut';
+import { countEnergyLevels, foldIntoOther, toPercentShares } from '@/lib/chart-math';
 import { getTrainingState } from '@/lib/training-state-loader';
 import { unlessUnchanged } from '@/lib/stable-state';
 import type { TrainingState } from '@/lib/engine/training-state';
@@ -83,6 +85,15 @@ const RECENT_BALANCE_WINDOW_DAYS = 7;
 // is what actually fixes that, without touching the normalization math
 // itself, which has its own separate, still-valid rationale.
 const MIN_SESSIONS_FOR_SHAPE = 3;
+// One hue, bright to deep: a share has no good or bad slice, so none of it
+// borrows the energy gauge's red-to-green colors (a Low slice must never
+// read as an alarm). Largest share, or the highest energy, takes the first.
+const SHARE_RAMP: Record<'light' | 'dark', string[]> = {
+  dark: ['#8FE0AE', '#5FBE84', '#4A9A6B', '#3A7A55', '#2D5E43', '#24493A'],
+  light: ['#2F7D52', '#438C63', '#5FA57C', '#86BE9C', '#ACD4BB', '#CFE6D8'],
+};
+// More named slices than this fold into one "Other".
+const MAX_NAMED_MOVEMENT_SLICES = 5;
 const TREND_LABEL: Record<'improving' | 'stable' | 'declining', string> = {
   improving: 'Improving',
   stable: 'Steady',
@@ -427,6 +438,25 @@ export default function ProgressScreen() {
         .filter(([, counts]) => counts.total > 0)
         .sort((a, b) => b[1].total - a[1].total)
     : [];
+  const shareRamp = SHARE_RAMP[resolvedScheme];
+  // What the completed work was made of, by movement — a donut of shares
+  // above the same rows, which now double as its legend.
+  const movementSlices = foldIntoOther(
+    movementPatternRows.map(([pattern, counts]) => ({ key: pattern, label: MOVEMENT_PATTERN_LABELS[pattern], value: counts.completed })),
+    MAX_NAMED_MOVEMENT_SLICES
+  );
+  const movementPercents = toPercentShares(movementSlices.map((slice) => slice.value));
+  const movementColorByKey: Record<string, string> = Object.fromEntries(
+    movementSlices.map((slice, index) => [slice.key, shareRamp[index]])
+  );
+  const movementPercentByKey: Record<string, number> = Object.fromEntries(
+    movementSlices.map((slice, index) => [slice.key, movementPercents[index]])
+  );
+  // Training Load's energy mix: how the same check-ins on the line above
+  // split across the five levels, highest energy first.
+  const energyCounts = countEnergyLevels(energyDays);
+  const energyMixLevels = ([5, 4, 3, 2, 1] as const).filter((level) => energyCounts[level] > 0);
+  const energyMixPercents = toPercentShares(energyMixLevels.map((level) => energyCounts[level]));
 
   return (
     <View style={styles.root}>
@@ -753,17 +783,48 @@ export default function ProgressScreen() {
                         </View>
                       );
                     })
-                  : movementPatternRows.map(([pattern, counts], index) => (
-                      <View
-                        key={pattern}
-                        style={[styles.balanceRow, index < movementPatternRows.length - 1 && styles.rowDivider]}
-                      >
-                        <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{MOVEMENT_PATTERN_LABELS[pattern]}</Text>
-                        <Text style={styles.balanceCount} maxFontSizeMultiplier={1.2}>
-                          {counts.completed}/{counts.total}
-                        </Text>
-                      </View>
-                    ))}
+                  : (
+                    <>
+                      {movementSlices.length > 1 ? (
+                        <View style={styles.movementDonutWrap}>
+                          <Donut
+                            slices={movementSlices.map((slice, index) => ({ key: slice.key, value: slice.value, color: shareRamp[index] }))}
+                            size={112}
+                            thickness={14}
+                            trackColor={colors.surfaceDivider}
+                            play={revealed.balance}
+                            accessibilityLabel={`Share of completed work: ${movementSlices
+                              .map((slice, index) => `${slice.label} ${movementPercents[index]}%`)
+                              .join(', ')}`}
+                          />
+                          <Text style={styles.movementShapeCaption} maxFontSizeMultiplier={1.3}>
+                            Share of completed work by movement
+                          </Text>
+                        </View>
+                      ) : null}
+                      {movementPatternRows.map(([pattern, counts], index) => (
+                        <View
+                          key={pattern}
+                          style={[styles.balanceRow, index < movementPatternRows.length - 1 && styles.rowDivider]}
+                        >
+                          <View style={styles.legendLabelRow}>
+                            <View
+                              style={[
+                                styles.legendSwatch,
+                                { backgroundColor: movementColorByKey[pattern] ?? movementColorByKey.other ?? colors.surfaceDivider },
+                                counts.completed === 0 && { backgroundColor: colors.surfaceDivider },
+                              ]}
+                            />
+                            <Text style={styles.balanceLabel} maxFontSizeMultiplier={1.3}>{MOVEMENT_PATTERN_LABELS[pattern]}</Text>
+                          </View>
+                          <Text style={[styles.balanceCount, TabularNums]} maxFontSizeMultiplier={1.2}>
+                            {movementPercentByKey[pattern] !== undefined ? `${movementPercentByKey[pattern]}% · ` : ''}
+                            {counts.completed}/{counts.total}
+                          </Text>
+                        </View>
+                      ))}
+                    </>
+                  )}
               </View>
             ) : (
               <View style={styles.emptyCard}>
@@ -845,6 +906,33 @@ export default function ProgressScreen() {
                   />
                 ) : null}
               </View>
+              {energyMixLevels.length > 1 ? (
+                <View style={styles.mixRow}>
+                  <Donut
+                    slices={energyMixLevels.map((level) => ({ key: String(level), value: energyCounts[level], color: shareRamp[5 - level] }))}
+                    size={76}
+                    thickness={11}
+                    trackColor={colors.surfaceDivider}
+                    play={revealed.load}
+                    accessibilityLabel={`Energy mix: ${energyMixLevels
+                      .map((level, index) => `${ENERGY_LABELS[level]} ${energyMixPercents[index]}%`)
+                      .join(', ')}`}
+                  />
+                  <View style={styles.mixLegend} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+                    {energyMixLevels.map((level, index) => (
+                      <View key={level} style={styles.mixLegendRow}>
+                        <View style={[styles.legendSwatch, { backgroundColor: shareRamp[5 - level] }]} />
+                        <Text style={styles.mixLegendLabel} maxFontSizeMultiplier={1.2}>
+                          {ENERGY_LABELS[level]}
+                        </Text>
+                        <Text style={[styles.mixLegendValue, TabularNums]} maxFontSizeMultiplier={1.2}>
+                          {energyMixPercents[index]}%
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
             </View>
           ) : null}
           {showDebt && trainingState ? (
@@ -1175,6 +1263,51 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], isDark: 
     // Plain numbers, no fill bar — the vault's brand system treats progress
     // bars as permanently off-limits (same reasoning as dropping streaks:
     // a bar reads as a score to chase, a number is just a fact).
+    movementDonutWrap: {
+      alignItems: 'center',
+      paddingTop: 6,
+      paddingBottom: 4,
+    },
+    legendLabelRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      flexShrink: 1,
+    },
+    legendSwatch: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+    },
+    mixRow: {
+      marginTop: 14,
+      paddingTop: 14,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.surfaceDivider,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 18,
+    },
+    mixLegend: {
+      flex: 1,
+      gap: 4,
+    },
+    mixLegendRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    mixLegendLabel: {
+      flex: 1,
+      color: colors.textSecondary,
+      fontSize: Type.secondary,
+      fontFamily: 'Geist-Medium',
+    },
+    mixLegendValue: {
+      color: colors.textSecondary,
+      fontSize: Type.secondary,
+      fontFamily: 'Geist-SemiBold',
+    },
     balanceRow: {
       flexDirection: 'row',
       alignItems: 'center',
