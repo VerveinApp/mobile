@@ -9,7 +9,7 @@ import { SymbolView } from '@/components/ui/app-symbol';
 
 import { TodaysTrainingCard } from '@/components/home/todays-training-card';
 import { AdjustPlanSheet } from '@/components/settings/adjust-plan-sheet';
-import { AndroidCardElevation, Type } from '@/constants/theme';
+import { AndroidCardElevation, TabularNums, Type } from '@/constants/theme';
 import { BODY_AREA_LABELS, BODY_AREA_ORDER } from '@/lib/body-area-labels';
 import { PRESSED_DIM } from '@/lib/button-interactions';
 import { getCalibration } from '@/lib/calibration';
@@ -50,6 +50,13 @@ const WEEKDAY_LABELS: Record<string, string> = {
  * check-in for a day that hasn't happened yet — labeled "Est." rather than
  * presented as a resolved session, same honesty rule as Summary's card.
  */
+/** A body area's rest, for the readiness row: "Trained today", "2d rested", "Fresh". */
+function restLabel(daysSinceTrained: number | null): string {
+  if (daysSinceTrained === null) return 'Fresh';
+  if (daysSinceTrained === 0) return 'Trained today';
+  return `${daysSinceTrained}d rested`;
+}
+
 export default function TrainScreen() {
   const adjustPlanSheetRef = useRef<BottomSheetModal>(null);
   const insets = useSafeAreaInsets();
@@ -321,6 +328,13 @@ export default function TrainScreen() {
                     >
                       {BODY_AREA_LABELS[area]}
                     </Text>
+                    {/* Each area's own rest, read as readiness: never trained
+                        reads as fresh, not as a gap. */}
+                    {trainingState && trainingState.recency.tier !== 'insufficient' ? (
+                      <Text style={styles.readinessDotSub} maxFontSizeMultiplier={1.1}>
+                        {restLabel(trainingState.recency.value[area].daysSinceTrained)}
+                      </Text>
+                    ) : null}
                   </View>
                 ))}
               </View>
@@ -493,6 +507,13 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
     readinessDotLabelActive: {
       color: colors.text,
       fontFamily: 'Geist-SemiBold',
+    },
+    readinessDotSub: {
+      marginTop: -3,
+      color: colors.textTertiary,
+      fontSize: Type.micro,
+      fontFamily: 'Geist-Regular',
+      ...TabularNums,
     },
     readinessLine: {
       marginTop: 14,

@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { SymbolView } from '@/components/ui/app-symbol';
@@ -8,6 +8,9 @@ import { useHoverFade, useLiquidPress } from '@/lib/button-interactions';
 import { hapticImpactLight } from '@/lib/haptics';
 import { useAppTheme } from '@/lib/theme-context';
 import type { TodaySession } from '@/lib/today-session';
+import { ENERGY_LABELS, MOOD_COLORS } from '@/components/home/energy-gauge';
+import { localDateStr } from '@/lib/local-date';
+import { getWorkoutLog } from '@/lib/workout-log';
 
 /**
  * Shared between Summary (the dashboard's own preview) and Train (the
@@ -43,6 +46,22 @@ export function TodaysTrainingCard({
   const { colors, resolvedScheme } = useAppTheme();
   const isDark = resolvedScheme === 'dark';
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
+
+  // How far a started session has got — read from today's workout log,
+  // which the session saves to as each exercise is checked off.
+  const inProgress = todaySession !== null && todaySession.completed !== true;
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  useEffect(() => {
+    if (!inProgress) return;
+    let cancelled = false;
+    getWorkoutLog(localDateStr()).then((log) => {
+      if (cancelled || !log) return;
+      setProgress({ done: log.exercises.filter((e) => e.completed).length, total: log.exercises.length });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [inProgress, todaySession]);
 
   const handlePress = () => {
     hapticImpactLight();
@@ -101,7 +120,11 @@ export function TodaysTrainingCard({
       accessibilityLabel={
         completed
           ? `${sessionLabel}. Done for today. View summary.`
-          : `${sessionLabel}. ${resolved ? '' : 'Estimated '}${exerciseCount} exercises, ${durationMin} minutes. ${actionLabel}.`
+          : resolved && todaySession
+            ? `${sessionLabel}. ${ENERGY_LABELS[todaySession.energy]} energy. ${
+                progress && progress.total > 0 ? `${progress.done} of ${progress.total} exercises done` : `${exerciseCount} exercises`
+              }, ${durationMin} minutes. ${actionLabel}.`
+            : `${sessionLabel}. Estimated ${exerciseCount} exercises, ${durationMin} minutes. ${actionLabel}.`
       }
     >
       <View style={styles.card}>
@@ -122,12 +145,25 @@ export function TodaysTrainingCard({
         {completed ? (
           <View style={styles.doneRow}>
             <SymbolView name="checkmark.circle.fill" size={14} tintColor="#5FBE84" />
-            <Text style={[styles.cardMeta, styles.doneText]} maxFontSizeMultiplier={1.3}>Done for today</Text>
+            <Text style={[styles.cardMeta, styles.doneText]} maxFontSizeMultiplier={1.3}>
+              Done for today{todaySession?.energy ? ` · ${ENERGY_LABELS[todaySession.energy]}` : ''}
+            </Text>
+          </View>
+        ) : resolved && todaySession ? (
+          // The level checked in at, and how far the session has got.
+          <View style={styles.doneRow}>
+            <View style={[styles.energyDot, { backgroundColor: MOOD_COLORS[todaySession.energy] }]} />
+            <Text style={styles.cardMeta} maxFontSizeMultiplier={1.3}>
+              {ENERGY_LABELS[todaySession.energy]}
+              {inProgress && progress && progress.total > 0
+                ? ` · ${progress.done} of ${progress.total} done`
+                : ` · ${exerciseCount} exercises`}
+              {` · ${durationMin} min`}
+            </Text>
           </View>
         ) : (
           <Text style={styles.cardMeta} maxFontSizeMultiplier={1.3}>
-            {resolved ? '' : 'Est. '}
-            {exerciseCount} exercises · {durationMin} min
+            Est. {exerciseCount} exercises · {durationMin} min
           </Text>
         )}
         {resolved && explanation ? (
@@ -156,6 +192,11 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], isDark: 
       // Low-alpha wash of the text color — reads as a subtle press
       // highlight on both the near-black dark card and the white light one.
       backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
+    },
+    energyDot: {
+      width: 7,
+      height: 7,
+      borderRadius: 3.5,
     },
     doneRow: {
       marginTop: 4,
