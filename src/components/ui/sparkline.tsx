@@ -12,6 +12,7 @@ import ReanimatedAnimated, {
 } from 'react-native-reanimated';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 
+import { sparklineXs } from '@/lib/chart-math';
 import { hapticSelect } from '@/lib/haptics';
 
 /** How long a finger rests on a chart before it starts scrubbing — long
@@ -23,6 +24,10 @@ const AnimatedCircle = ReanimatedAnimated.createAnimatedComponent(Circle);
 
 export type SparklinePoint = {
   value: number;
+  /** YYYY-MM-DD — only read when the chart spaces points by date. */
+  date?: string;
+  /** Drawn with a ring — e.g. a personal best on a strength line. */
+  marked?: boolean;
 };
 
 type SparklineProps = {
@@ -58,9 +63,27 @@ type SparklineProps = {
    * point under the finger (null on release) so the card can show that
    * point's value in its own heading — the chart itself stays label-free. */
   onScrub?: (index: number | null) => void;
+  /** 'date' spaces points by the days between them (each point's `date`),
+   * so a two-week break reads as a gap; falls back to even spacing whenever
+   * that can't be honest (see chart-math.ts's sparklineXs). */
+  spacing?: 'even' | 'date';
+  /** Fill inside a marked point's ring — the card's own surface makes it
+   * read as a ring on the line. Defaults to the line color (a solid dot). */
+  markerFill?: string;
 };
 
 type Point = { x: number; y: number };
+
+/** The point closest to a touch's x — positions aren't evenly spaced when
+ * the chart spaces by date. */
+function nearestIndex(xs: number[], x: number): number {
+  'worklet';
+  let best = 0;
+  for (let i = 1; i < xs.length; i++) {
+    if (Math.abs(xs[i] - x) < Math.abs(xs[best] - x)) best = i;
+  }
+  return best;
+}
 
 // Room left around the plotted points for the biggest mark drawn on one —
 // the scrub dot's radius. BUG FIX: the points used to run edge to edge, so
@@ -134,6 +157,8 @@ export function Sparkline({
   delay = 0,
   play = true,
   onScrub,
+  spacing = 'even',
+  markerFill,
 }: SparklineProps) {
   const reducedMotion = useReducedMotion();
   const reveal = useSharedValue(reducedMotion ? 1 : 0);
@@ -149,7 +174,14 @@ export function Sparkline({
   const [scrubIndex, setScrubIndex] = useState<number | null>(null);
   const lastScrubIndex = useSharedValue(-1);
   const pointCount = data.length;
-  const stepX = pointCount > 1 ? (width - EDGE_INSET * 2) / (pointCount - 1) : 0;
+  const xs = sparklineXs(
+    data.map((d) => d.date),
+    width,
+    EDGE_INSET,
+    spacing
+  );
+  // Rebuilds the gesture only when the positions actually change.
+  const xsKey = xs.join(',');
   const reportScrub = (index: number | null) => {
     setScrubIndex(index);
     if (index !== null) hapticSelect();
@@ -168,12 +200,12 @@ export function Sparkline({
         .enabled(onScrub !== undefined && pointCount > 1)
         .activateAfterLongPress(SCRUB_HOLD_MS)
         .onStart((e) => {
-          const index = Math.max(0, Math.min(pointCount - 1, Math.round((e.x - EDGE_INSET) / stepX)));
+          const index = nearestIndex(xs, e.x);
           lastScrubIndex.value = index;
           scheduleOnRN(reportScrub, index);
         })
         .onUpdate((e) => {
-          const index = Math.max(0, Math.min(pointCount - 1, Math.round((e.x - EDGE_INSET) / stepX)));
+          const index = nearestIndex(xs, e.x);
           if (index === lastScrubIndex.value) return;
           lastScrubIndex.value = index;
           scheduleOnRN(reportScrub, index);
@@ -185,7 +217,7 @@ export function Sparkline({
         }),
     // reportScrub closes over onScrub; a new chart identity rebuilds it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [onScrub, pointCount, stepX]
+    [onScrub, pointCount, xsKey]
   );
 
   const values = data.map((d) => d.value);
@@ -202,7 +234,7 @@ export function Sparkline({
   const plotHeight = height - inset * 2;
 
   const points = data.map((d, i) => ({
-    x: data.length > 1 ? EDGE_INSET + i * stepX : width / 2,
+    x: xs[i],
     y: inset + plotHeight - ((d.value - lo) / range) * plotHeight,
   }));
   const linePath = smoothPathD(points);
@@ -261,7 +293,29 @@ export function Sparkline({
             strokeDasharray={lineLength}
             animatedProps={lineAnimatedProps}
           />
-          <AnimatedCircle cx={lastPoint.x} cy={lastPoint.y} r={3.5} fill={color} animatedProps={dotAnimatedProps} />
+          {data.map((d, i) =>
+            d.marked && i !== data.length - 1 ? (
+              <AnimatedCircle
+                key={i}
+                cx={points[i].x}
+                cy={points[i].y}
+                r={3}
+                fill={markerFill ?? color}
+                stroke={color}
+                strokeWidth={1.5}
+                animatedProps={dotAnimatedProps}
+              />
+            ) : null
+          )}
+          <AnimatedCircle
+            cx={lastPoint.x}
+            cy={lastPoint.y}
+            r={3.5}
+            fill={data[data.length - 1].marked && markerFill ? markerFill : color}
+            stroke={color}
+            strokeWidth={data[data.length - 1].marked && markerFill ? 1.5 : 0}
+            animatedProps={dotAnimatedProps}
+          />
           {scrubPoint ? (
             <>
               <Line x1={scrubPoint.x} y1={0} x2={scrubPoint.x} y2={height} stroke={color} strokeOpacity={0.35} strokeWidth={1} />

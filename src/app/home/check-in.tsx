@@ -67,7 +67,12 @@ import { getCoachingInsightNote, markCoachingInsightShown } from '@/lib/coaching
 import { getPlanFitNote } from '@/lib/plan-fit';
 import { recordCheckInAndShouldShowPaywall } from '@/lib/paywall-trigger';
 import { getLoadImprovementNote, getPacingTrendNote, getPostSessionNote } from '@/lib/momentum';
-import { getLastPerformance, recordPerformanceBatch, type ExercisePerformance } from '@/lib/exercise-performance';
+import {
+  evaluatePerformance,
+  getAllExercisePerformances,
+  recordPerformanceBatch,
+  type ExercisePerformance,
+} from '@/lib/exercise-performance';
 import { schedulePrCelebration } from '@/lib/pr-celebration';
 import { PLATE_SETUP_BY_UNIT, calculatePlates, formatPlateBreakdown } from '@/lib/plate-calculator';
 import { registerForRemotePushNotifications } from '@/lib/push-notifications';
@@ -396,6 +401,9 @@ export default function EnergyCheckInScreen() {
   // need to define, not something to freelance in a UI label. Populated
   // below, once sessionExercises is known.
   const [lastPerformanceByName, setLastPerformanceByName] = useState<Record<string, ExercisePerformance | null>>({});
+  // Each session exercise's logged history — what the live "New best" chip
+  // compares a typed weight against (see evaluatePerformance).
+  const [performanceHistoryByName, setPerformanceHistoryByName] = useState<Record<string, ExercisePerformance[]>>({});
   // Shows the plate breakdown for whatever's currently typed (or last
   // time's weight, if nothing's typed yet) — collapsed by default so this
   // stays out of the way for the majority of exercises/people who never
@@ -1033,12 +1041,38 @@ export default function EnergyCheckInScreen() {
   useEffect(() => {
     if (sessionExercises.length === 0) return;
     (async () => {
-      const entries = await Promise.all(
-        sessionExercises.map(async (ex) => [ex.name, await getLastPerformance(ex.name)] as const)
+      const all = await getAllExercisePerformances();
+      setPerformanceHistoryByName(all);
+      setLastPerformanceByName(
+        Object.fromEntries(
+          sessionExercises.map((ex) => {
+            const history = all[ex.name];
+            return [ex.name, history && history.length > 0 ? history[history.length - 1] : null] as const;
+          })
+        )
       );
-      setLastPerformanceByName(Object.fromEntries(entries));
     })();
   }, [sessionExercises]);
+  // Whether the weight typed for the current exercise would be a personal
+  // best — decided by the same evaluatePerformance Finish records with, so
+  // the chip never promises a best that isn't then saved. Never on a first
+  // log (nothing to beat yet) or when the plan has no countable reps.
+  const typedWeight = parseDecimalInput(loggedWeightsKg[currentExerciseIndex] ?? '');
+  const isTypedBest =
+    currentExercise !== null &&
+    typedWeight !== null &&
+    typedWeight > 0 &&
+    typeof currentExercise.reps === 'number' &&
+    evaluatePerformance(
+      performanceHistoryByName[currentExercise.name] ?? [],
+      displayWeightToKg(typedWeight, weightUnit),
+      currentExercise.reps
+    ).improved;
+  useEffect(() => {
+    if (!isTypedBest) return;
+    hapticSuccess();
+    AccessibilityInfo.announceForAccessibility('New best');
+  }, [isTypedBest, currentExerciseIndex]);
   // A day finished before summaries were saved gets one rebuilt from what
   // was stored anyway (see summaryFromWorkoutLog), so "View summary" never
   // opens to just a checkmark.
@@ -1999,6 +2033,17 @@ export default function EnergyCheckInScreen() {
                             </Text>
                           </Pressable>
                         </View>
+                        {isTypedBest ? (
+                          <ReanimatedAnimated.View
+                            entering={reducedMotion ? undefined : FadeIn.duration(MOTION_DURATION.base)}
+                            style={styles.bestChip}
+                          >
+                            <SymbolView name="trophy.fill" size={11} tintColor={colors.accentText} />
+                            <Text style={styles.bestChipText} maxFontSizeMultiplier={1.2}>
+                              New best
+                            </Text>
+                          </ReanimatedAnimated.View>
+                        ) : null}
                         {plateBreakdownOpenIndex === currentExerciseIndex ? (
                           <Text style={styles.plateBreakdownText} maxFontSizeMultiplier={1.2}>
                             {formatPlateBreakdown(
@@ -4015,6 +4060,22 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
       fontSize: Type.secondary,
       fontFamily: 'Geist-SemiBold',
       textAlign: 'center',
+    },
+    bestChip: {
+      marginTop: 8,
+      alignSelf: 'center',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 12,
+      backgroundColor: 'rgba(95,190,132,0.14)',
+    },
+    bestChipText: {
+      color: colors.accentText,
+      fontSize: Type.caption,
+      fontFamily: 'Geist-SemiBold',
     },
     plateToggleText: {
       color: '#438C63',

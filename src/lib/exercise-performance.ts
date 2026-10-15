@@ -207,6 +207,34 @@ export type RecordPerformanceResult = {
 // recordPerformance and recordPerformanceBatch below so both compute a new
 // record identically; only how many times readAll/writeAll happen around
 // this differs between them.
+/**
+ * Whether lifting `weightKg` for `reps` would be a personal best against
+ * this exercise's history — the one definition both Finish (which persists
+ * it) and the live "New best" chip in the session read, so the chip can
+ * never promise a best that Finish then doesn't record. See
+ * ExercisePerformance.improved for what counts.
+ */
+export function evaluatePerformance(
+  history: ExercisePerformance[],
+  weightKg: number,
+  reps: number
+): { improved: boolean; estimatedOneRepMax: number; oneRepMaxRatio: number; previous: ExercisePerformance | null } {
+  const previous = latestOf(history);
+  const estimatedOneRepMax = estimateOneRepMax(weightKg, reps);
+  const oneRepMaxRatio = previous ? estimatedOneRepMax / previous.estimatedOneRepMax : 1;
+  const oneRepMaxImproved = previous !== null && oneRepMaxRatio >= LOAD_IMPROVEMENT_MIN_RATIO;
+  const isWeightPR = history.length > 0 && weightKg >= Math.max(...history.map((h) => h.weightKg)) * LOAD_IMPROVEMENT_MIN_RATIO;
+  const isRepsPR = history.length > 0 && reps > Math.max(...history.map((h) => h.reps));
+  const isVolumePR =
+    history.length > 0 && weightKg * reps >= Math.max(...history.map((h) => h.weightKg * h.reps)) * LOAD_IMPROVEMENT_MIN_RATIO;
+  return {
+    improved: oneRepMaxImproved || isWeightPR || isRepsPR || isVolumePR,
+    estimatedOneRepMax,
+    oneRepMaxRatio,
+    previous,
+  };
+}
+
 function applyRecord(
   all: Record<string, ExercisePerformance[]>,
   exerciseName: string,
@@ -214,29 +242,13 @@ function applyRecord(
   reps: number
 ): RecordPerformanceResult {
   const history = all[exerciseName] ?? [];
-  const previous = latestOf(history);
-  const estimatedOneRepMax = estimateOneRepMax(weightKg, reps);
-  const oneRepMaxRatio = previous ? estimatedOneRepMax / previous.estimatedOneRepMax : 1;
-  const oneRepMaxImproved = previous !== null && oneRepMaxRatio >= LOAD_IMPROVEMENT_MIN_RATIO;
-  // Compared against the FULL history, not just `previous` — a real best
-  // can beat every earlier session even when it doesn't beat the single
-  // most recent one (e.g. a heavier single lately, a higher-rep set two
-  // sessions back). Weight and volume need the same LOAD_IMPROVEMENT_MIN_RATIO
-  // floor the 1RM check already applies — a 100kg->100.5kg "PR" is the exact
-  // plate-rounding noise that threshold exists to filter, and this is a
-  // second, independent way to trip past it if it stayed a bare `>`. Reps
-  // has no equivalent noise problem (a whole rep someone actually completed
-  // is never a rounding artifact), so any real increase counts.
-  const isWeightPR = history.length > 0 && weightKg >= Math.max(...history.map((h) => h.weightKg)) * LOAD_IMPROVEMENT_MIN_RATIO;
-  const isRepsPR = history.length > 0 && reps > Math.max(...history.map((h) => h.reps));
-  const isVolumePR =
-    history.length > 0 && weightKg * reps >= Math.max(...history.map((h) => h.weightKg * h.reps)) * LOAD_IMPROVEMENT_MIN_RATIO;
+  const { improved, estimatedOneRepMax, oneRepMaxRatio, previous } = evaluatePerformance(history, weightKg, reps);
   const current: ExercisePerformance = {
     weightKg,
     reps,
     estimatedOneRepMax,
     date: localDateStr(),
-    improved: oneRepMaxImproved || isWeightPR || isRepsPR || isVolumePR,
+    improved,
   };
   all[exerciseName] = [...history, current].slice(-MAX_HISTORY_PER_EXERCISE);
   return { previous, current, oneRepMaxRatio };

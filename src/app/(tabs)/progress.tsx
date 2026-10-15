@@ -924,6 +924,7 @@ export default function ProgressScreen() {
                           {scrubbed ? (
                             <Text style={styles.strengthProgressRelative} maxFontSizeMultiplier={1.3}>
                               {formatEntryDateLabel(scrubbed.date)}
+                              {scrubbed.improved ? ' · Best' : ''}
                             </Text>
                           ) : weightKg > 0 ? (
                             <Text style={styles.strengthProgressRelative} maxFontSizeMultiplier={1.3}>
@@ -939,7 +940,11 @@ export default function ProgressScreen() {
                         >
                           {strengthChartWidth > 0 ? (
                             <Sparkline
-                              data={history.map((h) => ({ value: h.estimatedOneRepMax }))}
+                              // Each personal best is a ring on the line,
+                              // spaced by date so a break reads as a gap.
+                              data={history.map((h) => ({ value: h.estimatedOneRepMax, date: h.date, marked: h.improved }))}
+                              spacing="date"
+                              markerFill={colors.surface}
                               width={strengthChartWidth}
                               height={40}
                               color="#5FBE84"
