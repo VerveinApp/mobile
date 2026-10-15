@@ -17,7 +17,9 @@ import { PremiumGate } from '@/components/premium-gate';
 import { HorizontalRuler } from '@/components/onboarding/horizontal-ruler';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 import { Sparkline } from '@/components/ui/sparkline';
+import { DayPicker } from '@/components/ui/day-picker';
 import { SwipeRow } from '@/components/ui/swipe-row';
+import { dayPillLabel } from '@/lib/day-labels';
 import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 
 // 50-calorie resolution, 0–5000 — a manually-recalled daily total doesn't
@@ -68,6 +70,9 @@ export default function NutritionHistoryScreen() {
   const [loaded, setLoaded] = useState(false);
   const [adding, setAdding] = useState(false);
   const [draftCalories, setDraftCalories] = useState(DEFAULT_CALORIES);
+  // Which day the entry is for — today unless a past day is picked, or an
+  // existing row was tapped to correct it.
+  const [draftDate, setDraftDate] = useState(localDateStr());
   const [chartWidth, setChartWidth] = useState(0);
 
   useEffect(() => {
@@ -81,6 +86,7 @@ export default function NutritionHistoryScreen() {
 
   const today = localDateStr();
   const hasTodayEntry = entries.some((e) => e.date === today);
+  const loggedDates = useMemo(() => new Set(entries.map((e) => e.date)), [entries]);
   const recentEntries = entries.slice(0, RECENT_FREE_COUNT);
   const olderEntries = entries.slice(RECENT_FREE_COUNT);
   // Full history, gated the same way EARLIER is — see sleep-history.tsx's
@@ -91,16 +97,39 @@ export default function NutritionHistoryScreen() {
     hapticSelect();
     setAdding((wasAdding) => {
       const willAdd = !wasAdding;
-      if (willAdd) setDraftCalories(entries[0]?.calories ?? DEFAULT_CALORIES);
+      if (willAdd) {
+        setDraftDate(today);
+        setDraftCalories(entries.find((e) => e.date === today)?.calories ?? entries[0]?.calories ?? DEFAULT_CALORIES);
+      }
       return willAdd;
     });
   };
 
   const handleSave = async () => {
     hapticImpactLight();
-    await saveNutritionEntry(today, draftCalories);
-    setEntries((prev) => [{ date: today, calories: draftCalories }, ...prev.filter((e) => e.date !== today)]);
+    await saveNutritionEntry(draftDate, draftCalories);
+    setEntries((prev) =>
+      [{ date: draftDate, calories: draftCalories }, ...prev.filter((e) => e.date !== draftDate)].sort((a, b) =>
+        b.date.localeCompare(a.date)
+      )
+    );
     setAdding(false);
+  };
+
+  // Picking a day that already has an entry loads it, so saving updates it.
+  const handleSelectDay = (date: string) => {
+    setDraftDate(date);
+    const existing = entries.find((e) => e.date === date);
+    if (existing) setDraftCalories(existing.calories);
+  };
+
+  // Tapping a row reopens the editor on that day — how a typo gets fixed
+  // without deleting the row.
+  const handleEdit = (entry: NutritionLogEntry) => {
+    hapticSelect();
+    setDraftDate(entry.date);
+    setDraftCalories(entry.calories);
+    setAdding(true);
   };
 
   const handleDelete = async (date: string) => {
@@ -130,10 +159,21 @@ export default function NutritionHistoryScreen() {
       )}
       onFullSwipe={() => handleDelete(entry.date)}
     >
-      <View style={[styles.entryRow, index < total - 1 && styles.entryRowDivider, { backgroundColor: colors.surface }]}>
+      <Pressable
+        onPress={() => handleEdit(entry)}
+        style={({ pressed }) => [
+          styles.entryRow,
+          index < total - 1 && styles.entryRowDivider,
+          { backgroundColor: colors.surface },
+          pressed && PRESSED_DIM,
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel={`${formatEntryDate(entry.date)}, ${formatCalories(entry.calories)}`}
+        accessibilityHint="Edit this entry"
+      >
         <Text style={styles.entryDate} maxFontSizeMultiplier={1.2}>{formatEntryDate(entry.date)}</Text>
         <Text style={styles.entryValue} maxFontSizeMultiplier={1.2}>{formatCalories(entry.calories)}</Text>
-      </View>
+      </Pressable>
     </SwipeRow>
     </ReanimatedAnimated.View>
   );
@@ -182,6 +222,7 @@ export default function NutritionHistoryScreen() {
 
             {adding ? (
               <View style={styles.addCard}>
+                <DayPicker value={draftDate} onChange={handleSelectDay} loggedDates={loggedDates} />
                 <HorizontalRuler
                   items={CALORIE_ITEMS}
                   accessibilityLabel="Calories"
@@ -195,7 +236,9 @@ export default function NutritionHistoryScreen() {
                   style={styles.saveButtonHit}
                 >
                   <View style={styles.saveButton}>
-                    <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>Save</Text>
+                    <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>
+                      {draftDate === today ? 'Save' : `Save for ${dayPillLabel(draftDate).text}`}
+                    </Text>
                   </View>
                 </Pressable>
               </View>

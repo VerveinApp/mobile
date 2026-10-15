@@ -22,7 +22,9 @@ import {
 } from '@/components/onboarding/horizontal-ruler';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 import { Sparkline } from '@/components/ui/sparkline';
+import { DayPicker } from '@/components/ui/day-picker';
 import { SwipeRow } from '@/components/ui/swipe-row';
+import { dayPillLabel } from '@/lib/day-labels';
 import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 
 // Same conversion math and item ranges as biometrics-sheet.tsx — duplicated
@@ -134,6 +136,9 @@ export default function WeightHistoryScreen() {
   // own doc comment). null = no goal set, shown nowhere on this screen.
   const [targetWeightKg, setTargetWeightKg] = useState<number | null>(null);
   const [chartWidth, setChartWidth] = useState(0);
+  // Which day the weigh-in is for — today unless a past day is picked, or an
+  // existing row was tapped to correct it.
+  const [draftDate, setDraftDate] = useState(localDateStr());
 
   useEffect(() => {
     (async () => {
@@ -150,6 +155,7 @@ export default function WeightHistoryScreen() {
 
   const today = localDateStr();
   const hasTodayEntry = entries.some((e) => e.date === today);
+  const loggedDates = useMemo(() => new Set(entries.map((e) => e.date)), [entries]);
 
   const handleToggleAdd = () => {
     hapticSelect();
@@ -159,6 +165,7 @@ export default function WeightHistoryScreen() {
       // reopening after Cancel (or after this list changed) could show a
       // stale value from whenever the screen first mounted.
       if (willAdd) {
+        setDraftDate(today);
         setDraftWeightKg(seedWholeUnitKg(currentWeightKg ?? DEFAULT_WEIGHT_KG, unit));
       }
       return willAdd;
@@ -167,18 +174,50 @@ export default function WeightHistoryScreen() {
 
   const handleSave = async () => {
     hapticImpactLight();
-    await saveWeightEntry(today, draftWeightKg);
-    await updateProfile({ weightKg: String(draftWeightKg) });
-    setEntries((prev) => [{ date: today, weightKg: draftWeightKg }, ...prev.filter((e) => e.date !== today)]);
+    await saveWeightEntry(draftDate, draftWeightKg);
+    // The profile's weight is the CURRENT weight (calorie estimates, the
+    // strength-to-bodyweight ratio) — only the newest weigh-in sets it, never
+    // one backfilled under an earlier day.
+    const isNewest = entries.every((e) => e.date === draftDate || e.date < draftDate);
+    if (isNewest) await updateProfile({ weightKg: String(draftWeightKg) });
+    setEntries((prev) =>
+      [{ date: draftDate, weightKg: draftWeightKg }, ...prev.filter((e) => e.date !== draftDate)].sort((a, b) =>
+        b.date.localeCompare(a.date)
+      )
+    );
     setAdding(false);
+  };
+
+  // Picking a day that already has a weigh-in loads it, so saving updates it.
+  const handleSelectDay = (date: string) => {
+    setDraftDate(date);
+    const existing = entries.find((e) => e.date === date);
+    if (existing) setDraftWeightKg(existing.weightKg);
+  };
+
+  // Tapping a row reopens the editor on that day — how a typo gets fixed
+  // without deleting the row.
+  const handleEdit = (entry: WeightLogEntry) => {
+    hapticSelect();
+    setDraftDate(entry.date);
+    setDraftWeightKg(entry.weightKg);
+    setAdding(true);
   };
 
   const handleDelete = async (date: string) => {
     hapticImpactLight();
     const previous = entries;
-    setEntries((prev) => prev.filter((e) => e.date !== date));
+    const remaining = entries.filter((e) => e.date !== date);
+    setEntries(remaining);
     try {
       await deleteWeightEntry(date);
+      // BUG FIX: deleting the newest weigh-in left its weight on the profile,
+      // so a mistyped number kept feeding calorie estimates and the
+      // strength-to-bodyweight ratio. The next newest takes its place.
+      if (previous[0]?.date === date && remaining.length > 0) {
+        await updateProfile({ weightKg: String(remaining[0].weightKg) });
+        setProfileWeightKg(String(remaining[0].weightKg));
+      }
     } catch {
       // Persisted delete failed — restore the exact prior list instead of
       // silently letting the entry reappear on next load with no signal.
@@ -246,6 +285,7 @@ export default function WeightHistoryScreen() {
 
             {adding ? (
               <View style={styles.addCard}>
+                <DayPicker value={draftDate} onChange={handleSelectDay} loggedDates={loggedDates} />
                 <View style={styles.wheelRow}>
                   {unit === 'imperial' ? (
                     <>
@@ -302,7 +342,9 @@ export default function WeightHistoryScreen() {
                   style={styles.saveButtonHit}
                 >
                   <View style={styles.saveButton}>
-                    <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>Save</Text>
+                    <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>
+                      {draftDate === today ? 'Save' : `Save for ${dayPillLabel(draftDate).text}`}
+                    </Text>
                   </View>
                 </Pressable>
               </View>
@@ -374,18 +416,23 @@ export default function WeightHistoryScreen() {
                     )}
                     onFullSwipe={() => handleDelete(entry.date)}
                   >
-                    <View
-                      style={[
+                    <Pressable
+                      onPress={() => handleEdit(entry)}
+                      style={({ pressed }) => [
                         styles.entryRow,
                         index < entries.length - 1 && styles.entryRowDivider,
                         { backgroundColor: colors.surface },
+                        pressed && PRESSED_DIM,
                       ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${formatEntryDate(entry.date)}, ${formatWeight(entry.weightKg, unit)}`}
+                      accessibilityHint="Edit this entry"
                     >
                       <Text style={styles.entryDate} maxFontSizeMultiplier={1.2}>{formatEntryDate(entry.date)}</Text>
                       <Text style={styles.entryWeight} maxFontSizeMultiplier={1.2}>
                         {formatWeight(entry.weightKg, unit)}
                       </Text>
-                    </View>
+                    </Pressable>
                   </SwipeRow>
                   </ReanimatedAnimated.View>
                 ))}

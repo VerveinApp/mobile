@@ -24,7 +24,9 @@ import { getProfile } from '@/lib/user-profile';
 import { HealthConsentGate } from '@/components/settings/health-consent-gate';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 import { Sparkline } from '@/components/ui/sparkline';
+import { DayPicker } from '@/components/ui/day-picker';
 import { SwipeRow } from '@/components/ui/swipe-row';
+import { dayPillLabel } from '@/lib/day-labels';
 import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 
 const FIELDS: { key: BodyMeasurementField; label: string }[] = [
@@ -87,6 +89,9 @@ export default function BodyMeasurementsScreen() {
     armCm: '',
     thighCm: '',
   });
+  // Which day the measurements are for — today unless a past day is picked,
+  // or an existing row was tapped to correct it.
+  const [draftDate, setDraftDate] = useState(localDateStr());
   const [chartField, setChartField] = useState<BodyMeasurementField>('waistCm');
   const [chartWidth, setChartWidth] = useState(0);
 
@@ -101,9 +106,41 @@ export default function BodyMeasurementsScreen() {
   }, []);
   useFocusEffect(reload);
 
+  const today = localDateStr();
+  const loggedDates = useMemo(() => new Set(entries.map((e) => e.date)), [entries]);
+  // The day's saved values as typed text, so a picked day that already has
+  // measurements opens with them filled in and Save updates them.
+  const draftFor = (date: string): Record<BodyMeasurementField, string> => {
+    const existing = entries.find((e) => e.date === date);
+    const value = (key: BodyMeasurementField) =>
+      existing && existing[key] !== undefined ? cmToDisplay(existing[key] as number, unit) : '';
+    return { waistCm: value('waistCm'), chestCm: value('chestCm'), hipCm: value('hipCm'), armCm: value('armCm'), thighCm: value('thighCm') };
+  };
+  const hasDraftValue = FIELDS.some(({ key }) => displayToCm(draft[key], unit) !== undefined);
+
   const handleToggleAdd = () => {
     hapticSelect();
-    setAdding((a) => !a);
+    setAdding((wasAdding) => {
+      if (!wasAdding) {
+        setDraftDate(today);
+        setDraft(draftFor(today));
+      }
+      return !wasAdding;
+    });
+  };
+
+  const handleSelectDay = (date: string) => {
+    setDraftDate(date);
+    setDraft(draftFor(date));
+  };
+
+  // Tapping a row reopens the form on that day with its values — how a
+  // typo gets fixed, and how every value gets seen in full.
+  const handleEdit = (date: string) => {
+    hapticSelect();
+    setDraftDate(date);
+    setDraft(draftFor(date));
+    setAdding(true);
   };
 
   const handleSave = async () => {
@@ -116,8 +153,7 @@ export default function BodyMeasurementsScreen() {
     if (Object.keys(fields).length === 0) return;
     hapticImpactLight();
     setSaving(true);
-    const today = localDateStr();
-    await saveBodyMeasurementEntry(today, fields);
+    await saveBodyMeasurementEntry(draftDate, fields);
     reload();
     setDraft({ waistCm: '', chestCm: '', hipCm: '', armCm: '', thighCm: '' });
     setAdding(false);
@@ -193,16 +229,17 @@ export default function BodyMeasurementsScreen() {
               onHoverIn={addHover.onHoverIn}
               onHoverOut={addHover.onHoverOut}
               accessibilityRole="button"
-              accessibilityLabel={adding ? 'Cancel adding measurements' : "Add today's measurements"}
+              accessibilityLabel={adding ? 'Cancel adding measurements' : 'Add measurements'}
             >
               <SymbolView name={adding ? 'xmark' : 'plus'} size={13} tintColor="#5FBE84" />
               <Text style={styles.addRowText} maxFontSizeMultiplier={1.2}>
-                {adding ? 'Cancel' : "Add today's measurements"}
+                {adding ? 'Cancel' : 'Add measurements'}
               </Text>
             </Pressable>
 
             {adding ? (
               <View style={styles.addCard}>
+                <DayPicker value={draftDate} onChange={handleSelectDay} loggedDates={loggedDates} />
                 {FIELDS.map(({ key, label }) => (
                   <View key={key} style={styles.fieldRow}>
                     <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>{label}</Text>
@@ -224,12 +261,16 @@ export default function BodyMeasurementsScreen() {
                   onPress={handleSave}
                   onPressIn={savePress.onPressIn}
                   onPressOut={savePress.onPressOut}
-                  disabled={saving}
+                  // Dimmed until at least one measurement is filled in — it used
+                  // to look ready and silently do nothing on a blank form.
+                  disabled={saving || !hasDraftValue}
                   style={styles.saveButtonHit}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: saving || !hasDraftValue }}
                 >
-                  <View style={[styles.saveButton, saving && styles.saveButtonDisabled]}>
+                  <View style={[styles.saveButton, (saving || !hasDraftValue) && styles.saveButtonDisabled]}>
                     <Text style={styles.saveButtonText} maxFontSizeMultiplier={1.15}>
-                      {saving ? 'Saving…' : 'Save'}
+                      {saving ? 'Saving…' : draftDate === today ? 'Save' : `Save for ${dayPillLabel(draftDate).text}`}
                     </Text>
                   </View>
                 </Pressable>
@@ -304,18 +345,23 @@ export default function BodyMeasurementsScreen() {
                       )}
                       onFullSwipe={() => handleDelete(entry.date)}
                     >
-                      <View
-                        style={[
+                      <Pressable
+                        onPress={() => handleEdit(entry.date)}
+                        style={({ pressed }) => [
                           styles.entryRow,
                           index < entries.length - 1 && styles.entryRowDivider,
                           { backgroundColor: colors.surface },
+                          pressed && PRESSED_DIM,
                         ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${formatEntryDate(entry.date)}, ${parts.join(', ')}`}
+                        accessibilityHint="Edit this entry"
                       >
                         <Text style={styles.entryDate} maxFontSizeMultiplier={1.2}>{formatEntryDate(entry.date)}</Text>
-                        <Text style={styles.entryValues} numberOfLines={1} maxFontSizeMultiplier={1.2}>
+                        <Text style={styles.entryValues} numberOfLines={2} maxFontSizeMultiplier={1.2}>
                           {parts.join(' · ')}
                         </Text>
-                      </View>
+                      </Pressable>
                     </SwipeRow>
                     </ReanimatedAnimated.View>
                   );
