@@ -48,6 +48,12 @@ export function hapticImpactLight() {
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 }
 
+/** Weightier than Light, for a moment that has to be felt through a pocket — a rest ending. */
+export function hapticImpactMedium() {
+  if (Platform.OS === 'web' || !hapticsEnabled) return;
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+}
+
 /** For a validation error (bad email, incomplete code, empty required field). */
 export function hapticError() {
   if (Platform.OS === 'web' || !hapticsEnabled) return;

@@ -13,7 +13,9 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CanvasScaleContext, scaleCanvasStyles, useCanvasScale, useCanvasUnit } from '@/lib/canvas-scale';
 import ReanimatedAnimated, {
@@ -53,7 +55,12 @@ import {
   serializeOwnedEquipment,
   type OwnedEquipment,
 } from '@/lib/owned-equipment';
-import { hapticImpactLight, hapticSelect, hapticSuccess, hapticWarning } from '@/lib/haptics';
+import { hapticImpactLight, hapticImpactMedium, hapticSelect, hapticSuccess, hapticWarning } from '@/lib/haptics';
+import { cancelRestOverNotification, scheduleRestOverNotification } from '@/lib/rest-notification';
+import { REST_ADJUST_STEP_SECONDS, adjustRest, setsDoneFor } from '@/lib/rest-timer';
+import { BottomFade } from '@/components/session/bottom-fade';
+import { TimerRing } from '@/components/session/timer-ring';
+import { useKeepAwakeWhile } from '@/lib/keep-awake';
 import { getCoachingInsightNote, markCoachingInsightShown } from '@/lib/coaching-insights';
 import { getPlanFitNote } from '@/lib/plan-fit';
 import { recordCheckInAndShouldShowPaywall } from '@/lib/paywall-trigger';
@@ -259,6 +266,12 @@ function summarizeExclusions(
  */
 export default function EnergyCheckInScreen() {
   const scale = useCanvasScale();
+  // The pinned Up next bar clears the home indicator. The canvas is centered
+  // in the window, so whatever space sits below it already counts.
+  const safeArea = useSafeAreaInsets();
+  const window = useWindowDimensions();
+  const upNextBottomInset =
+    Math.max(10 * scale, safeArea.bottom - (window.height - CANVAS_HEIGHT * scale) / 2) + 6 * scale;
   const { colors, resolvedScheme } = useAppTheme();
   const hoverWashColor = resolvedScheme === 'dark' ? '#ffffff' : '#000000';
   // The canvas is laid out at its real size (see canvas-scale.ts). The two
@@ -1063,6 +1076,10 @@ export default function EnergyCheckInScreen() {
   // of that fact to keep in sync (and no reset-on-exercise-change effect
   // needed for it either).
   const currentExerciseTimerDone = completedExercises.has(currentExerciseIndex);
+  const nextExercise = sessionExercises[currentExerciseIndex + 1] ?? null;
+  // The screen stays on for the whole session — no lock and Face ID
+  // between sets. Released at Finish or on leaving.
+  useKeepAwakeWhile(sessionState === 'resolved');
   // "How much is left" — the one thing the resolved view didn't answer
   // before, which matters most exactly when energy is low and someone's
   // deciding whether to keep going. Clamped defensively even though
@@ -2128,53 +2145,6 @@ export default function EnergyCheckInScreen() {
 
             <ReanimatedAnimated.View layout={sectionLayout}>
             <Pressable
-              style={styles.checkinPrimaryButtonHit}
-              // 38pt tall by design; the slop brings the tap target past 44pt.
-              hitSlop={{ top: 6, bottom: 6 }}
-              onPress={() => (isLastExercise ? handleFinishSession() : handleNextExercise())}
-              disabled={!currentExerciseTimerDone || isFinishingSession}
-              onHoverIn={finishHover.onHoverIn}
-              onHoverOut={finishHover.onHoverOut}
-              onPressIn={finishPress.onPressIn}
-              onPressOut={finishPress.onPressOut}
-              accessibilityRole="button"
-              accessibilityLabel={isLastExercise ? 'Finish session' : 'Next exercise'}
-            >
-              <Animated.View
-                style={[
-                  styles.primaryButtonVisual,
-                  (!currentExerciseTimerDone || isFinishingSession) && styles.primaryButtonDisabled,
-                  { transform: [{ scale: finishPress.scale }] },
-                ]}
-              >
-                <Animated.View
-                  pointerEvents="none"
-                  style={[
-                    StyleSheet.absoluteFill,
-                    styles.hoverWash,
-                    { opacity: finishHover.anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.12] }) },
-                  ]}
-                />
-                <Animated.View
-                  pointerEvents="none"
-                  style={[
-                    StyleSheet.absoluteFill,
-                    styles.hoverWash,
-                    { opacity: finishPress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
-                  ]}
-                />
-                <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>
-                  {isLastExercise ? 'Finish session' : 'Next exercise'}
-                </Text>
-                <View style={styles.buttonArrow}>
-                  <ArrowUpIconGraphic size={24} />
-                </View>
-              </Animated.View>
-            </Pressable>
-            </ReanimatedAnimated.View>
-
-            <ReanimatedAnimated.View layout={sectionLayout}>
-            <Pressable
               style={styles.skipExerciseHit}
               onPress={handleSkipPress}
               hitSlop={8}
@@ -2640,6 +2610,82 @@ export default function EnergyCheckInScreen() {
             </Pressable>
           </ReanimatedAnimated.ScrollView>
         )}
+        {/* Pinned "Up next": what comes after this exercise, and the moment
+            it's done, the Next exercise / Finish button itself — so the way
+            forward is always on screen instead of under the whole list. */}
+        {sessionState === 'resolved' && preview && energy !== null ? (
+          <View style={[styles.upNextBar, { paddingBottom: upNextBottomInset }]} pointerEvents="box-none">
+            <BottomFade color={colors.background} height={28 * scale} />
+            {currentExerciseTimerDone ? (
+              <ReanimatedAnimated.View
+                key="up-next-go"
+                entering={FadeIn.duration(MOTION_DURATION.base).easing(MOTION_EASING.standard)}
+                exiting={FadeOut.duration(MOTION_DURATION.fast)}
+              >
+                  <Pressable
+                    style={[styles.checkinPrimaryButtonHit, styles.upNextButtonHit]}
+                    // 38pt tall by design; the slop brings the tap target past 44pt.
+                    hitSlop={{ top: 6, bottom: 6 }}
+                    onPress={() => (isLastExercise ? handleFinishSession() : handleNextExercise())}
+                    disabled={!currentExerciseTimerDone || isFinishingSession}
+                    onHoverIn={finishHover.onHoverIn}
+                    onHoverOut={finishHover.onHoverOut}
+                    onPressIn={finishPress.onPressIn}
+                    onPressOut={finishPress.onPressOut}
+                    accessibilityRole="button"
+                    accessibilityLabel={isLastExercise ? 'Finish session' : 'Next exercise'}
+                  >
+                    <Animated.View
+                      style={[
+                        styles.primaryButtonVisual,
+                        (!currentExerciseTimerDone || isFinishingSession) && styles.primaryButtonDisabled,
+                        { transform: [{ scale: finishPress.scale }] },
+                      ]}
+                    >
+                      <Animated.View
+                        pointerEvents="none"
+                        style={[
+                          StyleSheet.absoluteFill,
+                          styles.hoverWash,
+                          { opacity: finishHover.anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.12] }) },
+                        ]}
+                      />
+                      <Animated.View
+                        pointerEvents="none"
+                        style={[
+                          StyleSheet.absoluteFill,
+                          styles.hoverWash,
+                          { opacity: finishPress.glow.interpolate({ inputRange: [0, 1], outputRange: [0, 0.24] }) },
+                        ]}
+                      />
+                      <Text style={styles.primaryText} maxFontSizeMultiplier={1.15}>
+                        {isLastExercise ? 'Finish session' : 'Next exercise'}
+                      </Text>
+                      <View style={styles.buttonArrow}>
+                        <ArrowUpIconGraphic size={24} />
+                      </View>
+                    </Animated.View>
+                  </Pressable>
+              </ReanimatedAnimated.View>
+            ) : (
+              <ReanimatedAnimated.View
+                key="up-next-info"
+                entering={FadeIn.duration(MOTION_DURATION.base).easing(MOTION_EASING.standard)}
+                exiting={FadeOut.duration(MOTION_DURATION.fast)}
+                style={styles.upNextInfo}
+                accessible
+                accessibilityLabel={nextExercise ? `Up next: ${nextExercise.name}` : 'Last exercise. Finish when it is done'}
+              >
+                <Text style={styles.upNextLabel} maxFontSizeMultiplier={1.2}>
+                  {nextExercise ? 'UP NEXT' : 'LAST ONE'}
+                </Text>
+                <Text style={styles.upNextName} maxFontSizeMultiplier={1.2} numberOfLines={1}>
+                  {nextExercise ? nextExercise.name : 'Finish when this exercise is done'}
+                </Text>
+              </ReanimatedAnimated.View>
+            )}
+          </View>
+        ) : null}
       </ReanimatedAnimated.View>
       </View>
     </KeyboardAvoidingView>
@@ -2883,6 +2929,9 @@ function ExerciseTimer({
   const [phaseIndex, setPhaseIndex] = useState(0);
   const [secondsLeft, setSecondsLeft] = useState(() => intervals[0].seconds);
   const [active, setActive] = useState(true);
+  // Seconds the −15s / +15s buttons have moved the current rest by — the
+  // ring drains against the adjusted length. Back to 0 for every new phase.
+  const [restExtension, setRestExtension] = useState(0);
   // Collapsed by default here too — this is the "obvious tap" surface
   // (not automatic) for the live view, same disclosure language as the
   // exercise list and the reasoning panel. This is the moment a "surface
@@ -2899,6 +2948,9 @@ function ExerciseTimer({
   // handleStartNextPhase's tap. True only in that gap — false again the
   // instant the next interval actually starts.
   const awaitingNextPhase = secondsLeft === 0 && nextInterval !== null;
+  const isRest = currentInterval.kind === 'rest';
+  const intervalTotal = Math.max(1, currentInterval.seconds + (isRest ? restExtension : 0));
+  const restRunning = isRest && active && secondsLeft > 0;
 
   // The tick — a chained setTimeout keyed on secondsLeft itself; setState
   // happens inside the timeout callback, not the effect body itself. Counts
@@ -2960,8 +3012,44 @@ function ExerciseTimer({
   useEffect(() => {
     if (secondsLeft !== 0) return;
     clockPulse.set(withSequence(withTiming(0.35, { duration: 110 }), withTiming(1, { duration: 220 })));
-    if (!isLastInterval) hapticImpactLight();
-  }, [secondsLeft, isLastInterval, clockPulse]);
+    if (isRest) {
+      // Firmer than a set ending — this one has to reach a phone on a bench.
+      hapticImpactMedium();
+      AccessibilityInfo.announceForAccessibility('Rest over');
+    } else if (!isLastInterval) {
+      hapticImpactLight();
+    }
+  }, [secondsLeft, isLastInterval, isRest, clockPulse]);
+
+  // 3-2-1 during a rest: a light tap on each of the last three seconds, so
+  // the end never arrives as a surprise. Only while the app is on screen —
+  // a locked phone gets the rest-over notification below instead.
+  useEffect(() => {
+    if (!isRest || !active || secondsLeft < 1 || secondsLeft > 3) return;
+    if (AppState.currentState === 'active') hapticImpactLight();
+  }, [secondsLeft, isRest, active]);
+
+  // A rest running when the app leaves the screen gets one local
+  // notification at its end time ("Rest's up · Set 3 of 4 · Goblet Squat"),
+  // cancelled the moment the app is back, or when the rest is paused or
+  // over, or the exercise changes (unmount).
+  const restOverBody = isRest
+    ? `Set ${currentInterval.setNumber + 1} of ${currentInterval.totalSets} · ${exercise.name}`
+    : '';
+  useEffect(() => {
+    if (!restRunning) return;
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void cancelRestOverNotification();
+      } else if (endsAtRef.current !== null) {
+        void scheduleRestOverNotification(endsAtRef.current, restOverBody);
+      }
+    });
+    return () => {
+      subscription.remove();
+      void cancelRestOverNotification();
+    };
+  }, [restRunning, restOverBody]);
   const clockPulseStyle = useAnimatedStyle(() => ({ opacity: clockPulse.get() }));
 
   // Fluidity pass: this cluster is tapped constantly during a real session
@@ -2979,6 +3067,10 @@ function ExerciseTimer({
   const pausePress = useLiquidPress();
   const doneEarlyHover = useHoverFade();
   const doneEarlyPress = useLiquidPress();
+  const restLessHover = useHoverFade();
+  const restLessPress = useLiquidPress();
+  const restMoreHover = useHoverFade();
+  const restMorePress = useLiquidPress();
 
   const togglePause = () => {
     hapticSelect();
@@ -3000,16 +3092,29 @@ function ExerciseTimer({
   // The only place phaseIndex ever advances — an explicit tap to start
   // rest after a set, or to start the next set's own timer. Plain event
   // handler, not an effect, so calling setState here directly is fine.
+  // −15s / +15s on a running rest. The wall-clock end time moves by exactly
+  // what secondsLeft moves by, so the locked-phone catch-up above stays
+  // right; a paused rest has no end time yet and re-anchors on resume.
+  const handleAdjustRest = (delta: number) => {
+    const next = adjustRest({ secondsLeft, total: intervalTotal, plannedSeconds: currentInterval.seconds, delta });
+    const moved = next.secondsLeft - secondsLeft;
+    if (moved === 0) return;
+    hapticSelect();
+    if (endsAtRef.current !== null) endsAtRef.current += moved * 1000;
+    setRestExtension((e) => e + moved);
+    setSecondsLeft(next.secondsLeft);
+  };
+
   const handleStartNextPhase = () => {
     if (!nextInterval) return;
     hapticSelect();
     endsAtRef.current = null; // the next interval gets its own end time
+    setRestExtension(0);
     setPhaseIndex((i) => i + 1);
     setSecondsLeft(nextInterval.seconds);
     setActive(true);
   };
 
-  const isRest = currentInterval.kind === 'rest';
   // No label at all for a single-interval duration hold (totalSets:1,
   // nothing to count) — same plain-clock look as before for those.
   const phaseLabel = isRest
@@ -3121,12 +3226,25 @@ function ExerciseTimer({
           {phaseLabel}
         </Text>
       ) : null}
-      <ReanimatedAnimated.Text
-        style={[styles.timerClock, isRest && styles.timerClockRest, clockPulseStyle]}
-        maxFontSizeMultiplier={1.1}
-      >
-        {formatTimerClock(secondsLeft)}
-      </ReanimatedAnimated.Text>
+      <View style={styles.timerRingWrap}>
+        <TimerRing
+          fraction={(active && secondsLeft > 0 ? secondsLeft - 1 : secondsLeft) / intervalTotal}
+          running={active && secondsLeft > 0}
+          color={isRest ? '#E8823C' : colors.accentText}
+          trackColor={colors.surfaceDivider}
+          size={148}
+          strokeWidth={6}
+          setsDone={setsDoneFor(currentInterval, secondsLeft)}
+          totalSets={currentInterval.totalSets}
+        >
+          <ReanimatedAnimated.Text
+            style={[styles.timerClock, styles.timerClockInRing, isRest && styles.timerClockRest, clockPulseStyle]}
+            maxFontSizeMultiplier={1.1}
+          >
+            {formatTimerClock(secondsLeft)}
+          </ReanimatedAnimated.Text>
+        </TimerRing>
+      </View>
       {awaitingNextPhase ? (
         <Pressable
           style={styles.timerStartNextButton}
@@ -3147,6 +3265,24 @@ function ExerciseTimer({
         </Pressable>
       ) : secondsLeft > 0 ? (
         <View style={styles.timerActionRow}>
+          {isRest ? (
+            <Pressable
+              style={styles.timerPauseButton}
+              onPress={() => handleAdjustRest(-REST_ADJUST_STEP_SECONDS)}
+              hitSlop={8}
+              onHoverIn={restLessHover.onHoverIn}
+              onHoverOut={restLessHover.onHoverOut}
+              onPressIn={restLessPress.onPressIn}
+              onPressOut={restLessPress.onPressOut}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove ${REST_ADJUST_STEP_SECONDS} seconds of rest`}
+            >
+              <PillWash hover={restLessHover} press={restLessPress} radius={14} styles={styles} />
+              <Text style={[styles.timerPauseText, TabularNums]} maxFontSizeMultiplier={1.2}>
+                −{REST_ADJUST_STEP_SECONDS}s
+              </Text>
+            </Pressable>
+          ) : null}
           <Pressable
             style={styles.timerPauseButton}
             onPress={togglePause}
@@ -3180,6 +3316,24 @@ function ExerciseTimer({
               <SymbolView name="checkmark" size={11} tintColor={colors.textSecondary} />
               <Text style={styles.timerDoneEarlyText} maxFontSizeMultiplier={1.2}>
                 Done early?
+              </Text>
+            </Pressable>
+          ) : null}
+          {isRest ? (
+            <Pressable
+              style={styles.timerPauseButton}
+              onPress={() => handleAdjustRest(REST_ADJUST_STEP_SECONDS)}
+              hitSlop={8}
+              onHoverIn={restMoreHover.onHoverIn}
+              onHoverOut={restMoreHover.onHoverOut}
+              onPressIn={restMorePress.onPressIn}
+              onPressOut={restMorePress.onPressOut}
+              accessibilityRole="button"
+              accessibilityLabel={`Add ${REST_ADJUST_STEP_SECONDS} seconds of rest`}
+            >
+              <PillWash hover={restMoreHover} press={restMorePress} radius={14} styles={styles} />
+              <Text style={[styles.timerPauseText, TabularNums]} maxFontSizeMultiplier={1.2}>
+                +{REST_ADJUST_STEP_SECONDS}s
               </Text>
             </Pressable>
           ) : null}
@@ -3625,7 +3779,39 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     resolvedFlow: {
       alignItems: 'center',
       paddingTop: 68,
-      paddingBottom: 40,
+      // Clears the pinned Up next bar.
+      paddingBottom: 130,
+    },
+    upNextBar: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      alignItems: 'center',
+      paddingTop: 6,
+      backgroundColor: colors.background,
+    },
+    upNextButtonHit: {
+      marginTop: 0,
+      width: 325,
+    },
+    upNextInfo: {
+      width: 325,
+      height: 38,
+      justifyContent: 'center',
+      paddingHorizontal: 2,
+    },
+    upNextLabel: {
+      color: colors.textTertiary,
+      fontSize: Type.micro,
+      letterSpacing: 0.4,
+      fontFamily: 'Geist-Medium',
+    },
+    upNextName: {
+      marginTop: 2,
+      color: colors.text,
+      fontSize: Type.body,
+      fontFamily: 'Geist-Medium',
     },
     // Was a boxed badge (2px green border, sharp corners) — the energy
     // number/label already say what was picked, so the callout-style box
@@ -3733,6 +3919,13 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     },
     timerClockRest: {
       color: '#E8823C',
+    },
+    timerRingWrap: {
+      marginTop: 10,
+    },
+    // Centered inside the ring, which supplies its own spacing.
+    timerClockInRing: {
+      marginTop: 0,
     },
     timerActionRow: {
       marginTop: 8,
