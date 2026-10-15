@@ -64,6 +64,7 @@ import {
   plansFailureMessage,
   priceWithPeriod,
   renewalDisclosure,
+  trialDays,
   trialLabel,
 } from '@/lib/paywall-plans';
 import { supabase } from '@/lib/supabase';
@@ -72,6 +73,7 @@ import { getImprovedExercises, getPerformanceHistory } from '@/lib/exercise-perf
 import { hasConnectedHealthKit } from '@/lib/health-kit';
 import { getRecentWeeks } from '@/lib/session-history';
 import { getProfile } from '@/lib/user-profile';
+import { isReminderPermissionGranted } from '@/lib/session-reminders';
 
 type Colors = ReturnType<typeof useAppTheme>['colors'];
 type Styles = ReturnType<typeof createStyles>;
@@ -257,7 +259,11 @@ export default function PaywallScreen() {
   // PreviewCard): their last four weeks, their best-moving lift, and
   // whether Apple Health is connected for readiness.
   const [ownPreview, setOwnPreview] = useState<OwnPreview | null>(null);
+  // The trial timeline promises a reminder only when one can actually be
+  // sent — notifications are already allowed (this screen never asks).
+  const [canRemind, setCanRemind] = useState(false);
   useEffect(() => {
+    isReminderPermissionGranted().then(setCanRemind);
     (async () => {
       const profile = await getProfile();
       const [weeks, improved, healthConnected] = await Promise.all([
@@ -431,6 +437,20 @@ export default function PaywallScreen() {
         : billingPeriod(selectedPackage)
           ? `${priceWithPeriod(selectedPackage)}, renews automatically until canceled.`
           : `One-time purchase of ${selectedPackage.product.priceString}.`;
+  // A free trial reads as the days it covers: what happens today, when the
+  // reminder comes (only promised when notifications are allowed), and the
+  // day billing starts — the plain-language version of the terms below.
+  const selectedTrialDays = selectedTrial && selectedPackage ? trialDays(selectedPackage) : null;
+  const trialTimeline =
+    selectedPackage && selectedTrialDays !== null && selectedTrialDays >= 2
+      ? [
+          { when: 'Today', what: 'Plus unlocks' },
+          canRemind
+            ? { when: `Day ${selectedTrialDays - 1}`, what: 'We remind you' }
+            : { when: 'Anytime', what: 'Cancel in Settings' },
+          { when: `Day ${selectedTrialDays}`, what: `${priceWithPeriod(selectedPackage)} begins` },
+        ]
+      : null;
   // Room for the longest terms (a trial on a narrow phone wraps to five
   // lines), held whatever plan is selected — the terms sit under the button,
   // so a shorter variant must not let the button drop under a thumb.
@@ -606,7 +626,27 @@ export default function PaywallScreen() {
                 {notice.text}
               </ReanimatedAnimated.Text>
             ) : null}
-            {footerSummary ? (
+            {trialTimeline ? (
+              <ReanimatedAnimated.View
+                key="trial-timeline"
+                entering={LIST_ROW_ENTERING}
+                style={styles.trialTimeline}
+                accessible
+                accessibilityLabel={trialTimeline.map((step) => `${step.when}: ${step.what}`).join('. ')}
+              >
+                {trialTimeline.map((step, index) => (
+                  <View key={step.when} style={styles.trialStep}>
+                    <View style={[styles.trialDot, index === 0 && styles.trialDotNow]} />
+                    <Text style={styles.trialWhen} maxFontSizeMultiplier={1.2}>
+                      {step.when}
+                    </Text>
+                    <Text style={styles.trialWhat} maxFontSizeMultiplier={1.2} numberOfLines={2}>
+                      {step.what}
+                    </Text>
+                  </View>
+                ))}
+              </ReanimatedAnimated.View>
+            ) : footerSummary ? (
               <ReanimatedAnimated.Text
                 key={footerSummary}
                 entering={LIST_ROW_ENTERING}
@@ -1554,6 +1594,36 @@ function createStyles(colors: Colors, isDark: boolean) {
       lineHeight: 18,
       textAlign: 'center',
       fontFamily: 'Geist-Regular',
+    },
+    trialTimeline: {
+      flexDirection: 'row',
+      marginBottom: 10,
+    },
+    trialStep: {
+      flex: 1,
+      alignItems: 'center',
+      gap: 2,
+    },
+    trialDot: {
+      width: 7,
+      height: 7,
+      borderRadius: 3.5,
+      marginBottom: 3,
+      backgroundColor: colors.backgroundSelected,
+    },
+    trialDotNow: {
+      backgroundColor: BRAND_GREEN,
+    },
+    trialWhen: {
+      color: colors.text,
+      fontSize: Type.secondary,
+      fontFamily: 'Geist-SemiBold',
+    },
+    trialWhat: {
+      color: colors.textSecondary,
+      fontSize: Type.caption,
+      fontFamily: 'Geist-Medium',
+      textAlign: 'center',
     },
     trialText: {
       marginBottom: 8,

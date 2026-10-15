@@ -8,6 +8,7 @@ import {
   plansFailureMessage,
   priceWithPeriod,
   renewalDisclosure,
+  trialDays,
   trialLabel,
 } from '@/lib/paywall-plans';
 
@@ -132,5 +133,21 @@ describe('failure copy', () => {
     expect(plansFailureMessage('offline', true)).toMatch(/when you're back online/);
     expect(plansFailureMessage('unavailable', true)).toMatch(/when you're back online/);
     expect(plansFailureMessage('offline', false)).not.toMatch(/back online/);
+  });
+});
+
+describe('trialDays', () => {
+  it('counts the days a free trial covers', () => {
+    expect(trialDays(MONTHLY_WITH_TRIAL)).toBe(3);
+    expect(
+      trialDays(pkg('MONTHLY', { price: 7.99, priceString: '$7.99', introPrice: { price: 0, periodNumberOfUnits: 1, periodUnit: 'WEEK' } }))
+    ).toBe(7);
+  });
+
+  it('has no days for a plan without a free trial', () => {
+    expect(trialDays(MONTHLY)).toBeNull();
+    expect(
+      trialDays(pkg('MONTHLY', { price: 7.99, priceString: '$7.99', introPrice: { price: 0.99, periodNumberOfUnits: 1, periodUnit: 'MONTH' } }))
+    ).toBeNull();
   });
 });

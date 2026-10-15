@@ -92,6 +92,22 @@ export function trialLabel(pkg: PurchasesPackage): string | null {
   return `${intro.periodNumberOfUnits}-${intro.periodUnit.toLowerCase()} free trial`;
 }
 
+/** How many days a free trial runs, for the paywall's day-by-day timeline
+ * — null when there's no free trial (or a unit that can't be counted). */
+export function trialDays(pkg: PurchasesPackage): number | null {
+  const intro = pkg.product.introPrice;
+  if (!intro || intro.price !== 0) return null;
+  const units = intro.periodNumberOfUnits;
+  switch (intro.periodUnit) {
+    case 'DAY':
+      return units;
+    case 'WEEK':
+      return units * 7;
+    default:
+      return null;
+  }
+}
+
 /**
  * What a year on the yearly plan saves over twelve months of monthly, in
  * the store's own currency — computed from real prices, never a canned

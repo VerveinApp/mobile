@@ -12,6 +12,7 @@ import Purchases, {
 import * as Sentry from '@sentry/react-native';
 
 import { supabase } from '@/lib/supabase';
+import { syncTrialEndingReminder } from '@/lib/trial-reminder';
 
 // iOS-only for now, same scoping as health-kit.ts — this app doesn't ship
 // Android yet. EXPO_PUBLIC_REVENUECAT_API_KEY_IOS is the real key, wired to
@@ -81,7 +82,11 @@ export async function initPurchases(): Promise<void> {
     // Purchases, restores, renewals and expirations all arrive here — every
     // mounted screen's gate updates the moment it happens, not on its next
     // focus.
-    Purchases.addCustomerInfoUpdateListener((info) => publishEntitlement(isEntitled(info)));
+    Purchases.addCustomerInfoUpdateListener((info) => {
+      publishEntitlement(isEntitled(info));
+      // A trial cancelled in Settings (or converted) drops its reminder.
+      void syncTrialEndingReminder(info, PREMIUM_ENTITLEMENT_ID);
+    });
   } catch {
     // Worst case Premium features stay locked this session — never a crash,
     // same "under-triggering is the safe failure mode" rule health-kit.ts
@@ -368,6 +373,7 @@ export type PurchaseOutcome =
 export async function purchasePackage(pkg: PurchasesPackage): Promise<PurchaseOutcome> {
   try {
     const { customerInfo } = await Purchases.purchasePackage(pkg);
+    void syncTrialEndingReminder(customerInfo, PREMIUM_ENTITLEMENT_ID);
     return { kind: 'purchased', customerInfo };
   } catch (error) {
     const code = (error as { code?: PURCHASES_ERROR_CODE })?.code;
