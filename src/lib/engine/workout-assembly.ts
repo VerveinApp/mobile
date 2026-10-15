@@ -44,7 +44,9 @@ export function assembleWorkout(
   }
 
   return {
-    workout: { exercises: exerciseList, totalDuration, isRestDay },
+    // Whole minutes: short blocks are half-minute steps (volume-scaling.ts),
+    // and a session length reads in minutes, never "26.5 min".
+    workout: { exercises: exerciseList, totalDuration: Math.round(totalDuration), isRestDay },
     knownGaps,
   };
 }

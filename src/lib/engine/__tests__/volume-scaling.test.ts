@@ -29,21 +29,31 @@ describe('scaleVolume', () => {
     expect(result.exercises[0].adapted_sets).toBeGreaterThanOrEqual(1);
   });
 
-  it('rounds adapted_duration_min to the nearest 5 minutes', () => {
-    const ex = makeExercise({ base_duration_min: 8, base_sets: null });
-    // energy 4 -> durationMultiplier 1.0, calibration 1 -> 8 * 1 = 8 -> round to nearest 5 -> 10
+  it('rounds a block of 10 minutes or more to the nearest 5 minutes', () => {
+    const ex = makeExercise({ base_duration_min: 12, base_sets: null });
+    // energy 4 -> durationMultiplier 1.0 -> 12 -> nearest 5 -> 10
     const result = scaleVolume([ex], ENERGY_MODIFIER_TABLE[4], [], 'standard', 1);
     if (result.kind !== 'scaled') throw new Error('expected scaled');
     expect(result.exercises[0].adapted_duration_min).toBe(10);
   });
 
-  it('floors a duration that rounds to exactly 0 up to 1 minute — never presents a 0-minute exercise — while still flagging (in knownGaps) the documented 5-minute-rounding gap that produced it', () => {
-    const ex = makeExercise({ base_duration_min: 4, base_sets: null, rep_structure: 'isometric_hold' });
-    // energy 2 -> durationMultiplier 0.6, calibration 1 -> 4*0.6=2.4 -> round(2.4/5)*5 -> 0, floored to 1
-    const result = scaleVolume([ex], ENERGY_MODIFIER_TABLE[2], [], 'standard', 1);
-    if (result.kind !== 'scaled') throw new Error('expected scaled');
-    expect(result.exercises[0].adapted_duration_min).toBe(1);
-    expect(result.knownGaps.some((g) => g.includes('rounded to 0'))).toBe(true);
+  it('rounds a short block to the nearest half minute instead of 0, 1 or 5 minutes', () => {
+    const shortHold = makeExercise({ base_duration_min: 4, base_sets: null, rep_structure: 'isometric_hold' });
+    // energy 2 -> durationMultiplier 0.6 -> 2.4 -> 2.5 (used to round to 0 and be floored to 1)
+    const low = scaleVolume([shortHold], ENERGY_MODIFIER_TABLE[2], [], 'standard', 1);
+    if (low.kind !== 'scaled') throw new Error('expected scaled');
+    expect(low.exercises[0].adapted_duration_min).toBe(2.5);
+    expect(low.knownGaps.some((g) => g.includes('rounded to 0'))).toBe(false);
+
+    const tinyHold = makeExercise({ base_duration_min: 0.5, base_sets: null, rep_structure: 'isometric_hold' });
+    const tiny = scaleVolume([tinyHold], ENERGY_MODIFIER_TABLE[2], [], 'standard', 1);
+    if (tiny.kind !== 'scaled') throw new Error('expected scaled');
+    expect(tiny.exercises[0].adapted_duration_min).toBe(0.5);
+
+    const eight = makeExercise({ base_duration_min: 8, base_sets: null });
+    const good = scaleVolume([eight], ENERGY_MODIFIER_TABLE[4], [], 'standard', 1);
+    if (good.kind !== 'scaled') throw new Error('expected scaled');
+    expect(good.exercises[0].adapted_duration_min).toBe(8);
   });
 
   it('a conservative volume stance dampens sets by 0.85x relative to a standard stance, all else equal', () => {
