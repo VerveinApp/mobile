@@ -14,7 +14,7 @@ import {
 } from '@/lib/body-measurements';
 import { Type } from '@/constants/theme';
 import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
-import { hapticError, hapticImpactLight, hapticSelect } from '@/lib/haptics';
+import { hapticError, hapticImpactLight, hapticSelect, hapticSuccess } from '@/lib/haptics';
 import { localDateStr } from '@/lib/local-date';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
@@ -159,6 +159,7 @@ export default function BodyMeasurementsScreen() {
     setDraft({ waistCm: '', chestCm: '', hipCm: '', armCm: '', thighCm: '' });
     setAdding(false);
     setSaving(false);
+    hapticSuccess();
   };
 
   const handleDelete = async (date: string) => {

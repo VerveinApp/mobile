@@ -7,7 +7,7 @@ import { SymbolView } from '@/components/ui/app-symbol';
 
 import { TabularNums, Type } from '@/constants/theme';
 import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
-import { hapticError, hapticImpactLight, hapticSelect } from '@/lib/haptics';
+import { hapticError, hapticImpactLight, hapticSelect, hapticSuccess } from '@/lib/haptics';
 import { localDateStr } from '@/lib/local-date';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
@@ -174,7 +174,6 @@ export default function WeightHistoryScreen() {
   };
 
   const handleSave = async () => {
-    hapticImpactLight();
     await saveWeightEntry(draftDate, draftWeightKg);
     // The profile's weight is the CURRENT weight (calorie estimates, the
     // strength-to-bodyweight ratio) — only the newest weigh-in sets it, never
@@ -187,6 +186,8 @@ export default function WeightHistoryScreen() {
       )
     );
     setAdding(false);
+    // A clear "saved" once it's actually stored, same as Measurements.
+    hapticSuccess();
   };
 
   // Picking a day that already has a weigh-in loads it, so saving updates it.

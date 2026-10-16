@@ -9,7 +9,7 @@ import type { SFSymbol } from 'sf-symbols-typescript';
 
 import { useHoverFade, PRESSED_DIM } from '@/lib/button-interactions';
 import { AndroidCardElevation, AndroidRipple, TabularNums, Type, sheenGradient } from '@/constants/theme';
-import { hapticImpactLight, hapticSuccess } from '@/lib/haptics';
+import { hapticImpactLight, hapticSelect, hapticSuccess } from '@/lib/haptics';
 import {
   DURATION_LABELS,
   ENVIRONMENT_LABELS,
@@ -18,6 +18,7 @@ import {
   GOAL_LABELS,
 } from '@/lib/profile-labels';
 import { COMMITMENT_LEVELS } from '@/lib/commitment-levels';
+import { getLifetimeSessionCount } from '@/lib/session-milestones';
 import { getPerformanceHistory } from '@/lib/exercise-performance';
 import { getUnitSystem, type UnitSystem } from '@/lib/unit-preference';
 import { getWeightLog, resolveCurrentWeightKg } from '@/lib/weight-log';
@@ -77,11 +78,20 @@ export default function ProfileScreen() {
   // for that exercise, same "no honest number, don't show one" rule
   // targetWeightKg's own progress already follows.
   const [currentLiftBestKg, setCurrentLiftBestKg] = useState<number | null>(null);
+  // Every session ever finished — a count that only grows (see
+  // session-milestones.ts: deliberately not a streak, nothing to break).
+  const [lifetimeSessions, setLifetimeSessions] = useState(0);
   const goalsSheetRef = useRef<BottomSheetModal>(null);
   const adjustPlanSheetRef = useRef<BottomSheetModal>(null);
 
   const loadProfileData = useCallback(async () => {
-    const [p, globalUnit, weightLog] = await Promise.all([getProfile(), getUnitSystem(), getWeightLog()]);
+    const [p, globalUnit, weightLog, sessions] = await Promise.all([
+      getProfile(),
+      getUnitSystem(),
+      getWeightLog(),
+      getLifetimeSessionCount(),
+    ]);
+    setLifetimeSessions(sessions);
     // unlessUnchanged: a focus that finds nothing new keeps every object as
     // it was, so a plain tab switch doesn't re-render this screen.
     setProfile(unlessUnchanged(p));
@@ -211,7 +221,10 @@ export default function ProfileScreen() {
       >
         <View style={styles.header}>
           <Pressable
-            onPress={() => router.push('/settings' as never)}
+            onPress={() => {
+              hapticSelect();
+              router.push('/settings' as never);
+            }}
             onHoverIn={settingsHover.onHoverIn}
             onHoverOut={settingsHover.onHoverOut}
             hitSlop={10}
@@ -239,6 +252,11 @@ export default function ProfileScreen() {
             <SymbolView name="pencil" size={13} tintColor={colors.textTertiary} style={styles.namePencil} />
           </Pressable>
           {profile?.email ? <Text style={styles.email} maxFontSizeMultiplier={1.3}>{profile.email}</Text> : null}
+          {lifetimeSessions > 0 ? (
+            <Text style={styles.lifetimeSessions} maxFontSizeMultiplier={1.3}>
+              {lifetimeSessions} session{lifetimeSessions === 1 ? '' : 's'} logged
+            </Text>
+          ) : null}
           {isPremium ? (
             <View style={styles.plusBadge}>
               {/* Dark mode's own request: keep the near-black icon there (it
@@ -353,7 +371,12 @@ export default function ProfileScreen() {
           <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>LOG</Text>
           <Pressable
             style={({ pressed }) => [styles.card, pressed && PRESSED_DIM]}
-            onPress={() => router.push('/log' as never)}
+            // Same tap as the plan card above — every card on Profile
+            // answers a press the same way.
+            onPress={() => {
+              hapticImpactLight();
+              router.push('/log' as never);
+            }}
             onHoverIn={logHover.onHoverIn}
             onHoverOut={logHover.onHoverOut}
             android_ripple={AndroidRipple}
@@ -383,7 +406,10 @@ export default function ProfileScreen() {
           <PremiumGate isPremium={isPremium} label="Goals" feature="goals">
           <Pressable
             style={({ pressed }) => [styles.card, pressed && PRESSED_DIM]}
-            onPress={() => goalsSheetRef.current?.present()}
+            onPress={() => {
+              hapticImpactLight();
+              goalsSheetRef.current?.present();
+            }}
             onHoverIn={goalsHover.onHoverIn}
             onHoverOut={goalsHover.onHoverOut}
             android_ripple={AndroidRipple}
@@ -576,6 +602,13 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors']) {
     },
     section: {
       gap: 12,
+    },
+    lifetimeSessions: {
+      marginTop: 4,
+      color: colors.textTertiary,
+      fontSize: Type.secondary,
+      fontFamily: 'Geist-Medium',
+      ...TabularNums,
     },
     sectionKicker: {
       color: colors.textTertiary,

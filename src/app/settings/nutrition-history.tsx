@@ -7,7 +7,7 @@ import { SymbolView } from '@/components/ui/app-symbol';
 
 import { TabularNums, Type } from '@/constants/theme';
 import { useHoverFade, useLiquidPress, PRESSED_DIM } from '@/lib/button-interactions';
-import { hapticError, hapticImpactLight, hapticSelect } from '@/lib/haptics';
+import { hapticError, hapticImpactLight, hapticSelect, hapticSuccess } from '@/lib/haptics';
 import { localDateStr } from '@/lib/local-date';
 import { deleteNutritionEntry, getNutritionLog, saveNutritionEntry, type NutritionLogEntry } from '@/lib/nutrition-log';
 import { usePremiumEntitlement } from '@/lib/purchases';
@@ -107,7 +107,6 @@ export default function NutritionHistoryScreen() {
   };
 
   const handleSave = async () => {
-    hapticImpactLight();
     await saveNutritionEntry(draftDate, draftCalories);
     setEntries((prev) =>
       [{ date: draftDate, calories: draftCalories }, ...prev.filter((e) => e.date !== draftDate)].sort((a, b) =>
@@ -115,6 +114,8 @@ export default function NutritionHistoryScreen() {
       )
     );
     setAdding(false);
+    // A clear "saved" once it's actually stored, same as Measurements.
+    hapticSuccess();
   };
 
   // Picking a day that already has an entry loads it, so saving updates it.
@@ -252,9 +253,11 @@ export default function NutritionHistoryScreen() {
           </View>
 
           {nutritionTrendData.length > 0 ? (
-            <PremiumGate isPremium={isPremium} label="Full nutrition trend" feature="history">
-              <View style={styles.section}>
-                <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>TREND</Text>
+            <View style={styles.section}>
+              <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>TREND</Text>
+              {/* The heading stays outside the gate, so a locked section still
+                  reads as a section, not a bare lock. */}
+              <PremiumGate isPremium={isPremium} label="Full nutrition trend" feature="history">
                 <View style={[styles.card, styles.chartCardPadding]}>
                   <TrendChart
                     data={nutritionTrendData}
@@ -264,8 +267,8 @@ export default function NutritionHistoryScreen() {
                     onScrubbingChange={setScrubbing}
                   />
                 </View>
-              </View>
-            </PremiumGate>
+              </PremiumGate>
+            </View>
           ) : null}
 
           <View style={styles.section}>
@@ -285,14 +288,16 @@ export default function NutritionHistoryScreen() {
           </View>
 
           {olderEntries.length > 0 ? (
-            <PremiumGate isPremium={isPremium} label="Full nutrition history" feature="history">
-              <View style={styles.section}>
-                <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>EARLIER</Text>
+            <View style={styles.section}>
+              <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>EARLIER</Text>
+              {/* The heading stays outside the gate, so a locked section still
+                  reads as a section, not a bare lock. */}
+              <PremiumGate isPremium={isPremium} label="Full nutrition history" feature="history">
                 <View style={styles.card}>
                   {olderEntries.map((entry, index) => renderEntryRow(entry, index, olderEntries.length))}
                 </View>
-              </View>
-            </PremiumGate>
+              </PremiumGate>
+            </View>
           ) : null}
         </ScrollView>
         </ReanimatedAnimated.View>

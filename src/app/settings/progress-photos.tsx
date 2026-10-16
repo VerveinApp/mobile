@@ -3,7 +3,7 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import ReanimatedAnimated, {
   Extrapolation,
@@ -56,6 +56,18 @@ function formatEntryDate(dateStr: string): string {
  * grid already had, just a more direct way to see it than flipping between
  * two full-screen views.
  */
+/** The day a picked photo was taken (its EXIF "2026:10:12 08:15:00"), or
+ * today when the photo carries no date — a camera shot, or one stripped of
+ * its metadata. Never a future day. */
+function photoDate(asset: ImagePicker.ImagePickerAsset): string {
+  const today = localDateStr();
+  const taken = asset.exif?.DateTimeOriginal ?? asset.exif?.DateTime;
+  const match = typeof taken === 'string' ? /^(\d{4}):(\d{2}):(\d{2})/.exec(taken) : null;
+  if (!match) return today;
+  const date = `${match[1]}-${match[2]}-${match[3]}`;
+  return date <= today ? date : today;
+}
+
 export default function ProgressPhotosScreen() {
   const insets = useSafeAreaInsets();
   const colors = useAppColors();
@@ -67,6 +79,10 @@ export default function ProgressPhotosScreen() {
   const entering = useFadeInEntering();
 
   const [photos, setPhotos] = useState<ProgressPhotoEntry[]>([]);
+  // Why nothing happened, when something didn't: access declined (with a
+  // way to fix it) or a photo that couldn't be saved. These used to fail
+  // silently, which looked like a broken button.
+  const [notice, setNotice] = useState<{ text: string; openSettings: boolean } | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [hasConsent, setHasConsent] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -116,9 +132,10 @@ export default function ProgressPhotosScreen() {
 
   const savePickedAsset = async (result: ImagePicker.ImagePickerResult) => {
     if (result.canceled || !result.assets[0]) return;
+    setNotice(null);
     setSaving(true);
     const id = Crypto.randomUUID();
-    const entry = await addProgressPhoto(id, localDateStr(), result.assets[0].uri);
+    const entry = await addProgressPhoto(id, photoDate(result.assets[0]), result.assets[0].uri);
     setSaving(false);
     setAdding(false);
     if (entry) {
@@ -131,23 +148,42 @@ export default function ProgressPhotosScreen() {
       // today vanish from the list, even though they were still safely on
       // disk the whole time (a reload would have brought them right back —
       // still a real, confusing bug, just not actual data loss).
-      setPhotos((prev) => [entry, ...prev]);
+      // Same order the store reads back (date, then newest first), so a
+      // photo dated from its EXIF lands on its own day, not on top.
+      setPhotos((prev) =>
+        [entry, ...prev].sort((a, b) => (a.date !== b.date ? (a.date < b.date ? 1 : -1) : a.createdAt < b.createdAt ? 1 : -1))
+      );
     } else {
       hapticError();
+      setNotice({ text: "That photo couldn't be saved. Try again.", openSettings: false });
     }
   };
 
   const handleTakePhoto = async () => {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) return;
+    if (!permission.granted) {
+      setNotice({ text: 'Camera access is off for VerveIn.', openSettings: true });
+      return;
+    }
     const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [3, 4], quality: 0.85 });
     await savePickedAsset(result);
   };
 
   const handleChooseFromLibrary = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) return;
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [3, 4], quality: 0.85 });
+    if (!permission.granted) {
+      setNotice({ text: 'Photo access is off for VerveIn.', openSettings: true });
+      return;
+    }
+    // exif: the day the photo was taken, so an older progress photo lands
+    // on its own day instead of today.
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [3, 4],
+      quality: 0.85,
+      exif: true,
+    });
     await savePickedAsset(result);
   };
 
@@ -307,6 +343,23 @@ export default function ProgressPhotosScreen() {
                 </Pressable>
                 {saving ? (
                   <Text style={styles.savingText} maxFontSizeMultiplier={1.2}>Saving…</Text>
+                ) : null}
+                {notice ? (
+                  <Text style={styles.noticeText} maxFontSizeMultiplier={1.3} accessibilityLiveRegion="polite">
+                    {notice.text}
+                    {notice.openSettings ? (
+                      <>
+                        {' '}
+                        <Text
+                          style={styles.noticeLink}
+                          onPress={() => Linking.openSettings()}
+                          accessibilityRole="link"
+                        >
+                          Open Settings
+                        </Text>
+                      </>
+                    ) : null}
+                  </Text>
                 ) : null}
               </View>
             ) : null}
@@ -617,6 +670,17 @@ function createStyles(colors: ReturnType<typeof useAppColors>) {
       paddingVertical: 12,
       paddingHorizontal: 12,
       borderRadius: 12,
+    },
+    noticeText: {
+      marginTop: 10,
+      textAlign: 'center',
+      color: colors.textSecondary,
+      fontSize: Type.secondary,
+      fontFamily: 'Geist-Medium',
+    },
+    noticeLink: {
+      color: colors.accentText,
+      textDecorationLine: 'underline',
     },
     choiceText: {
       color: colors.text,
