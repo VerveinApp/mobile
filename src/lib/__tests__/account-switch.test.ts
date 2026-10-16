@@ -1,6 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { claimLocalDataIfUnowned, forgetLocalDataOwner, prepareLocalDataForAccount } from '@/lib/account-switch';
+import {
+  claimLocalDataIfUnowned,
+  forgetLocalDataOwner,
+  prepareLocalDataForAccount,
+  reconcileLocalDataOwner,
+} from '@/lib/account-switch';
 import { buildBackupPayload, clearAllLocalData } from '@/lib/data-backup';
 import { getAccountStartDate, hasCompletedOnboarding, markOnboardingComplete } from '@/lib/onboarding-draft';
 import { getProgressPhotos } from '@/lib/progress-photos';
@@ -164,3 +169,26 @@ describe('account switching edge cases', () => {
   });
 });
 
+
+describe('reconcileLocalDataOwner', () => {
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+  });
+
+  it('claims unowned data and changes nothing for its owner', async () => {
+    await seedAccountData('Alex');
+    expect(await reconcileLocalDataOwner('user-a')).toBe(false);
+    expect(await reconcileLocalDataOwner('user-a')).toBe(false);
+    expect((await getProfile())?.name).toBe('Alex');
+  });
+
+  it("sets aside another account's data when the app relaunches signed in as someone else", async () => {
+    await seedAccountData('Alex');
+    await prepareLocalDataForAccount('user-a');
+    // Signed in as user-b, killed before the switch ran.
+    expect(await reconcileLocalDataOwner('user-b')).toBe(true);
+    expect(await getProfile()).toBeNull();
+    expect(await prepareLocalDataForAccount('user-a')).toBe('restored');
+    expect((await getProfile())?.name).toBe('Alex');
+  });
+});

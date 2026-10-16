@@ -981,7 +981,44 @@ export default function EnergyCheckInScreen() {
       ),
     [planProfile, calibration, symptomTags, planHealthReadinessModifier, planHealthReadinessReasons]
   );
-  const exerciseDelta = preview ? baseline.exerciseCount - preview.exerciseCount : 0;
+  // BUG FIX: the delta against `baseline` was always credited to energy, but
+  // a time limit, a different location or a body-area focus trims too —
+  // "3 exercises trimmed — great energy today" on a Great day with 15
+  // minutes. The same setup at Good energy splits the two: what energy
+  // changed (energyDelta) and what the setup changed (setupDelta).
+  const sameSetupAtGood = useMemo(
+    () =>
+      computePlanPreview(
+        planProfile ?? {},
+        4,
+        calibration ?? { userId: LOCAL_USER_ID, ...DEFAULT_CALIBRATION },
+        Array.from(symptomTags),
+        trainingState ?? undefined,
+        planHealthReadinessModifier,
+        verifiedYesterdayEnergy,
+        timeAvailableMin ?? undefined,
+        planDaysSinceLastCheckIn,
+        false,
+        planHealthReadinessReasons,
+        preferredBodyArea ?? undefined,
+        equipmentOverride ?? undefined
+      ),
+    [
+      planProfile,
+      calibration,
+      symptomTags,
+      trainingState,
+      planHealthReadinessModifier,
+      verifiedYesterdayEnergy,
+      timeAvailableMin,
+      planDaysSinceLastCheckIn,
+      planHealthReadinessReasons,
+      preferredBodyArea,
+      equipmentOverride,
+    ]
+  );
+  const exerciseDelta = preview ? sameSetupAtGood.exerciseCount - preview.exerciseCount : 0;
+  const setupDelta = baseline.exerciseCount - sameSetupAtGood.exerciseCount;
   // A symptom already set in Settings' Ongoing Symptoms applies every day
   // on its own — offering it again here would be a chip that does nothing.
   const dailySymptomTags = useMemo(
@@ -1006,7 +1043,11 @@ export default function EnergyCheckInScreen() {
           ? `${exerciseDelta} exercise${exerciseDelta === 1 ? '' : 's'} trimmed — ${ENERGY_LABELS[energy].toLowerCase()} energy today.`
           : exerciseDelta < 0
             ? `${-exerciseDelta} extra exercise${-exerciseDelta === 1 ? '' : 's'} — pushing further today.`
-            : preview.overallSetsPct < 100
+            : setupDelta > 0
+              ? timeAvailableMin
+                ? `Shortened to fit the ${timeAvailableMin} minutes you have.`
+                : 'Adjusted for where and what you’re training today.'
+              : preview.overallSetsPct < 100
               ? `Sets trimmed to ${preview.overallSetsPct}% — ${ENERGY_LABELS[energy].toLowerCase()} energy today.`
               : 'Standard session today.'
       : null;

@@ -54,7 +54,9 @@ export function TodaysTrainingCard({
   useEffect(() => {
     if (!inProgress) return;
     let cancelled = false;
-    getWorkoutLog(localDateStr()).then((log) => {
+    // The session's own day — a workout carried past midnight logs under
+    // the day it started (see today-session.ts).
+    getWorkoutLog(todaySession?.date ?? localDateStr()).then((log) => {
       if (cancelled || !log) return;
       setProgress({ done: log.exercises.filter((e) => e.completed).length, total: log.exercises.length });
     });

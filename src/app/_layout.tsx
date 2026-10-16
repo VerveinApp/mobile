@@ -1,7 +1,7 @@
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import * as Sentry from '@sentry/react-native';
 import { useFonts } from 'expo-font';
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { DarkTheme, DefaultTheme, router, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { AppState, View } from 'react-native';
@@ -13,7 +13,7 @@ import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { OfflineBanner } from '@/components/offline-banner';
 import { AppLockGate } from '@/components/security/app-lock-gate';
-import { claimLocalDataIfUnowned } from '@/lib/account-switch';
+import { reconcileLocalDataOwner } from '@/lib/account-switch';
 import { initErrorMonitoring } from '@/lib/error-monitoring';
 import { initPurchases } from '@/lib/purchases';
 import { registerForRemotePushNotifications } from '@/lib/push-notifications';
@@ -77,14 +77,17 @@ function RootLayout() {
   // without account switching has no recorded data owner until their next
   // sign-in, which may never come. Recording the restored session's account
   // here keeps their data from being handed to a different account that
-  // signs in on this phone later (see claimLocalDataIfUnowned).
+  // signs in on this phone later (see reconcileLocalDataOwner).
   useEffect(() => {
     (async () => {
       try {
         const {
           data: { session },
         } = await supabase.auth.getSession();
-        if (session) await claimLocalDataIfUnowned(session.user.id);
+        // Also finishes a switch between accounts that was cut off — and if
+        // that changed what's on the device, reloads so no screen keeps
+        // showing the previous person's data.
+        if (session && (await reconcileLocalDataOwner(session.user.id))) router.replace('/' as never);
       } catch {
         // Retried on the next launch.
       }

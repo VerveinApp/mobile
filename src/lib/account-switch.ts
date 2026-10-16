@@ -191,6 +191,35 @@ export async function claimLocalDataIfUnowned(userId: string): Promise<void> {
   }
 }
 
+/**
+ * At launch, with the restored session's account. BUG FIX: sign-in stores
+ * the new session before prepareLocalDataForAccount runs, so an app killed
+ * in between — or partway through a switch — relaunched signed in as the
+ * new account over the previous person's data, and nothing finished the
+ * switch until a sign-in that never came. This finishes it: an interrupted
+ * switch is completed, and data owned by someone other than the signed-in
+ * account is set aside for its owner. Returns true when the device's data
+ * changed under the screens already showing, so the caller can reload.
+ */
+export async function reconcileLocalDataOwner(userId: string): Promise<boolean> {
+  try {
+    const [owner, pending] = await Promise.all([
+      AsyncStorage.getItem(OWNER_KEY),
+      AsyncStorage.getItem(SWITCH_PENDING_KEY),
+    ]);
+    if (!pending && owner === null) {
+      await AsyncStorage.setItem(OWNER_KEY, userId);
+      return false;
+    }
+    if (!pending && owner === userId) return false;
+    await prepareLocalDataForAccount(userId);
+    return true;
+  } catch {
+    // Retried on the next launch; the next sign-in also reconciles.
+    return false;
+  }
+}
+
 /** After Delete Account: the data is gone and so is the account, so this
  * device's data no longer belongs to anyone. */
 export async function forgetLocalDataOwner(): Promise<void> {
