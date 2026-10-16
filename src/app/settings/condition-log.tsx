@@ -237,7 +237,7 @@ export default function ConditionLogScreen() {
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>HISTORY</Text>
+            <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>HISTORY</Text>
             {entries.length === 0 ? (
               <View style={styles.emptyCard}>
                 <SymbolView name="heart.text.square" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />

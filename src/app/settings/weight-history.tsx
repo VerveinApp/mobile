@@ -358,7 +358,7 @@ export default function WeightHistoryScreen() {
 
           {weightTrendData.length > 0 ? (
             <View style={styles.section}>
-              <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TREND</Text>
+              <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>TREND</Text>
               <View style={[styles.card, styles.chartCardPadding]}>
                 <TrendChart
                   data={weightTrendData}
@@ -372,7 +372,7 @@ export default function WeightHistoryScreen() {
 
           {targetWeightKg !== null && currentWeightKg !== null ? (
             <View style={styles.section}>
-              <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TARGET</Text>
+              <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>TARGET</Text>
               <View style={styles.card}>
                 <View style={styles.targetRow}>
                   <Text style={styles.targetText} maxFontSizeMultiplier={1.3}>
@@ -397,7 +397,7 @@ export default function WeightHistoryScreen() {
           ) : null}
 
           <View style={styles.section}>
-            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>HISTORY</Text>
+            <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>HISTORY</Text>
             {entries.length === 0 ? (
               <View style={styles.emptyCard}>
                 <SymbolView name="scalemass" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />

@@ -255,7 +255,7 @@ export default function SleepHistoryScreen() {
           {sleepTrendData.length > 0 ? (
             <PremiumGate isPremium={isPremium} label="Full sleep trend" feature="history">
               <View style={styles.section}>
-                <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TREND</Text>
+                <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>TREND</Text>
                 <View style={[styles.card, styles.chartCardPadding]}>
                   <TrendChart
                     data={sleepTrendData}
@@ -270,7 +270,7 @@ export default function SleepHistoryScreen() {
           ) : null}
 
           <View style={styles.section}>
-            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>HISTORY</Text>
+            <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>HISTORY</Text>
             {entries.length === 0 ? (
               <View style={styles.emptyCard}>
                 <SymbolView name="bed.double" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />
@@ -288,7 +288,7 @@ export default function SleepHistoryScreen() {
           {olderEntries.length > 0 ? (
             <PremiumGate isPremium={isPremium} label="Full sleep history" feature="history">
               <View style={styles.section}>
-                <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>EARLIER</Text>
+                <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>EARLIER</Text>
                 <View style={styles.card}>
                   {olderEntries.map((entry, index) => renderEntryRow(entry, index, olderEntries.length))}
                 </View>

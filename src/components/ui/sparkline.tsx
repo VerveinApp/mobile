@@ -70,6 +70,13 @@ type SparklineProps = {
   /** Fill inside a marked point's ring — the card's own surface makes it
    * read as a ring on the line. Defaults to the line color (a solid dot). */
   markerFill?: string;
+  /** What VoiceOver says the chart is ("Weight trend"). Without it the
+   * chart stays out of VoiceOver, as before. */
+  accessibilityLabel?: string;
+  /** Spoken text for one point ("Oct 12, 182 lb"). With it, VoiceOver can
+   * step through the points by swiping up or down (an adjustable element),
+   * starting at the latest — without touching the visual scrub. */
+  describePoint?: (index: number) => string;
 };
 
 type Point = { x: number; y: number };
@@ -159,7 +166,11 @@ export function Sparkline({
   onScrub,
   spacing = 'even',
   markerFill,
+  accessibilityLabel,
+  describePoint,
 }: SparklineProps) {
+  // Which point VoiceOver is on; null = the latest.
+  const [spokenIndex, setSpokenIndex] = useState<number | null>(null);
   const reducedMotion = useReducedMotion();
   const reveal = useSharedValue(reducedMotion ? 1 : 0);
   useEffect(() => {
@@ -263,10 +274,27 @@ export function Sparkline({
   if (data.length === 0) return null;
 
   const scrubPoint = scrubIndex !== null ? points[scrubIndex] : null;
+  const spokenAt = spokenIndex ?? data.length - 1;
+  const a11y =
+    accessibilityLabel === undefined
+      ? {}
+      : describePoint
+        ? {
+            accessible: true,
+            accessibilityRole: 'adjustable' as const,
+            accessibilityLabel,
+            accessibilityValue: { text: describePoint(spokenAt) },
+            accessibilityActions: [{ name: 'increment' as const }, { name: 'decrement' as const }],
+            onAccessibilityAction: (event: { nativeEvent: { actionName: string } }) => {
+              const step = event.nativeEvent.actionName === 'increment' ? 1 : event.nativeEvent.actionName === 'decrement' ? -1 : 0;
+              setSpokenIndex(Math.max(0, Math.min(data.length - 1, spokenAt + step)));
+            },
+          }
+        : { accessible: true, accessibilityRole: 'image' as const, accessibilityLabel };
 
   return (
     <GestureDetector gesture={scrubGesture}>
-      <View style={{ width, height }}>
+      <View style={{ width, height }} {...a11y}>
         <Svg width={width} height={height}>
           {referenceY !== null ? (
             <Line

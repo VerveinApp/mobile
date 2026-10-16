@@ -670,7 +670,7 @@ function WeeklyActivity({
 
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>THIS WEEK</Text>
+      <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>THIS WEEK</Text>
       <View style={styles.weekRow}>
         {weekActivity.days.map((day, index) => (
           <View key={day.weekday} style={styles.weekDayCol}>
@@ -820,7 +820,7 @@ function YourFitness({
 
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>YOUR FITNESS</Text>
+      <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>YOUR FITNESS</Text>
 
       {/* POLICY CHANGE (explicit product decision, not a bug fix): Home's
           own Training Load and Consistency cards are now Plus-gated too,

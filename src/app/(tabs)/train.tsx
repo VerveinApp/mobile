@@ -316,7 +316,7 @@ export default function TrainScreen() {
 
         {readyArea && readinessLine ? (
           <View style={styles.section}>
-            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>READINESS</Text>
+            <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>READINESS</Text>
             <View style={[styles.card, styles.readinessCardPadding]}>
               <View style={styles.readinessDotsRow}>
                 {BODY_AREA_ORDER.map((area) => (
@@ -345,7 +345,7 @@ export default function TrainScreen() {
 
         {orderedScheduledDays.length > 0 ? (
           <View style={styles.section}>
-            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>THIS WEEK&apos;S PLAN</Text>
+            <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>THIS WEEK&apos;S PLAN</Text>
             <View style={styles.card}>
               {orderedScheduledDays.map((day, index) => {
                 const isToday = day === today;
@@ -411,7 +411,7 @@ export default function TrainScreen() {
           </View>
         ) : (
           <View style={styles.section}>
-            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>THIS WEEK&apos;S PLAN</Text>
+            <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>THIS WEEK&apos;S PLAN</Text>
             {/* Opens Adjust My Plan right here — it used to name the sheet
                 and leave someone to find it on Profile. */}
             <Pressable

@@ -329,7 +329,7 @@ export default function ProgressPhotosScreen() {
           ) : null}
 
           <View style={styles.section}>
-            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>PHOTOS</Text>
+            <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>PHOTOS</Text>
             {photos.length === 0 ? (
               <View style={styles.emptyCard}>
                 <SymbolView name="photo.stack" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />

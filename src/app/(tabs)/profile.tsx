@@ -322,7 +322,7 @@ export default function ProfileScreen() {
         </Modal>
 
         <View style={styles.section}>
-          <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>YOUR PLAN</Text>
+          <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>YOUR PLAN</Text>
           {/* Tappable — these rows looked like settings you could change,
               but tapping did nothing; editing lived only in Settings. Opens
               the same Adjust My Plan sheet directly. */}
@@ -350,7 +350,7 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>LOG</Text>
+          <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>LOG</Text>
           <Pressable
             style={({ pressed }) => [styles.card, pressed && PRESSED_DIM]}
             onPress={() => router.push('/log' as never)}
@@ -379,7 +379,7 @@ export default function ProfileScreen() {
             its section spacing) from free users, leaving a bare teaser card
             jammed against the LOG section above it. */}
         <View style={styles.section}>
-          <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>GOALS</Text>
+          <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>GOALS</Text>
           <PremiumGate isPremium={isPremium} label="Goals" feature="goals">
           <Pressable
             style={({ pressed }) => [styles.card, pressed && PRESSED_DIM]}

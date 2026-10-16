@@ -160,7 +160,7 @@ export default function ReferralScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.section}>
-            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>YOUR CODE</Text>
+            <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>YOUR CODE</Text>
             {myCode ? (
               <>
                 <Text style={styles.introText} maxFontSizeMultiplier={1.4}>
@@ -215,7 +215,7 @@ export default function ReferralScreen() {
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>HAVE A CODE?</Text>
+            <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>HAVE A CODE?</Text>
             <View style={styles.redeemRow}>
               <TextInput
                 style={styles.redeemInput}

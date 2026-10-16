@@ -1378,7 +1378,7 @@ export default function SettingsScreen() {
 function Section({ styles, title, children }: { styles: ReturnType<typeof createStyles>; title: string; children: React.ReactNode }) {
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>{title}</Text>
+      <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>{title}</Text>
       {children}
     </View>
   );

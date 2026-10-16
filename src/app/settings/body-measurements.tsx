@@ -286,7 +286,7 @@ export default function BodyMeasurementsScreen() {
           {chartableFields.length > 0 && activeChartField ? (
             <View style={styles.section}>
               <View style={styles.chartHeaderRow}>
-                <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TREND</Text>
+                <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>TREND</Text>
                 <View style={styles.chartFieldPills}>
                   {chartableFields.map(({ key, label }) => {
                     const active = activeChartField === key;
@@ -322,7 +322,7 @@ export default function BodyMeasurementsScreen() {
           ) : null}
 
           <View style={styles.section}>
-            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>HISTORY</Text>
+            <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>HISTORY</Text>
             {entries.length === 0 ? (
               <View style={styles.emptyCard}>
                 <SymbolView name="ruler" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />

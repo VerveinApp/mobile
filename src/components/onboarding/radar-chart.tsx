@@ -83,8 +83,17 @@ export function RadarChart({ data, size = 220, maxValue = 100, play = true }: Ra
   const count = data.length;
   const reducedMotion = useReducedMotion();
 
+  // Spoken as each axis's share of the most-trained one — the same shape
+  // the drawing shows, in words.
+  const spoken = data.map((d) => `${d.label} ${Math.round((d.value / maxValue) * 100)}%`).join(', ');
+
   return (
-    <View style={{ width: size, height: size }}>
+    <View
+      style={{ width: size, height: size }}
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={`Training balance: ${spoken}`}
+    >
       <Svg width={size} height={size} style={StyleSheet.absoluteFill}>
         {RING_FRACTIONS.map((fraction) => (
           <Polygon

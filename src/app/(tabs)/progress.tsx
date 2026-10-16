@@ -484,7 +484,7 @@ export default function ProgressScreen() {
 
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>CONSISTENCY</Text>
+            <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>CONSISTENCY</Text>
             <View style={styles.rangeToggle}>
               {(['week', 'month'] as const).map((option) => (
                 <Pressable
@@ -573,6 +573,8 @@ export default function ProgressScreen() {
                       filled
                       color="#5FBE84"
                       onScrub={scrubHandler('consistency')}
+                      accessibilityLabel="Weekly completion"
+                      describePoint={(i) => `${consistencyMeterData[i].label}, ${consistencyMeterData[i].value}% completed`}
                     />
                   ) : null}
                 </View>
@@ -694,7 +696,7 @@ export default function ProgressScreen() {
 
         <View style={styles.section} onLayout={(e) => handleSectionLayout('balance', e.nativeEvent.layout.y)}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TRAINING BALANCE</Text>
+            <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>TRAINING BALANCE</Text>
             <View style={styles.rangeToggle}>
               {(['recent', 'all'] as const).map((option) => (
                 <Pressable
@@ -858,7 +860,7 @@ export default function ProgressScreen() {
         </View>
 
         <View style={styles.section} onLayout={(e) => handleSectionLayout('load', e.nativeEvent.layout.y)}>
-          <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TRAINING LOAD</Text>
+          <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>TRAINING LOAD</Text>
           {showTrend && trainingState ? (
             <View style={styles.card}>
               <View style={styles.chartCaptionRow}>
@@ -904,6 +906,10 @@ export default function ProgressScreen() {
                     color="#5FBE84"
                     play={revealed.load}
                     onScrub={scrubHandler('energy')}
+                    accessibilityLabel={`Energy, last ${energyDays.length} check-ins`}
+                    describePoint={(i) =>
+                      `${formatEntryDateLabel(energyDays[i].date)}, ${ENERGY_LABELS[energyDays[i].energyScore as EnergyScore]}`
+                    }
                   />
                 ) : null}
               </View>
@@ -998,7 +1004,7 @@ export default function ProgressScreen() {
             improvement — most people will see the empty state, and that's
             the honest default, not a lesser version of this section. */}
         <View style={styles.section} onLayout={(e) => handleSectionLayout('strength', e.nativeEvent.layout.y)}>
-          <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>STRENGTH PROGRESS</Text>
+          <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>STRENGTH PROGRESS</Text>
           <PremiumGate isPremium={isPremium} label="Strength Progress" feature="strength">
             {improvedExercises.length > 0 ? (
               <View style={styles.card}>
@@ -1055,6 +1061,12 @@ export default function ProgressScreen() {
                               delay={index * 90}
                               play={revealed.strength}
                               onScrub={scrubHandler(`strength:${entry.exerciseName}`)}
+                              accessibilityLabel={`${entry.exerciseName}, estimated one-rep max`}
+                              describePoint={(i) =>
+                                `${formatEntryDateLabel(history[i].date)}, ${formatWeight(history[i].estimatedOneRepMax, unit)}${
+                                  history[i].improved ? ', personal best' : ''
+                                }`
+                              }
                             />
                           ) : null}
                         </View>

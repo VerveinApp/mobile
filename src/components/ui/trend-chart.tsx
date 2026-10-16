@@ -61,6 +61,8 @@ export function TrendChart({
             height={height}
             min={min}
             color={color}
+            accessibilityLabel={`${caption} trend, ${data.length} entries`}
+            describePoint={(index) => `${shortDateLabel(data[index].date)}, ${formatValue(data[index].value)}`}
             onScrub={(index) => {
               setScrubIndex(index);
               onScrubbingChange?.(index !== null);
