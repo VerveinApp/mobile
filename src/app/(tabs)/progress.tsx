@@ -38,6 +38,7 @@ import { getRecentWeeks, type WeekDay } from '@/lib/session-history';
 import { useAppTheme } from '@/lib/theme-context';
 import { CAPACITY_TREND_MIN_WINDOW } from '@/lib/engine/training-state';
 import { Donut } from '@/components/ui/donut';
+import { BodySection } from '@/components/progress/body-section';
 import { countEnergyLevels, foldIntoOther, toPercentShares } from '@/lib/chart-math';
 import { getTrainingState } from '@/lib/training-state-loader';
 import { unlessUnchanged } from '@/lib/stable-state';
@@ -202,6 +203,8 @@ export default function ProgressScreen() {
   // Leaving the tab mid-scrub (a second finger on the tab bar) shouldn't
   // come back to a page that's still locked on a point.
   useFocusEffect(useCallback(() => () => setScrub(null), []));
+  // A finger held on one of the Body section's charts (see BodySection).
+  const [bodyScrubbing, setBodyScrubbing] = useState(false);
   const reducedMotion = useReducedMotion();
   const [revealed, setRevealed] = useState<Record<RevealSection, boolean>>({
     balance: false,
@@ -466,7 +469,7 @@ export default function ProgressScreen() {
         ref={scrollRef}
         contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 16, paddingBottom: 140 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
-        scrollEnabled={scrub === null}
+        scrollEnabled={scrub === null && !bodyScrubbing}
         onLayout={(e) => {
           scrollMetrics.current.viewport = e.nativeEvent.layout.height;
           checkReveals();
@@ -1085,6 +1088,8 @@ export default function ProgressScreen() {
             )}
           </PremiumGate>
         </View>
+
+        <BodySection isPremium={isPremium} onScrubbingChange={setBodyScrubbing} />
       </ScrollView>
       </ReanimatedAnimated.View>
     </View>
