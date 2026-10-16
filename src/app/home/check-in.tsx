@@ -144,6 +144,7 @@ import { ENERGY_LABELS, EnergyGauge, type EnergyScore } from '@/components/home/
 import { SuccessCheckmark } from '@/components/onboarding/success-checkmark';
 import { PremiumGate } from '@/components/premium-gate';
 import { useAppTheme } from '@/lib/theme-context';
+import { BackArrowGraphic } from '@/components/auth/verify-email-graphics';
 
 // Lets the done screen's checkmark land before the Plus offer slides up.
 const PAYWALL_AFTER_FINISH_DELAY_MS = 1800;
@@ -2673,6 +2674,21 @@ export default function EnergyCheckInScreen() {
             </Pressable>
           </ReanimatedAnimated.ScrollView>
         )}
+        {/* A way out before anything has started — the check-in and the
+            rest-day screen had only the edge swipe, with nothing visible
+            saying it was there. Once a session runs, Up next and the done
+            screen's Back to Home take over. */}
+        {showRestDay || (hydrated && sessionState === 'checkin') ? (
+          <Pressable
+            style={styles.backButton}
+            onPress={handleBackToHome}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <BackArrowGraphic color={colors.text} />
+          </Pressable>
+        ) : null}
         {/* Start, pinned like the session's Up next bar: the plan preview
             and options above it can run past the fold, and the one thing to
             do next should never be under them. */}
@@ -3532,6 +3548,14 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], hoverWas
     // only place this fixed/absolute logo variant is still used. checkin/
     // resolved/done render logoMarkFlow instead — see its comment below for
     // why (a fixed-position logo over scrolling content overlaps it).
+    // Same spot and size as the onboarding screens' back arrow.
+    backButton: {
+      position: 'absolute',
+      left: 11,
+      top: 33,
+      width: 27,
+      height: 27,
+    },
     logoMark: {
       position: 'absolute',
       left: 145.65,
