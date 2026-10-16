@@ -171,8 +171,10 @@ function RootNavigator() {
           <Stack.Screen name="onboarding/step-7" />
           <Stack.Screen name="onboarding/first-look" />
           <Stack.Screen name="onboarding/create-account" />
-          <Stack.Screen name="onboarding/all-set" />
-          <Stack.Screen name="onboarding/trajectory" />
+          {/* Past account creation there is nothing to go back to — a swipe
+              back used to land in the sign-up screen again. */}
+          <Stack.Screen name="onboarding/all-set" options={{ gestureEnabled: false }} />
+          <Stack.Screen name="onboarding/trajectory" options={{ gestureEnabled: false }} />
           <Stack.Screen name="home/check-in" />
           <Stack.Screen name="settings/index" />
           <Stack.Screen name="settings/progress-history" />

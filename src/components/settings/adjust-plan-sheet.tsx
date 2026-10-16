@@ -261,6 +261,10 @@ export const AdjustPlanSheet = forwardRef<BottomSheetModal, { onDismiss?: () => 
                   style={({ pressed }) => [styles.dayCircle, isSelected && styles.dayCircleSelected, pressed && PRESSED_DIM]}
                   onPress={() => toggleDay(day.id)}
                   hitSlop={4}
+                  // The letters repeat (T, T, S, S); VoiceOver hears the day.
+                  accessibilityRole="checkbox"
+                  accessibilityLabel={day.id.charAt(0).toUpperCase() + day.id.slice(1)}
+                  accessibilityState={{ checked: isSelected }}
                 >
                   <Text
                     style={[styles.dayCircleText, isSelected && styles.dayCircleTextSelected]}

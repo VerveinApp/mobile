@@ -14,6 +14,7 @@ import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 import { CONTACT_EMAIL } from '@/lib/legal/terms-content';
+import { APP_STORE_URL } from '@/lib/session-summary';
 
 /**
  * Reached from Settings and from the post-session milestone moment (see
@@ -77,7 +78,9 @@ export default function ReferralScreen() {
     hapticImpactLight();
     try {
       await Share.share({
-        message: `Train with me on VerveIn — use my code ${myCode} when you join and we both get a free week of VerveIn Plus.`,
+        // The link and where the code goes: a friend reading this had no way
+        // to find the app, or to know where a code is entered.
+        message: `Train with me on VerveIn: ${APP_STORE_URL}\nIn your first week, enter my code ${myCode} in Settings › Bring a Training Partner and we both get a free week of VerveIn Plus.`,
       });
     } catch {
       // The share sheet itself failing (or just being dismissed) needs no

@@ -673,6 +673,16 @@ export default function CreateAccountScreen() {
           accessibilityRole="checkbox"
           accessibilityState={{ checked: ageConfirmed }}
           accessibilityLabel="I'm at least 16 and agree to VerveIn's Terms of Service and Privacy Policy"
+          // The row is one VoiceOver element, so the two links inside it
+          // were out of reach; they're its actions instead (swipe up or down).
+          accessibilityActions={[
+            { name: 'terms', label: 'Read the Terms of Service' },
+            { name: 'privacy', label: 'Read the Privacy Policy' },
+          ]}
+          onAccessibilityAction={(event) => {
+            if (event.nativeEvent.actionName === 'terms') router.push('/legal/terms' as never);
+            if (event.nativeEvent.actionName === 'privacy') router.push('/legal/privacy' as never);
+          }}
         >
           {/* The row's content shakes, not the Pressable, so the tap target
               itself never moves. */}

@@ -46,7 +46,10 @@ const CARD_RADIUS = 10;
 // Supabase's real email OTP is 6 digits by default — this used to be a
 // placeholder 4, back when nothing actually sent or checked a code.
 const CODE_LENGTH = 6;
-const RESEND_COOLDOWN_SECONDS = 30;
+// Matches Supabase's own limit of one code per address per minute — at 30
+// the first resend always failed with a raw "you can only request this
+// after N seconds" message.
+const RESEND_COOLDOWN_SECONDS = 60;
 
 function formatCountdown(seconds: number) {
   const m = Math.floor(seconds / 60);

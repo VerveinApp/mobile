@@ -478,22 +478,16 @@ export default function SummaryScreen() {
 
         {deloadNudge?.triggered && deloadNudge.message ? (
           <ReanimatedAnimated.View exiting={bannerExiting}>
-          <Pressable
-            style={({ pressed }) => [styles.deloadBanner, pressed && PRESSED_DIM]}
-            onPress={() => {
-              hapticSelect();
-              router.push('/home/check-in' as never);
-            }}
-            android_ripple={AndroidRipple}
-          >
+          {/* A note, not a call to action: the message suggests resting and
+              checking in tomorrow, so a "Check in →" button under it said
+              the opposite. Today's card below is there for anyone who'd
+              still rather train. */}
+          <View style={styles.deloadBanner} accessible accessibilityLabel={deloadNudge.message}>
             <View style={styles.deloadBannerRow}>
               <SymbolView name="moon.zzz.fill" size={15} tintColor={colors.textSecondary} />
               <Text style={styles.deloadBannerText} maxFontSizeMultiplier={1.4}>{deloadNudge.message}</Text>
             </View>
-            <Text style={styles.deloadBannerAction} maxFontSizeMultiplier={1.2}>
-              Check in →
-            </Text>
-          </Pressable>
+          </View>
           </ReanimatedAnimated.View>
         ) : null}
 
