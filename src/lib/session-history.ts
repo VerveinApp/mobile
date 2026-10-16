@@ -66,9 +66,11 @@ export async function recordSessionCompletion(
   completed: boolean,
   energy?: EnergyScore,
   completionStatus?: CompletionStatus,
-  caloriesBurned?: number
+  caloriesBurned?: number,
+  /** The day the session belongs to — the day it started, even when it
+   * finishes after midnight. */
+  date: string = localDateStr()
 ) {
-  const date = localDateStr();
   const entries = await readJsonList<SessionHistoryEntry>(KEY);
   // Merged, not replaced — a call after notes/feedback were already
   // attached (saveSessionNote/saveSessionFeedback) must not silently wipe

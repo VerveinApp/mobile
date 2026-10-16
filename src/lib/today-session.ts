@@ -112,8 +112,22 @@ export type TodaySession = {
   summary?: SessionSummary;
 };
 
-/** Everything but the date, which is always "today" when saving. */
-export type TodaySessionInput = Omit<TodaySession, 'date' | 'symptomTags'> & { symptomTags?: string[] };
+/** Everything but the date, which is "today" when saving — unless the
+ * session being saved started on an earlier day (see getTodaySession). */
+export type TodaySessionInput = Omit<TodaySession, 'date' | 'symptomTags'> & { symptomTags?: string[]; date?: string };
+
+// How long after it started an unfinished session still counts as today's
+// once the date has turned — a workout begun at 11:30pm is still that
+// workout at 12:15am, not a reason to ask for a new check-in.
+const CARRY_OVER_MS = 6 * 60 * 60 * 1000;
+
+/** Whether a stored session from an earlier date is still the one in
+ * progress: unfinished, and started within CARRY_OVER_MS. */
+export function isCarriedOverSession(session: Pick<TodaySession, 'completed' | 'startedAt'>, now: number = Date.now()): boolean {
+  if (session.completed || !session.startedAt) return false;
+  const started = Date.parse(session.startedAt);
+  return Number.isFinite(started) && now - started >= 0 && now - started < CARRY_OVER_MS;
+}
 
 function today() {
   return localDateStr();
@@ -125,7 +139,9 @@ export async function getTodaySession(): Promise<TodaySession | null> {
     const raw = await AsyncStorage.getItem(KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as TodaySession;
-    if (parsed.date !== today()) return null;
+    // BUG FIX: a workout that ran past midnight vanished — reopening the
+    // app asked for a new check-in and the half-done session was lost.
+    if (parsed.date !== today() && !isCarriedOverSession(parsed)) return null;
     // Entries saved before symptomTags existed won't have the field.
     return { ...parsed, symptomTags: parsed.symptomTags ?? [] };
   } catch {
@@ -140,7 +156,7 @@ export async function getTodaySession(): Promise<TodaySession | null> {
  */
 export async function saveTodaySession(input: TodaySessionInput) {
   try {
-    const session: TodaySession = { ...input, date: today(), symptomTags: input.symptomTags ?? [] };
+    const session: TodaySession = { ...input, date: input.date ?? today(), symptomTags: input.symptomTags ?? [] };
     await AsyncStorage.setItem(KEY, JSON.stringify(session));
   } catch {
     // Worst case the app re-asks for a check-in it already had — same as a first check-in.

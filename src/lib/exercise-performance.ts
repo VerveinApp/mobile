@@ -239,7 +239,8 @@ function applyRecord(
   all: Record<string, ExercisePerformance[]>,
   exerciseName: string,
   weightKg: number,
-  reps: number
+  reps: number,
+  date: string = localDateStr()
 ): RecordPerformanceResult {
   const history = all[exerciseName] ?? [];
   const { improved, estimatedOneRepMax, oneRepMaxRatio, previous } = evaluatePerformance(history, weightKg, reps);
@@ -247,7 +248,7 @@ function applyRecord(
     weightKg,
     reps,
     estimatedOneRepMax,
-    date: localDateStr(),
+    date,
     improved,
   };
   all[exerciseName] = [...history, current].slice(-MAX_HISTORY_PER_EXERCISE);
@@ -292,12 +293,14 @@ export async function recordPerformance(
  * check-in.tsx's finish-session handler is the one real caller.
  */
 export async function recordPerformanceBatch(
-  entries: { exerciseName: string; weightKg: number; reps: number }[]
+  entries: { exerciseName: string; weightKg: number; reps: number }[],
+  /** The session's own day — see recordSessionCompletion's date. */
+  date: string = localDateStr()
 ): Promise<{ exerciseName: string; result: RecordPerformanceResult }[]> {
   const all = await readAll();
   const results = entries.map(({ exerciseName, weightKg, reps }) => ({
     exerciseName,
-    result: applyRecord(all, exerciseName, weightKg, reps),
+    result: applyRecord(all, exerciseName, weightKg, reps, date),
   }));
   await writeAll(all);
   return results;

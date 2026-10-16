@@ -382,6 +382,10 @@ export default function EnergyCheckInScreen() {
   // today's session, so reopening a finished day (Home's "View summary")
   // shows it too. See session-summary.ts.
   const [sessionSummary, setSessionSummary] = useState<SessionSummary | null>(null);
+  // The day this session belongs to: the day it started. Every record it
+  // writes (workout log, completion, note, feedback, lifts) goes under this
+  // date, so a workout that runs past midnight stays one day's workout.
+  const [sessionDate, setSessionDate] = useState(() => localDateStr());
   // Entirely optional, per exercise — most sessions will log none of these.
   // Keyed by exercise index (same indexing preview.exercises/
   // completedExercises already use), raw string from the input so an
@@ -583,6 +587,7 @@ export default function EnergyCheckInScreen() {
           setEquipmentOverride(loadedTodaySession.equipmentOverride ?? null);
           setSessionState(loadedTodaySession.completed ? 'done' : 'resolved');
           setSessionSummary(loadedTodaySession.summary ?? null);
+          setSessionDate(loadedTodaySession.date);
           // Restored regardless of completed/resolved — this feeds preview's
           // computation either way, not just the done-screen display fields.
           // Re-applies the same M4 two-step-disclosure rule handleEnergyChange
@@ -608,15 +613,15 @@ export default function EnergyCheckInScreen() {
             setCurrentExerciseIndex(loadedTodaySession.currentExerciseIndex ?? 0);
             // Completion is already autosaved per exercise, in plan order —
             // which, with the plan now frozen, is the same order on resume.
-            const partialLog = await getWorkoutLog(localDateStr());
+            const partialLog = await getWorkoutLog(loadedTodaySession.date);
             if (partialLog) {
               setCompletedExercises(new Set(partialLog.exercises.flatMap((exercise, i) => (exercise.completed ? [i] : []))));
             }
           }
           if (loadedTodaySession.completed) {
             const [existingNote, existingFeedback, insight] = await Promise.all([
-              getSessionNote(localDateStr()),
-              getSessionFeedback(localDateStr()),
+              getSessionNote(loadedTodaySession.date),
+              getSessionFeedback(loadedTodaySession.date),
               getBodyAreaInsight(),
             ]);
             if (existingNote) setNoteText(existingNote);
@@ -648,7 +653,7 @@ export default function EnergyCheckInScreen() {
 
   const handleNoteChange = (text: string) => {
     setNoteText(text);
-    saveSessionNote(localDateStr(), text);
+    saveSessionNote(sessionDate, text);
   };
 
   // BUG FIX: the pills stayed live while the history read below ran, so a
@@ -663,7 +668,7 @@ export default function EnergyCheckInScreen() {
     const priorHistory = await getSessionHistory();
     setIsFirstFeedback(!priorHistory.some((e) => e.feedback !== undefined));
     setFeedbackGiven(response);
-    saveSessionFeedback(localDateStr(), response);
+    saveSessionFeedback(sessionDate, response);
     const updated = await submitSessionFeedback(response);
     setCalibration(updated);
   };
@@ -1084,7 +1089,7 @@ export default function EnergyCheckInScreen() {
     if (!isDoneWithoutSummary) return;
     let cancelled = false;
     (async () => {
-      const source = await loadUnsavedSummarySource(localDateStr());
+      const source = await loadUnsavedSummarySource(sessionDate);
       if (!cancelled && source) setSessionSummary(summaryFromWorkoutLog(source.log, sessionExercises, source.weightsKgByName));
     })();
     return () => {
@@ -1141,14 +1146,14 @@ export default function EnergyCheckInScreen() {
     const updated = new Set(completedExercises).add(index);
     setCompletedExercises(updated);
     const exercises = buildWorkoutLogExercises(updated);
-    saveWorkoutLog(localDateStr(), exercises);
+    saveWorkoutLog(sessionDate, exercises);
     // BUG FIX: session history kept Start's 'skipped' entry until Finish, so
     // a session left after a couple of exercises (no Finish tapped) showed
     // as a missed day everywhere. It's updated alongside the workout log,
     // with the same status Finish would record.
     if (energy !== null) {
       const status = getCompletionStatus(exercises);
-      recordSessionCompletion(status !== 'skipped', energy, status);
+      recordSessionCompletion(status !== 'skipped', energy, status, undefined, sessionDate);
     }
   };
 
@@ -1309,6 +1314,7 @@ export default function EnergyCheckInScreen() {
     planDaysSinceLastCheckIn: frozenGap?.days,
     startedAt: sessionStartedAtRef.current?.toISOString(),
     summary: sessionSummary ?? undefined,
+    date: sessionDate,
   });
 
   // BUG FIX (found in a later full-app audit): loggedWeightsKg used to live
@@ -1341,6 +1347,9 @@ export default function EnergyCheckInScreen() {
     isStartingSessionRef.current = true;
     setIsStartingSession(true);
     sessionStartedAtRef.current = new Date();
+    // A fresh session belongs to the day it starts on.
+    const startDate = localDateStr();
+    setSessionDate(startDate);
     setCurrentExerciseIndex(0);
     if (energy === 1) hapticWarning();
     else if (energy === 5) hapticSuccess();
@@ -1356,6 +1365,8 @@ export default function EnergyCheckInScreen() {
       planHealthReadiness: readinessAtStart,
       planEquipment: equipmentAtStart,
       planDaysSinceLastCheckIn: daysSinceLastCheckIn,
+      // sessionDate's state update hasn't landed yet in this handler.
+      date: startDate,
     });
     // Already showed up today — a "Training day" nudge later would be noise.
     cancelTodaysReminder();
@@ -1368,8 +1379,8 @@ export default function EnergyCheckInScreen() {
     // Awaited (not fire-and-forget) so this baseline entry is guaranteed
     // written before the UI moves on — otherwise backgrounding the app in
     // the instant right after tapping Start could lose it entirely.
-    await saveWorkoutLog(localDateStr(), buildWorkoutLogExercises(new Set()));
-    await recordSessionCompletion(false, energy, 'skipped');
+    await saveWorkoutLog(startDate, buildWorkoutLogExercises(new Set()));
+    await recordSessionCompletion(false, energy, 'skipped', undefined, startDate);
     setSessionState('resolved');
     // Counted here, offered after Finish — see paywall-trigger.ts for why
     // this counts check-ins specifically, and why the offer waits.
@@ -1425,7 +1436,7 @@ export default function EnergyCheckInScreen() {
             weightKg
           )
         : null;
-    await recordSessionCompletion(completedSomething, energy, status, caloriesForSession ?? undefined);
+    await recordSessionCompletion(completedSomething, energy, status, caloriesForSession ?? undefined, sessionDate);
     // Only a real session (done or partial) counts toward the lifetime
     // total — never a skipped one, so this can't be inflated by opening the
     // app or abandoning a session before doing anything.
@@ -1468,7 +1479,7 @@ export default function EnergyCheckInScreen() {
       // recordPerformanceBatch (not N parallel recordPerformance calls) —
       // see that function's own doc comment for the lost-update race this
       // avoids when a session logs weights for more than one exercise.
-      const results = await recordPerformanceBatch(loggedEntries);
+      const results = await recordPerformanceBatch(loggedEntries, sessionDate);
       setLoadImprovementNote(getLoadImprovementNote(results));
       // Fire-and-forget, same as saveCompletedWorkout above — a delayed
       // celebration notification is a nice-to-have, never something worth
@@ -1498,8 +1509,8 @@ export default function EnergyCheckInScreen() {
     // Awaited (unlike the old fire-and-forget) so today's exercises are
     // already in storage before getBodyAreaInsight reads the breakdown —
     // otherwise the done screen could render one save-cycle stale.
-    await saveWorkoutLog(localDateStr(), finalExercises);
-    recordDecisionTrace(localDateStr(), preview.trace);
+    await saveWorkoutLog(sessionDate, finalExercises);
+    recordDecisionTrace(sessionDate, preview.trace);
     setDoneInsight(await getBodyAreaInsight());
     // Upcoming reminders name a well-rested body area — rebuild them now that
     // this session changed which one that is (otherwise they waited for the

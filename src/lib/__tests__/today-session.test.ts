@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { clearTodaySession, getTodaySession, saveTodaySession } from '@/lib/today-session';
+import { clearTodaySession, getTodaySession, isCarriedOverSession, saveTodaySession } from '@/lib/today-session';
 
 describe('today-session', () => {
   afterEach(async () => {
@@ -25,5 +25,21 @@ describe('today-session', () => {
     const stale = { ...JSON.parse(raw!), date: '2000-01-01' };
     await AsyncStorage.setItem('vervein.todaySession.v1', JSON.stringify(stale));
     expect(await getTodaySession()).toBeNull();
+  });
+
+  it('keeps a session that started before midnight and is still going', async () => {
+    const startedAt = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+    await saveTodaySession({ energy: 4, completed: false, startedAt, date: '2000-01-01' });
+    const session = await getTodaySession();
+    expect(session?.date).toBe('2000-01-01');
+    expect(session?.energy).toBe(4);
+  });
+
+  it('lets a finished or long-abandoned session from an earlier day go', () => {
+    const now = Date.parse('2026-10-15T00:30:00');
+    expect(isCarriedOverSession({ completed: false, startedAt: '2026-10-14T23:30:00' }, now)).toBe(true);
+    expect(isCarriedOverSession({ completed: true, startedAt: '2026-10-14T23:30:00' }, now)).toBe(false);
+    expect(isCarriedOverSession({ completed: false, startedAt: '2026-10-14T12:00:00' }, now)).toBe(false);
+    expect(isCarriedOverSession({ completed: false }, now)).toBe(false);
   });
 });
