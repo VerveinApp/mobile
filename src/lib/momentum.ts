@@ -14,9 +14,11 @@ import { formatWeight } from '@/lib/weight-units';
  * means silence is a valid state too — no banner at all rather than a
  * discouraging one when the week's been quiet.
  */
-export function getWeeklyRecap(weekActivity: { completedCount: number; scheduledCount: number }): string | null {
-  if (weekActivity.completedCount <= 0) return null;
-  return `${weekActivity.completedCount} session${weekActivity.completedCount === 1 ? '' : 's'} this week`;
+export function getWeeklyRecap(weekActivity: { completedCount: number; scheduledCount: number; extraCount?: number }): string | null {
+  // Every session this week, scheduled or extra.
+  const sessions = weekActivity.completedCount + (weekActivity.extraCount ?? 0);
+  if (sessions <= 0) return null;
+  return `${sessions} session${sessions === 1 ? '' : 's'} this week`;
 }
 
 /**
@@ -112,7 +114,7 @@ export function getLoadImprovementNote(
  * fabricated here if it's absent.
  */
 export function getShareableWeeklyRecapText(
-  weekActivity: { completedCount: number; scheduledCount: number },
+  weekActivity: { completedCount: number; scheduledCount: number; extraCount?: number },
   recentStrengthGain?: { exerciseName: string; estimatedOneRepMaxKg: number } | null,
   unit: UnitSystem = 'metric'
 ): string | null {

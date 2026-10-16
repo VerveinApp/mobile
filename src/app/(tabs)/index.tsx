@@ -147,6 +147,7 @@ export default function SummaryScreen() {
     days: WeekDay[];
     completedCount: number;
     scheduledCount: number;
+    extraCount: number;
   } | null>(null);
   const [calibration, setCalibration] = useState<UserCalibration | null>(null);
   const [deloadNudge, setDeloadNudge] = useState<DeloadNudge | null>(null);
@@ -658,7 +659,7 @@ function WeeklyActivity({
 }: {
   styles: ReturnType<typeof createStyles>;
   colors: ReturnType<typeof useAppColors>;
-  weekActivity: { days: WeekDay[]; completedCount: number; scheduledCount: number };
+  weekActivity: { days: WeekDay[]; completedCount: number; scheduledCount: number; extraCount: number };
   onShare: () => void;
 }) {
   const shareHover = useHoverFade();
@@ -666,7 +667,7 @@ function WeeklyActivity({
   // Same gate getWeeklyRecap itself applies — no share affordance for a
   // week with nothing real to report yet (blameless silence, not a lesser/
   // empty version of the button).
-  const canShare = weekActivity.completedCount > 0;
+  const canShare = weekActivity.completedCount + weekActivity.extraCount > 0;
 
   return (
     <View style={styles.section}>
@@ -682,8 +683,9 @@ function WeeklyActivity({
                 // training day with a slightly fainter border — the two
                 // used to be all but indistinguishable. Today keeps its
                 // full ring either way so it's always findable.
-                !day.isScheduled && !day.isToday && styles.weekDotRest,
-                day.isScheduled && day.completed === true && styles.weekDotCompleted,
+                !day.isScheduled && !day.isToday && day.completed !== true && styles.weekDotRest,
+                // Any finished day, scheduled or an extra one on a rest day.
+                day.completed === true && styles.weekDotCompleted,
                 // Fixed bug: previously `day.completed === false` only — a
                 // past day with zero recorded entry (completed: null, not
                 // false — recordSessionCompletion only ever writes once
@@ -703,6 +705,7 @@ function WeeklyActivity({
       <View style={styles.weekSummaryRow}>
         <Text style={styles.weekSummary} maxFontSizeMultiplier={1.3}>
           {weekActivity.completedCount} / {weekActivity.scheduledCount} workouts completed
+          {weekActivity.extraCount > 0 ? ` · ${weekActivity.extraCount} extra` : ''}
         </Text>
         {canShare ? (
           <Pressable
@@ -740,7 +743,7 @@ function YourFitness({
   styles: ReturnType<typeof createStyles>;
   profile: UserProfile | null;
   todaySession: TodaySession | null;
-  weekActivity: { days: WeekDay[]; completedCount: number; scheduledCount: number };
+  weekActivity: { days: WeekDay[]; completedCount: number; scheduledCount: number; extraCount: number };
   calibration: UserCalibration | null;
   isPremium: boolean | null;
   /** Re-reads Home after the body-info sheet below closes. */
@@ -782,20 +785,28 @@ function YourFitness({
   // safe having one, not guilty. The real numbers are already shown above;
   // this is just plain context, same register regardless of how the week
   // went.
-  const ratio = weekActivity.scheduledCount > 0 ? weekActivity.completedCount / weekActivity.scheduledCount : 0;
+  // BUG FIX: the ratio counted days still ahead, so every Monday morning
+  // read 0/3 — "A quieter week so far." It's measured against the
+  // scheduled days that have actually come round (today counts once done).
+  const scheduledSoFar = weekActivity.days.filter(
+    (d) => d.isScheduled && !d.isFuture && (!d.isToday || d.completed === true)
+  ).length;
+  const ratio = scheduledSoFar > 0 ? weekActivity.completedCount / scheduledSoFar : 0;
   const consistencyNote =
     weekActivity.scheduledCount === 0
       ? 'No sessions logged yet.'
-      : ratio >= 0.75
-        ? 'Most sessions logged this week.'
-        : ratio >= 0.25
-          ? 'Some sessions logged this week.'
-          : 'A quieter week so far.';
+      : scheduledSoFar === 0
+        ? 'Your week is just getting started.'
+        : ratio >= 0.75
+          ? 'Most sessions logged this week.'
+          : ratio >= 0.25
+            ? 'Some sessions logged this week.'
+            : 'A quieter week so far.';
 
   // Only surfaced on an actual quiet stretch, not preemptively — the brand
   // thesis lands as reassurance after a real shortfall, not as a caveat
   // shown by default.
-  const isQuietWeek = weekActivity.scheduledCount > 0 && ratio < 0.25;
+  const isQuietWeek = scheduledSoFar > 0 && ratio < 0.25;
 
   // Real per-day intensity, not a redraw of loadLevel's own commitment-tier
   // meter — the same caloriesBurned estimate getWeeklyCaloriesBurned sums

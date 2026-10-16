@@ -20,6 +20,11 @@ function makeEntry(overrides: Partial<SessionHistoryEntry> = {}): SessionHistory
 }
 
 describe('getWeeklyRecap', () => {
+  it('counts extra sessions on rest days too', () => {
+    expect(getWeeklyRecap({ completedCount: 2, scheduledCount: 3, extraCount: 1 })).toBe('3 sessions this week');
+    expect(getWeeklyRecap({ completedCount: 0, scheduledCount: 3, extraCount: 1 })).toBe('1 session this week');
+  });
+
   it('returns null for a quiet week — blameless silence, never a discouraging message', () => {
     expect(getWeeklyRecap({ completedCount: 0, scheduledCount: 5 })).toBeNull();
   });

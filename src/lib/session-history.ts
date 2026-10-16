@@ -260,6 +260,7 @@ export async function getWeekActivity(scheduledDays: string[] | null): Promise<{
   days: WeekDay[];
   completedCount: number;
   scheduledCount: number;
+  extraCount: number;
 }> {
   const entries = await readJsonList<SessionHistoryEntry>(KEY);
   const byDate = new Map(entries.map((e) => [e.date, e.completed]));
@@ -307,8 +308,11 @@ export async function getWeekActivity(scheduledDays: string[] | null): Promise<{
 
   const scheduledCount = days.filter((d) => d.isScheduled).length;
   const completedCount = days.filter((d) => d.isScheduled && d.completed).length;
+  // Sessions on days that weren't scheduled — real work the "3 / 4"
+  // adherence count can't hold, shown alongside it rather than dropped.
+  const extraCount = days.filter((d) => !d.isScheduled && d.completed === true).length;
 
-  return { days, completedCount, scheduledCount };
+  return { days, completedCount, scheduledCount, extraCount };
 }
 
 /**

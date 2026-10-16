@@ -255,7 +255,11 @@ export default function TrainScreen() {
   // Monday-first calendar order used everywhere else a day list is shown
   // (the onboarding day picker, the adjust-plan sheet, profile-labels.ts's
   // own formatDays). DAY_ORDER is that same shared Monday-first order.
-  const orderedScheduledDays = DAY_ORDER.filter((d) => trainingDays?.includes(d));
+  // Scheduled days, plus any rest day this week that got an extra session —
+  // real work the plan should show, not leave off the list.
+  const orderedScheduledDays = DAY_ORDER.filter(
+    (d) => trainingDays?.includes(d) || weekDays?.some((w) => w.weekday === d && !w.isScheduled && w.completed === true)
+  );
 
   // A standing signal, not tied to today's check-in — the same real
   // priority score plan-preview.ts's own body-area reorder already computes
@@ -358,6 +362,7 @@ export default function TrainScreen() {
                 // Days already behind us this week show what happened, not
                 // an estimate for a session that can no longer occur.
                 const weekDay = weekDays?.find((d) => d.weekday === day);
+                const isExtra = !trainingDays?.includes(day);
                 const isPast = !!weekDay && !weekDay.isFuture && !weekDay.isToday;
                 // BUG FIX: this used to be past days only, so after today's
                 // session was finished the Today card above said "Done for
@@ -378,7 +383,7 @@ export default function TrainScreen() {
                         {WEEKDAY_LABELS[day]}
                         {isToday ? ' · Today' : ''}
                       </Text>
-                      <Text style={styles.planRowLabel} maxFontSizeMultiplier={1.3}>{sessionLabel}</Text>
+                      <Text style={styles.planRowLabel} maxFontSizeMultiplier={1.3}>{isExtra ? 'Extra session' : sessionLabel}</Text>
                     </View>
                     {isDone ? (
                       <View
