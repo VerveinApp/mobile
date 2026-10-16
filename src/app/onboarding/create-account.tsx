@@ -349,14 +349,21 @@ export default function CreateAccountScreen() {
     hapticImpactLight();
     setIsSocialAuthInProgress(true);
     setSocialAuthNotice(null);
-    const result = await signInWithApple();
-    isSocialAuthInProgressRef.current = false;
-    setIsSocialAuthInProgress(false);
-    if (result.kind === 'success') {
-      await handleSocialAuthSuccess(result.email);
-    } else if (result.kind === 'error') {
-      hapticError();
-      setSocialAuthNotice(result.message);
+    // BUG FIX: the buttons turned back on as soon as Apple returned,
+    // while handleSocialAuthSuccess was still restoring the account (a
+    // network round trip), so a second tap started a second sign-in. They
+    // stay off until the whole sign-in has finished.
+    try {
+      const result = await signInWithApple();
+      if (result.kind === 'success') {
+        await handleSocialAuthSuccess(result.email);
+      } else if (result.kind === 'error') {
+        hapticError();
+        setSocialAuthNotice(result.message);
+      }
+    } finally {
+      isSocialAuthInProgressRef.current = false;
+      setIsSocialAuthInProgress(false);
     }
     // 'cancelled' — the user backed out of Apple's own sheet, the most
     // common outcome. No error, nothing to say.
@@ -374,14 +381,21 @@ export default function CreateAccountScreen() {
     hapticImpactLight();
     setIsSocialAuthInProgress(true);
     setSocialAuthNotice(null);
-    const result = await signInWithGoogle();
-    isSocialAuthInProgressRef.current = false;
-    setIsSocialAuthInProgress(false);
-    if (result.kind === 'success') {
-      await handleSocialAuthSuccess(result.email);
-    } else if (result.kind === 'error') {
-      hapticError();
-      setSocialAuthNotice(result.message);
+    // BUG FIX: the buttons turned back on as soon as Google returned,
+    // while handleSocialAuthSuccess was still restoring the account (a
+    // network round trip), so a second tap started a second sign-in. They
+    // stay off until the whole sign-in has finished.
+    try {
+      const result = await signInWithGoogle();
+      if (result.kind === 'success') {
+        await handleSocialAuthSuccess(result.email);
+      } else if (result.kind === 'error') {
+        hapticError();
+        setSocialAuthNotice(result.message);
+      }
+    } finally {
+      isSocialAuthInProgressRef.current = false;
+      setIsSocialAuthInProgress(false);
     }
     // 'cancelled' — the user closed the browser sheet, the most common
     // outcome. No error, nothing to say.

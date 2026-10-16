@@ -88,6 +88,11 @@ export default function VerifyEmailScreen() {
   const inputRefs = useRef<(TextInput | null)[]>([]);
   // True once this screen's code has been verified — see handleContinue.
   const verifiedRef = useRef(false);
+  // Which account the code verified, and whether this device's data has
+  // been prepared for it yet — kept apart so a failed prepare is retried on
+  // the next Continue instead of skipped (verifiedRef alone skipped it).
+  const verifiedUserIdRef = useRef<string | null>(null);
+  const preparedRef = useRef(false);
   const isSubmittingRef = useRef(false);
 
   const [cooldown, setCooldown] = useState(RESEND_COOLDOWN_SECONDS);
@@ -200,10 +205,25 @@ export default function VerifyEmailScreen() {
         return;
       }
       verifiedRef.current = true;
-      // Before anything below reads the local profile or onboarding state: if
-      // this device's data belongs to a DIFFERENT account, it's set aside for
-      // that account and this one gets its own (see account-switch.ts).
-      if (data.user) await prepareLocalDataForAccount(data.user.id);
+      verifiedUserIdRef.current = data.user?.id ?? null;
+    }
+    // Before anything below reads the local profile or onboarding state: if
+    // this device's data belongs to a DIFFERENT account, it's set aside for
+    // that account and this one gets its own (see account-switch.ts).
+    // BUG FIX: a failure here (storage full, a write that threw) used to
+    // escape, leaving the screen stuck on "Verifying…", and a retry skipped
+    // this step entirely because the code was already verified.
+    if (!preparedRef.current && verifiedUserIdRef.current) {
+      try {
+        await prepareLocalDataForAccount(verifiedUserIdRef.current);
+        preparedRef.current = true;
+      } catch {
+        isSubmittingRef.current = false;
+        setPhase('idle');
+        setCodeError("Couldn't finish setting up this phone for your account. Tap Continue to try again.");
+        hapticError();
+        return;
+      }
     }
     // BUG FIX: this used to reopen isSubmittingRef and flip the button back
     // to an enabled "Continue" right here — before the restore/finish below,

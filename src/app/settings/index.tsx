@@ -39,6 +39,7 @@ import {
   isReminderEnabled,
   isReminderPermissionGranted,
   isReminderSupported,
+  refreshSessionReminders,
 } from '@/lib/session-reminders';
 import { useAppTheme } from '@/lib/theme-context';
 import type { ThemePreference } from '@/lib/theme-preference';
@@ -187,63 +188,66 @@ export default function SettingsScreen() {
   const goalsSheetRef = useRef<BottomSheetModal>(null);
   const movementRestrictionsSheetRef = useRef<BottomSheetModal>(null);
   const standingSymptomsSheetRef = useRef<BottomSheetModal>(null);
+  // Everything this screen shows, read fresh — on every focus, and after
+  // Import My Data, whose modal isn't a route, so no focus event follows it.
+  const loadSettings = useCallback(async () => {
+    const healthKitTogglesAtLoad = healthKitToggleCount.current;
+    setUnit(await getUnitSystem());
+    setHapticsOn(isHapticsEnabled());
+    setAppLockOn(await isAppLockEnabled());
+    const [hasHardware, isEnrolled, types] = await Promise.all([
+      LocalAuthentication.hasHardwareAsync(),
+      LocalAuthentication.isEnrolledAsync(),
+      LocalAuthentication.supportedAuthenticationTypesAsync(),
+    ]);
+    setAppLockAvailable(hasHardware && isEnrolled);
+    // "Face ID"/"Touch ID" are real Apple product names, correct only on
+    // iOS hardware — Android's own face/fingerprint unlock is the same
+    // AuthenticationType from this API but isn't either of those
+    // trademarked features, so it gets the generic name instead.
+    setAppLockLabel(
+      types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)
+        ? Platform.OS === 'ios'
+          ? 'Face ID'
+          : 'Face Unlock'
+        : types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT)
+          ? Platform.OS === 'ios'
+            ? 'Touch ID'
+            : 'Fingerprint'
+          : 'App Lock'
+    );
+    const [remindersEnabled, remindersProfile, remindersSupportedNow] = await Promise.all([
+      isReminderEnabled(),
+      getProfile(),
+      isReminderSupported(),
+    ]);
+    setRemindersSupported(remindersSupportedNow);
+    // Re-verify the real OS permission, not just the stored preference —
+    // if it was revoked in system Settings since being turned on here,
+    // showing this toggle as still "on" would be exactly the kind of
+    // pretends-to-work row this screen's own doc comment rules out.
+    const stillPermitted = remindersEnabled ? await isReminderPermissionGranted() : false;
+    if (remindersEnabled && !stillPermitted) await disableSessionReminders();
+    setRemindersOn(stillPermitted);
+    setScheduledDaysCount(remindersProfile?.days ? remindersProfile.days.split(',').filter(Boolean).length : 0);
+    setProfileName(remindersProfile?.name ?? null);
+    const [hkAvailable, hkConnected] = await Promise.all([isHealthKitAvailable(), refreshHealthKitConnection()]);
+    setHealthKitAvailable(hkAvailable);
+    if (healthKitToggleCount.current === healthKitTogglesAtLoad) {
+      setHealthKitOn(hkConnected);
+      if (hkConnected) setHealthKitLastSync(await getLastRestingHeartRateSyncDate());
+    }
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    setAccountEmail(session?.user?.email ?? null);
+    setLoaded(true);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
-      (async () => {
-        const healthKitTogglesAtLoad = healthKitToggleCount.current;
-        setUnit(await getUnitSystem());
-        setHapticsOn(isHapticsEnabled());
-        setAppLockOn(await isAppLockEnabled());
-        const [hasHardware, isEnrolled, types] = await Promise.all([
-          LocalAuthentication.hasHardwareAsync(),
-          LocalAuthentication.isEnrolledAsync(),
-          LocalAuthentication.supportedAuthenticationTypesAsync(),
-        ]);
-        setAppLockAvailable(hasHardware && isEnrolled);
-        // "Face ID"/"Touch ID" are real Apple product names, correct only on
-        // iOS hardware — Android's own face/fingerprint unlock is the same
-        // AuthenticationType from this API but isn't either of those
-        // trademarked features, so it gets the generic name instead.
-        setAppLockLabel(
-          types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)
-            ? Platform.OS === 'ios'
-              ? 'Face ID'
-              : 'Face Unlock'
-            : types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT)
-              ? Platform.OS === 'ios'
-                ? 'Touch ID'
-                : 'Fingerprint'
-              : 'App Lock'
-        );
-        const [remindersEnabled, remindersProfile, remindersSupportedNow] = await Promise.all([
-          isReminderEnabled(),
-          getProfile(),
-          isReminderSupported(),
-        ]);
-        setRemindersSupported(remindersSupportedNow);
-        // Re-verify the real OS permission, not just the stored preference —
-        // if it was revoked in system Settings since being turned on here,
-        // showing this toggle as still "on" would be exactly the kind of
-        // pretends-to-work row this screen's own doc comment rules out.
-        const stillPermitted = remindersEnabled ? await isReminderPermissionGranted() : false;
-        if (remindersEnabled && !stillPermitted) await disableSessionReminders();
-        setRemindersOn(stillPermitted);
-        setScheduledDaysCount(remindersProfile?.days ? remindersProfile.days.split(',').filter(Boolean).length : 0);
-        setProfileName(remindersProfile?.name ?? null);
-        const [hkAvailable, hkConnected] = await Promise.all([isHealthKitAvailable(), refreshHealthKitConnection()]);
-        setHealthKitAvailable(hkAvailable);
-        if (healthKitToggleCount.current === healthKitTogglesAtLoad) {
-          setHealthKitOn(hkConnected);
-          if (hkConnected) setHealthKitLastSync(await getLastRestingHeartRateSyncDate());
-        }
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        setAccountEmail(session?.user?.email ?? null);
-        setLoaded(true);
-      })();
-    }, [])
+      loadSettings();
+    }, [loadSettings])
   );
 
   const entering = useFadeInEntering();
@@ -316,16 +320,19 @@ export default function SettingsScreen() {
     }
     // Confirm the user can actually authenticate before committing to the
     // toggle — turning this on blind risks locking them out of their own app.
+    // The switch shows on while the prompt is up (it used to snap back off
+    // under the prompt and only flip on after), and reverts if it fails.
+    setAppLockOn(true);
     const result = await LocalAuthentication.authenticateAsync({
       promptMessage: `Confirm ${appLockLabel} to enable App Lock`,
       cancelLabel: 'Cancel',
     });
     if (result.success) {
-      setAppLockOn(true);
       setAppLockEnabled(true);
       hapticImpactLight();
     } else {
-      hapticError();
+      setAppLockOn(false);
+      if (result.error !== 'user_cancel' && result.error !== 'system_cancel') hapticError();
     }
   };
 
@@ -337,11 +344,12 @@ export default function SettingsScreen() {
       hapticImpactLight();
       return;
     }
+    // On while the permission prompt is up, settled by the answer below.
+    setRemindersOn(true);
     const profile = await getProfile();
     const days = profile?.days ? profile.days.split(',').filter(Boolean) : [];
     const granted = await enableSessionReminders(days);
     if (granted) {
-      setRemindersOn(true);
       setRemindersBlocked(false);
       hapticImpactLight();
       // Same permission covers remote pushes — register now rather than
@@ -353,6 +361,7 @@ export default function SettingsScreen() {
       // revert with only an error buzz, which read as a broken switch to
       // anyone who'd declined the prompt once; the line below the row now
       // says why and links to where it can be changed.
+      setRemindersOn(false);
       setRemindersBlocked(true);
       hapticError();
     }
@@ -393,17 +402,19 @@ export default function SettingsScreen() {
       hapticImpactLight();
       return;
     }
+    // On while Apple Health's sheet is up, settled by what it allowed.
+    setHealthKitOn(true);
     const granted = await requestHealthKitAccess();
     if (granted) {
-      setHealthKitOn(true);
       setHealthKitBlocked(false);
       setHealthKitLastSync(await getLastRestingHeartRateSyncDate());
       hapticImpactLight();
     } else {
       // Don't Allow at the prompt, a prompt iOS no longer shows because it
       // was answered before, or reads allowed with no data to see yet —
-      // the switch stays off and the line below the row says where VerveIn's
-      // access is actually managed.
+      // the switch goes back off and the line below the row says where
+      // VerveIn's access is actually managed.
+      setHealthKitOn(false);
       setHealthKitBlocked(true);
       hapticError();
     }
@@ -532,6 +543,11 @@ export default function SettingsScreen() {
     hapticSuccess();
     setShowImportModal(false);
     setLastRestoredAt(new Date().toLocaleDateString());
+    // BUG FIX: the restored profile (name, training days, goals) didn't show
+    // here until the screen was left and reopened, and reminders kept the
+    // old days. Re-read this screen and reschedule from the restored plan.
+    loadSettings();
+    refreshSessionReminders({ force: true });
   };
 
   const handleOpenDeleteData = () => {
