@@ -29,6 +29,12 @@ export function AppLockGate() {
   // came back through inactive→active and immediately re-locked, looping
   // the Face ID prompt. Only a real trip through 'background' counts now.
   const wentToBackground = useRef(false);
+  // Whether App Lock is on, kept current so leaving the app can react in
+  // the same tick — an awaited storage read there came too late (below).
+  const lockEnabledRef = useRef(false);
+  // A plain cover while the app is leaving the screen, for the app-switcher
+  // snapshot (see the AppState handler).
+  const [covered, setCovered] = useState(false);
   // Guards against two overlapping authenticateAsync calls (the mount-time
   // check and a foreground event landing close together, or a double-tap
   // on Try Again) stacking two system prompts.
@@ -73,7 +79,8 @@ export function AppLockGate() {
       if (result.success) {
         hapticSuccess();
         setLocked(false);
-      } else {
+      } else if (result.error !== 'user_cancel' && result.error !== 'system_cancel' && result.error !== 'app_cancel') {
+        // Cancelling is a choice, not a failure — no error buzz for it.
         hapticError();
       }
     } finally {
@@ -84,6 +91,7 @@ export function AppLockGate() {
   useEffect(() => {
     (async () => {
       const enabled = await isAppLockEnabled();
+      lockEnabledRef.current = enabled;
       if (enabled) {
         setLocked(true);
         attemptUnlock();
@@ -94,25 +102,46 @@ export function AppLockGate() {
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', async (next: AppStateStatus) => {
-      if (next === 'background') {
-        wentToBackground.current = true;
+      // BUG FIX: nothing covered the screen on the way out, so iOS's
+      // app-switcher snapshot showed whatever was open (weight, notes,
+      // health history), and the lock only went up after an awaited read on
+      // return, after a flash of it. Now the cover goes up as the app starts
+      // leaving ('inactive' comes before the snapshot), and the lock is set
+      // on 'background' itself, so return lands straight on the lock.
+      if (next === 'inactive' || next === 'background') {
+        if (lockEnabledRef.current) setCovered(true);
+        if (next === 'background') {
+          wentToBackground.current = true;
+          if (lockEnabledRef.current) setLocked(true);
+        }
         return;
       }
-      if (next !== 'active' || !wentToBackground.current) return;
-      wentToBackground.current = false;
+      if (next !== 'active') return;
+      setCovered(false);
+      // Re-read on every return: App Lock may have been switched in Settings.
       const enabled = await isAppLockEnabled();
+      lockEnabledRef.current = enabled;
+      if (!wentToBackground.current) return;
+      wentToBackground.current = false;
       if (enabled) {
         setLocked(true);
         attemptUnlock();
+      } else {
+        setLocked(false);
       }
     });
     return () => subscription.remove();
   }, [attemptUnlock]);
 
+  if (checked && !locked && covered) {
+    return <View style={styles.root} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />;
+  }
   if (!checked || !locked) return null;
 
   return (
-    <View style={styles.root}>
+    // accessibilityViewIsModal: VoiceOver stays on the lock, never on the
+    // screen underneath it.
+    <View style={styles.root} accessibilityViewIsModal>
       <View style={styles.iconWrap}>
         <SymbolView name={biometricIcon} size={48} tintColor="#5FBE84" />
       </View>

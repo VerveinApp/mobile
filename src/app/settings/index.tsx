@@ -974,6 +974,9 @@ export default function SettingsScreen() {
               styles={styles}
               colors={colors}
               label={appLockLabel}
+              // The lock screen already shows Touch ID's symbol on Touch ID
+              // phones; this row used Face ID's everywhere.
+              icon={appLockLabel === 'Touch ID' || appLockLabel === 'Fingerprint' ? 'touchid' : 'faceid'}
               available={appLockAvailable}
               value={appLockOn && appLockAvailable}
               onValueChange={handleToggleAppLock}
