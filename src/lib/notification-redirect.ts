@@ -2,7 +2,7 @@ import { router, usePathname } from 'expo-router';
 import { useEffect, useRef } from 'react';
 
 import { hasCompletedOnboarding } from '@/lib/onboarding-draft';
-import { getModule } from '@/lib/session-reminders';
+import { ENERGY_ACTION_PREFIX, getModule, registerReminderActions } from '@/lib/session-reminders';
 
 /**
  * Every screen a notification is allowed to open. A notification names its
@@ -45,19 +45,29 @@ export function useNotificationRedirect(): void {
     const Notifications = getModule();
     if (!Notifications) return;
     let active = true;
-    const follow = async (data: unknown) => {
+    void registerReminderActions();
+    const follow = async (data: unknown, actionIdentifier?: string) => {
       const route = notificationRoute(data);
       if (!route || !(await hasCompletedOnboarding()) || !active) return;
+      // An energy button on the training-day reminder: open the check-in
+      // already on that level (see session-reminders.ts).
+      const level = actionIdentifier?.startsWith(ENERGY_ACTION_PREFIX)
+        ? Number(actionIdentifier.slice(ENERGY_ACTION_PREFIX.length))
+        : NaN;
+      if (route === '/home/check-in' && level >= 1 && level <= 5) {
+        router.push({ pathname: '/home/check-in', params: { energy: String(level) } } as never);
+        return;
+      }
       if (pathnameRef.current === route) return;
       router.push(route as never);
     };
     const launchResponse = Notifications.getLastNotificationResponse();
     if (launchResponse) {
       Notifications.clearLastNotificationResponse();
-      void follow(launchResponse.notification.request.content.data);
+      void follow(launchResponse.notification.request.content.data, launchResponse.actionIdentifier);
     }
     const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
-      void follow(response.notification.request.content.data);
+      void follow(response.notification.request.content.data, response.actionIdentifier);
     });
     return () => {
       active = false;

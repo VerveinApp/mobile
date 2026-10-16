@@ -226,7 +226,46 @@ function pickRandom<T>(items: T[]): T {
 // (see notification-redirect.ts) rather than wherever the app last was.
 const REMINDER_DATA = { url: '/home/check-in' };
 
-async function buildReminderContent(): Promise<{ title: string; body: string; data: { url: string } }> {
+/** The training-day reminder's category: long-press it and answer the
+ * check-in's first question from the notification itself. */
+export const CHECK_IN_CATEGORY = 'vervein-checkin';
+/** Each button's identifier carries the energy level it picks. */
+export const ENERGY_ACTION_PREFIX = 'energy-';
+const ENERGY_ACTIONS = [
+  { level: 2, buttonTitle: 'Running low' },
+  { level: 3, buttonTitle: 'Okay' },
+  { level: 4, buttonTitle: 'Feeling good' },
+] as const;
+
+/**
+ * Registers the reminder's energy buttons with iOS. Called on every launch
+ * (categories don't survive a reinstall, and re-registering is harmless).
+ * Each button opens the app — the check-in then starts on that level, and
+ * Start is still the person's own tap.
+ */
+export async function registerReminderActions(): Promise<void> {
+  const Notifications = getModule();
+  if (!Notifications) return;
+  try {
+    await Notifications.setNotificationCategoryAsync(
+      CHECK_IN_CATEGORY,
+      ENERGY_ACTIONS.map(({ level, buttonTitle }) => ({
+        identifier: `${ENERGY_ACTION_PREFIX}${level}`,
+        buttonTitle,
+        options: { opensAppToForeground: true },
+      }))
+    );
+  } catch {
+    // Without the buttons the reminder still opens the check-in on a tap.
+  }
+}
+
+async function buildReminderContent(): Promise<{
+  title: string;
+  body: string;
+  data: { url: string };
+  categoryIdentifier: string;
+}> {
   const trainingState = await getTrainingState();
   const area = getMostNeglectedBodyArea(trainingState);
   if (area) {
@@ -234,9 +273,10 @@ async function buildReminderContent(): Promise<{ title: string; body: string; da
       title: 'Training day',
       body: pickRandom(AREA_READY_TEMPLATES)(REMINDER_AREA[area]),
       data: REMINDER_DATA,
+      categoryIdentifier: CHECK_IN_CATEGORY,
     };
   }
-  return { title: 'Training day', body: pickRandom(GENERIC_TEMPLATES), data: REMINDER_DATA };
+  return { title: 'Training day', body: pickRandom(GENERIC_TEMPLATES), data: REMINDER_DATA, categoryIdentifier: CHECK_IN_CATEGORY };
 }
 
 // BUG FIX: scheduleRollingWindow's own cancel-then-reschedule sequence had

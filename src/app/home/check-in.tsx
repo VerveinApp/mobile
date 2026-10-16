@@ -272,7 +272,13 @@ export default function EnergyCheckInScreen() {
   const styles = useMemo(() => scaleCanvasStyles(rawStyles, scale), [rawStyles, scale]);
   const isPremium = usePremiumEntitlement();
 
-  const [energy, setEnergy] = useState<EnergyScore | null>(null);
+  // Opened from an energy button on the training-day reminder: start on
+  // that level. Today's saved session, if any, still wins when it loads.
+  const { energy: energyParam } = useLocalSearchParams<{ energy?: string }>();
+  const [energy, setEnergy] = useState<EnergyScore | null>(() => {
+    const level = Number(energyParam);
+    return level >= 1 && level <= 5 ? (level as EnergyScore) : null;
+  });
   // A second, independent input alongside energy — someone can have high
   // energy and 15 minutes, or low energy and an hour. null means no
   // constraint picked (the plan runs at full energy-driven length), not "0
