@@ -21,7 +21,7 @@ import {
   RULER_TICK_SPACING,
 } from '@/components/onboarding/horizontal-ruler';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
-import { Sparkline } from '@/components/ui/sparkline';
+import { TrendChart } from '@/components/ui/trend-chart';
 import { DayPicker } from '@/components/ui/day-picker';
 import { SwipeRow } from '@/components/ui/swipe-row';
 import { dayPillLabel } from '@/lib/day-labels';
@@ -135,7 +135,8 @@ export default function WeightHistoryScreen() {
   // Settings' Goals sheet — self-reported, never derived (see that sheet's
   // own doc comment). null = no goal set, shown nowhere on this screen.
   const [targetWeightKg, setTargetWeightKg] = useState<number | null>(null);
-  const [chartWidth, setChartWidth] = useState(0);
+  // A finger held on the chart locks the page's scroll — see TrendChart.
+  const [scrubbing, setScrubbing] = useState(false);
   // Which day the weigh-in is for — today unless a past day is picked, or an
   // existing row was tapped to correct it.
   const [draftDate, setDraftDate] = useState(localDateStr());
@@ -231,7 +232,7 @@ export default function WeightHistoryScreen() {
   // toggle, since a line's shape is identical either way and Sparkline
   // carries no axis labels to convert. Needs 2+ real points to draw an
   // actual trend, not just a dot.
-  const weightTrendData = entries.length >= 2 ? [...entries].reverse().map((e) => ({ value: e.weightKg })) : [];
+  const weightTrendData = entries.length >= 2 ? [...entries].reverse().map((e) => ({ value: e.weightKg, date: e.date })) : [];
   const currentWeightKg = resolveCurrentWeightKg(entries, profileWeightKg);
 
   const lbWholeIndex = kgToLbWholeIndex(draftWeightKg);
@@ -267,7 +268,11 @@ export default function WeightHistoryScreen() {
         </ScrollView>
       ) : (
         <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          scrollEnabled={!scrubbing}
+        >
           <View style={styles.section}>
             <Pressable
               style={({ pressed }) => [styles.addRow, pressed && PRESSED_DIM]}
@@ -355,11 +360,12 @@ export default function WeightHistoryScreen() {
             <View style={styles.section}>
               <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TREND</Text>
               <View style={[styles.card, styles.chartCardPadding]}>
-                <View style={styles.chartCardInner} onLayout={(e) => setChartWidth(e.nativeEvent.layout.width)}>
-                  {chartWidth > 0 ? (
-                    <Sparkline data={weightTrendData} width={chartWidth} height={56} color="#5FBE84" />
-                  ) : null}
-                </View>
+                <TrendChart
+                  data={weightTrendData}
+                  caption="Weight"
+                  formatValue={(kg) => formatWeight(kg, unit)}
+                  onScrubbingChange={setScrubbing}
+                />
               </View>
             </View>
           ) : null}

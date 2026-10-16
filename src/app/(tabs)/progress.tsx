@@ -36,6 +36,7 @@ import { usePremiumEntitlement } from '@/lib/purchases';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { getRecentWeeks, type WeekDay } from '@/lib/session-history';
 import { useAppTheme } from '@/lib/theme-context';
+import { CAPACITY_TREND_MIN_WINDOW } from '@/lib/engine/training-state';
 import { Donut } from '@/components/ui/donut';
 import { countEnergyLevels, foldIntoOther, toPercentShares } from '@/lib/chart-math';
 import { getTrainingState } from '@/lib/training-state-loader';
@@ -970,9 +971,22 @@ export default function ProgressScreen() {
           ) : null}
           {showTrend || showDebt ? null : (
             <View style={styles.emptyCard}>
-              <SymbolView name="chart.line.uptrend.xyaxis" size={26} tintColor={colors.iconFaint} style={styles.emptyIcon} />
+              {/* Real progress toward the line, not a generic "keep going":
+                  one dot per check-in the trend needs, filled as they land. */}
+              <View
+                style={styles.trendDotsRow}
+                accessible
+                accessibilityLabel={`${Math.min(energyDays.length, CAPACITY_TREND_MIN_WINDOW)} of ${CAPACITY_TREND_MIN_WINDOW} past check-ins`}
+              >
+                {Array.from({ length: CAPACITY_TREND_MIN_WINDOW }, (_, i) => (
+                  <View key={i} style={[styles.trendDot, i < energyDays.length && styles.trendDotFilled]} />
+                ))}
+              </View>
               <Text style={styles.emptyText} maxFontSizeMultiplier={1.3}>
-                Finish a few more sessions to see your energy trend and banked volume here.
+                {/* The trend reads days before today (today's check-in counts
+                    from tomorrow), so "past" keeps the count honest. */}
+                {Math.min(energyDays.length, CAPACITY_TREND_MIN_WINDOW)} of {CAPACITY_TREND_MIN_WINDOW} past check-ins — your
+                energy line starts at {CAPACITY_TREND_MIN_WINDOW}.
               </Text>
             </View>
           )}
@@ -1265,6 +1279,23 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors'], isDark: 
     // Plain numbers, no fill bar — the vault's brand system treats progress
     // bars as permanently off-limits (same reasoning as dropping streaks:
     // a bar reads as a score to chase, a number is just a fact).
+    trendDotsRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginBottom: 12,
+    },
+    trendDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.pillBorder,
+      backgroundColor: colors.pillBg,
+    },
+    trendDotFilled: {
+      borderColor: '#5FBE84',
+      backgroundColor: '#5FBE84',
+    },
     movementDonutWrap: {
       alignItems: 'center',
       paddingTop: 6,

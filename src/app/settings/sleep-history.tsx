@@ -16,7 +16,7 @@ import { useAppColors } from '@/lib/theme-context';
 import { PremiumGate } from '@/components/premium-gate';
 import { HorizontalRuler } from '@/components/onboarding/horizontal-ruler';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
-import { Sparkline } from '@/components/ui/sparkline';
+import { TrendChart } from '@/components/ui/trend-chart';
 import { DayPicker } from '@/components/ui/day-picker';
 import { SwipeRow } from '@/components/ui/swipe-row';
 import { dayPillLabel } from '@/lib/day-labels';
@@ -72,7 +72,8 @@ export default function SleepHistoryScreen() {
   // Which day the entry is for — today unless a past day is picked, or an
   // existing row was tapped to correct it.
   const [draftDate, setDraftDate] = useState(localDateStr());
-  const [chartWidth, setChartWidth] = useState(0);
+  // A finger held on the chart locks the page's scroll — see TrendChart.
+  const [scrubbing, setScrubbing] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -92,7 +93,7 @@ export default function SleepHistoryScreen() {
   // itself the "deeper insight" this screen's own Plus split already draws
   // between the raw log (always free) and full depth (Plus), so it sits
   // behind the same gate as EARLIER below, not a third, ungated exception.
-  const sleepTrendData = entries.length >= 2 ? [...entries].reverse().map((e) => ({ value: e.hours })) : [];
+  const sleepTrendData = entries.length >= 2 ? [...entries].reverse().map((e) => ({ value: e.hours, date: e.date })) : [];
 
   const handleToggleAdd = () => {
     hapticSelect();
@@ -207,7 +208,11 @@ export default function SleepHistoryScreen() {
         </ScrollView>
       ) : (
         <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          scrollEnabled={!scrubbing}
+        >
           <View style={styles.section}>
             <Pressable
               style={({ pressed }) => [styles.addRow, pressed && PRESSED_DIM]}
@@ -251,11 +256,13 @@ export default function SleepHistoryScreen() {
               <View style={styles.section}>
                 <Text style={styles.sectionKicker} maxFontSizeMultiplier={1.3}>TREND</Text>
                 <View style={[styles.card, styles.chartCardPadding]}>
-                  <View style={styles.chartCardInner} onLayout={(e) => setChartWidth(e.nativeEvent.layout.width)}>
-                    {chartWidth > 0 ? (
-                      <Sparkline data={sleepTrendData} width={chartWidth} height={56} min={0} color="#5FBE84" />
-                    ) : null}
-                  </View>
+                  <TrendChart
+                    data={sleepTrendData}
+                    caption="Hours slept"
+                    formatValue={(hours) => formatHours(hours)}
+                    min={0}
+                    onScrubbingChange={setScrubbing}
+                  />
                 </View>
               </View>
             </PremiumGate>

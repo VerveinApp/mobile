@@ -88,7 +88,7 @@ export default function ProfileScreen() {
     setUnit(globalUnit);
     setCurrentWeightKg(resolveCurrentWeightKg(weightLog, p?.weightKg));
     setWeightTrendData(
-      unlessUnchanged(weightLog.length >= 2 ? [...weightLog].reverse().map((e) => ({ value: e.weightKg })) : [])
+      unlessUnchanged(weightLog.length >= 2 ? [...weightLog].reverse().map((e) => ({ value: e.weightKg, date: e.date })) : [])
     );
     // Which exercise to look up only exists once the profile itself has
     // resolved, so this can't join the Promise.all above.
@@ -434,6 +434,8 @@ export default function ProfileScreen() {
                   {trendChartWidth > 0 ? (
                     <Sparkline
                       data={weightTrendData}
+                      // Spaced by date, so a gap in weigh-ins reads as a gap.
+                      spacing="date"
                       width={trendChartWidth}
                       height={46}
                       color="#5FBE84"

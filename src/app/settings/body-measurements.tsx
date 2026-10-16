@@ -23,7 +23,7 @@ import { parseDecimalInput } from '@/lib/weight-units';
 import { getProfile } from '@/lib/user-profile';
 import { HealthConsentGate } from '@/components/settings/health-consent-gate';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
-import { Sparkline } from '@/components/ui/sparkline';
+import { TrendChart } from '@/components/ui/trend-chart';
 import { DayPicker } from '@/components/ui/day-picker';
 import { SwipeRow } from '@/components/ui/swipe-row';
 import { dayPillLabel } from '@/lib/day-labels';
@@ -93,7 +93,8 @@ export default function BodyMeasurementsScreen() {
   // or an existing row was tapped to correct it.
   const [draftDate, setDraftDate] = useState(localDateStr());
   const [chartField, setChartField] = useState<BodyMeasurementField>('waistCm');
-  const [chartWidth, setChartWidth] = useState(0);
+  // A finger held on the chart locks the page's scroll — see TrendChart.
+  const [scrubbing, setScrubbing] = useState(false);
 
   const reload = useCallback(() => {
     (async () => {
@@ -185,7 +186,7 @@ export default function BodyMeasurementsScreen() {
     ? [...entries]
         .reverse()
         .filter((e) => e[activeChartField] !== undefined)
-        .map((e) => ({ value: e[activeChartField] as number }))
+        .map((e) => ({ value: e[activeChartField] as number, date: e.date }))
     : [];
 
   return (
@@ -221,7 +222,11 @@ export default function BodyMeasurementsScreen() {
         <HealthConsentGate />
       ) : (
         <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          scrollEnabled={!scrubbing}
+        >
           <View style={styles.section}>
             <Pressable
               style={({ pressed }) => [styles.addRow, pressed && PRESSED_DIM]}
@@ -306,11 +311,12 @@ export default function BodyMeasurementsScreen() {
                 </View>
               </View>
               <View style={[styles.card, styles.chartCardPadding]}>
-                <View style={styles.chartCardInner} onLayout={(e) => setChartWidth(e.nativeEvent.layout.width)}>
-                  {chartWidth > 0 ? (
-                    <Sparkline data={chartData} width={chartWidth} height={56} color="#5FBE84" />
-                  ) : null}
-                </View>
+                <TrendChart
+                  data={chartData}
+                  caption={FIELDS.find((f) => f.key === activeChartField)?.label ?? ''}
+                  formatValue={(cm) => `${cmToDisplay(cm, unit)}${unitSuffix}`}
+                  onScrubbingChange={setScrubbing}
+                />
               </View>
             </View>
           ) : null}

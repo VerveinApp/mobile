@@ -28,3 +28,9 @@ export function dayPillLabel(date: string, today: string = localDateStr()): { te
   if (date === yesterday) return { text: 'Yesterday', spoken: `Yesterday, ${spoken}` };
   return { text: `${WEEKDAY[day.getDay()]} ${day.getDate()}`, spoken };
 }
+
+/** "Oct 12" — a point's date on a chart caption. */
+export function shortDateLabel(date: string): string {
+  const day = parseLocal(date);
+  return `${MONTH[day.getMonth()]} ${day.getDate()}`;
+}
