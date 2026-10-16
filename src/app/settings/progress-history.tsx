@@ -26,7 +26,7 @@ import { useAppColors } from '@/lib/theme-context';
 import { getProfile } from '@/lib/user-profile';
 import { deleteWorkoutLog, getAllWorkoutLogs, type WorkoutLogExercise } from '@/lib/workout-log';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
-import { SwipeRow } from '@/components/ui/swipe-row';
+import { SwipeRow, swipeRowAccessibility } from '@/components/ui/swipe-row';
 import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 
 function formatEntryDate(dateStr: string): string {
@@ -378,6 +378,12 @@ function HistoryRow({
     >
       <Pressable
         onPress={toggleExpanded}
+        accessibilityRole={hasLog ? 'button' : undefined}
+        accessibilityLabel={`${formatEntryDate(entry.date)}, ${entry.completed ? 'completed' : 'rest day'}${
+          entry.completed && entry.energy ? `, ${ENERGY_LABELS[entry.energy]} energy` : ''
+        }`}
+        accessibilityHint={hasLog ? (expanded ? 'Hides the workout' : 'Shows the workout') : undefined}
+        {...swipeRowAccessibility([{ name: 'delete', label: 'Delete', run: onDelete }])}
         style={[
           styles.entryRow,
           !isLast && styles.entryRowDivider,

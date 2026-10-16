@@ -14,7 +14,7 @@ import { notePreview, noteTitle } from '@/lib/note-text';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { SkeletonCard } from '@/components/ui/skeleton';
-import { SwipeRow } from '@/components/ui/swipe-row';
+import { SwipeRow, swipeRowAccessibility } from '@/components/ui/swipe-row';
 import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 
 // Archive is the full-swipe action here (Mail's own default), not Delete —
@@ -198,6 +198,10 @@ export default function NotesScreen() {
                     }}
                     accessibilityRole="button"
                     accessibilityLabel={`${noteTitle(note.text)}. ${formatNoteDate(note.updatedAt)}`}
+                    {...swipeRowAccessibility([
+                      { name: 'archive', label: 'Archive', run: () => handleArchive(note) },
+                      { name: 'delete', label: 'Delete', run: () => handleDelete(note.id) },
+                    ])}
                   >
                     <View style={styles.noteText}>
                       <Text style={styles.noteTitle} numberOfLines={1} maxFontSizeMultiplier={1.2}>

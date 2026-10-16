@@ -18,7 +18,7 @@ import { HorizontalRuler } from '@/components/onboarding/horizontal-ruler';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 import { TrendChart } from '@/components/ui/trend-chart';
 import { DayPicker } from '@/components/ui/day-picker';
-import { SwipeRow } from '@/components/ui/swipe-row';
+import { SwipeRow, swipeRowAccessibility } from '@/components/ui/swipe-row';
 import { dayPillLabel } from '@/lib/day-labels';
 import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 
@@ -171,6 +171,7 @@ export default function NutritionHistoryScreen() {
         accessibilityRole="button"
         accessibilityLabel={`${formatEntryDate(entry.date)}, ${formatCalories(entry.calories)}`}
         accessibilityHint="Edit this entry"
+        {...swipeRowAccessibility([{ name: 'delete', label: 'Delete', run: () => handleDelete(entry.date) }])}
       >
         <Text style={styles.entryDate} maxFontSizeMultiplier={1.2}>{formatEntryDate(entry.date)}</Text>
         <Text style={styles.entryValue} maxFontSizeMultiplier={1.2}>{formatCalories(entry.calories)}</Text>

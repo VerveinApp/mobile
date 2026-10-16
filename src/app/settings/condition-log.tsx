@@ -23,7 +23,7 @@ import { useAppColors } from '@/lib/theme-context';
 import { getProfile } from '@/lib/user-profile';
 import { HealthConsentGate } from '@/components/settings/health-consent-gate';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
-import { SwipeRow } from '@/components/ui/swipe-row';
+import { SwipeRow, swipeRowAccessibility } from '@/components/ui/swipe-row';
 import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 
 // 0 = today, since a flare-up (unlike a training session) can honestly be
@@ -268,6 +268,9 @@ export default function ConditionLogScreen() {
                         index < entries.length - 1 && styles.entryRowDivider,
                         { backgroundColor: colors.surface },
                       ]}
+                      accessible
+                      accessibilityLabel={`${CONDITION_LABELS[entry.condition]}${entry.note ? `, ${entry.note}` : ''}, ${formatEntryDate(entry.date)}`}
+                      {...swipeRowAccessibility([{ name: 'delete', label: 'Delete', run: () => handleDelete(entry.id) }])}
                     >
                       <View style={styles.entryText}>
                         <Text style={styles.entryCondition} maxFontSizeMultiplier={1.2}>

@@ -31,6 +31,21 @@ type SwipeRowProps = {
  * arms at the threshold and acts on release, as Mail does, so it can still
  * be called off by dragging back.
  */
+/**
+ * The VoiceOver half of a swipe row. Swiping is a gesture VoiceOver users
+ * can't make, so a row's swipe actions were out of reach; spread this on the
+ * row's own focusable element (the one VoiceOver lands on) and its actions
+ * appear in the actions rotor: swipe up or down, double-tap.
+ */
+export function swipeRowAccessibility(actions: { name: string; label: string; run: () => void }[]) {
+  return {
+    accessibilityActions: actions.map(({ name, label }) => ({ name, label })),
+    onAccessibilityAction: (event: { nativeEvent: { actionName: string } }) => {
+      actions.find((action) => action.name === event.nativeEvent.actionName)?.run();
+    },
+  };
+}
+
 export function SwipeRow({ renderActions, onFullSwipe, children }: SwipeRowProps) {
   // Armed state as JS last heard it. Arm/disarm messages and the release
   // callback travel from the UI thread to JS in order, so at release this is

@@ -13,7 +13,7 @@ import { notePreview, noteTitle } from '@/lib/note-text';
 import { useFadeInEntering } from '@/lib/screen-transitions';
 import { useAppColors } from '@/lib/theme-context';
 import { SkeletonCard } from '@/components/ui/skeleton';
-import { SwipeRow } from '@/components/ui/swipe-row';
+import { SwipeRow, swipeRowAccessibility } from '@/components/ui/swipe-row';
 import { LIST_ROW_EXITING, LIST_ROW_LAYOUT } from '@/lib/motion';
 
 // The full-swipe action here is Unarchive (putting a note back), not Delete
@@ -159,6 +159,10 @@ export default function ArchiveScreen() {
                     }}
                     accessibilityRole="button"
                     accessibilityLabel={`${noteTitle(note.text)}. ${formatNoteDate(note.updatedAt)}`}
+                    {...swipeRowAccessibility([
+                      { name: 'unarchive', label: 'Move out of Archive', run: () => handleUnarchive(note) },
+                      { name: 'delete', label: 'Delete', run: () => handleDelete(note.id) },
+                    ])}
                   >
                     <View style={styles.noteText}>
                       <Text style={styles.noteTitle} numberOfLines={1} maxFontSizeMultiplier={1.2}>
