@@ -1,4 +1,4 @@
-import { sleepHoursByNight } from '@/lib/health-kit';
+import { sleepDebtTrendFrom, sleepHoursByNight } from '@/lib/health-kit';
 
 // Local-time constructors on purpose — localDateStr buckets by the device's
 // own calendar day, so these read the same in any test-runner time zone.
@@ -43,3 +43,29 @@ describe('sleepHoursByNight', () => {
     ]);
   });
 });
+
+describe('sleepDebtTrendFrom', () => {
+  const nights = (hours: number[], lastDate = '2026-10-14') => {
+    const last = Date.parse(`${lastDate}T00:00:00Z`);
+    return hours.map((value, i) => ({
+      date: new Date(last - (hours.length - 1 - i) * 86400000).toISOString().slice(0, 10),
+      value,
+    }));
+  };
+
+  it('compares last night with your own usual nights', () => {
+    const trend = sleepDebtTrendFrom(nights([7.5, 8, 7.5, 8, 5.5]), '2026-10-14');
+    expect(trend?.recentHours).toBe(5.5);
+    expect(trend?.baselineAvgHours).toBe(7.75);
+    expect(trend?.ratio).toBeLessThan(1);
+  });
+
+  it('says nothing without four usual nights plus last night', () => {
+    expect(sleepDebtTrendFrom(nights([7, 8, 6]), '2026-10-14')).toBeNull();
+  });
+
+  it('says nothing when the newest night is stale', () => {
+    expect(sleepDebtTrendFrom(nights([7, 8, 7, 8, 6], '2026-10-10'), '2026-10-14')).toBeNull();
+  });
+});
+

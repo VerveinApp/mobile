@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { Exercise } from '@/lib/engine/types';
 import { localDateStr } from '@/lib/local-date';
+import { getSleepLog } from '@/lib/sleep-log';
 
 // iOS-only, read-only wrapper around @kingstinct/react-native-healthkit.
 // HealthKit itself never tells an app which individual read permissions
@@ -626,12 +627,22 @@ export type SleepDebtTrend = { recentHours: number; baselineAvgHours: number; ra
  * rule as the RHR trend.
  */
 export async function getSleepDebtTrend(): Promise<SleepDebtTrend | null> {
-  const samples = await getRecentSleepHours(10); // oldest-first
+  let samples = await getRecentSleepHours(10); // oldest-first
+  // No sleep from Apple Health (not connected, or no wearable): the nights
+  // logged by hand in Sleep History are the same signal for anyone without
+  // one, as sleep-log.ts promises. They never fed the check-in before.
+  if (samples.length === 0) samples = await getLoggedSleepNights(10);
+  return sleepDebtTrendFrom(samples, localDateStr());
+}
+
+/** Pure core of getSleepDebtTrend, exported for tests: last night against
+ * this person's own trailing nights, or null without enough fresh data. */
+export function sleepDebtTrendFrom(samples: DailyMetric[], today: string): SleepDebtTrend | null {
   if (samples.length < SLEEP_MIN_BASELINE_NIGHTS + 1) return null;
 
   const newest = samples[samples.length - 1];
   const daysSinceNewest = Math.round(
-    (Date.parse(`${localDateStr()}T00:00:00Z`) - Date.parse(`${newest.date}T00:00:00Z`)) / 86400000
+    (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${newest.date}T00:00:00Z`)) / 86400000
   );
   if (daysSinceNewest > SLEEP_FRESHNESS_MAX_DAYS) return null;
 
@@ -639,6 +650,18 @@ export async function getSleepDebtTrend(): Promise<SleepDebtTrend | null> {
   const baseline = samples.slice(0, -1);
   const baselineAvgHours = baseline.reduce((sum, s) => sum + s.value, 0) / baseline.length;
   return { recentHours, baselineAvgHours, ratio: recentHours / baselineAvgHours };
+}
+
+/** Hand-logged nights from the last `days` days, oldest first — a logged
+ * entry's date is the morning that night ended, the same "sleep day" Apple
+ * Health nights use above. */
+async function getLoggedSleepNights(days: number): Promise<DailyMetric[]> {
+  const oldestDate = localDateStr(new Date(Date.now() - (days - 1) * 24 * 60 * 60 * 1000));
+  const log = await getSleepLog();
+  return log
+    .filter((entry) => entry.date >= oldestDate && entry.hours > 0)
+    .map((entry) => ({ date: entry.date, value: entry.hours }))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
 /**
