@@ -50,7 +50,7 @@ export function LegalDocumentScreen({
         >
           <SymbolView name="chevron.left" size={16} tintColor={colors.text} />
         </Pressable>
-        <Text style={styles.headerTitle} maxFontSizeMultiplier={1.3}>{title}</Text>
+        <Text style={styles.headerTitle} accessibilityRole="header" maxFontSizeMultiplier={1.3}>{title}</Text>
         <View style={styles.backButton} />
       </View>
 
@@ -62,7 +62,7 @@ export function LegalDocumentScreen({
 
         {sections.map((section) => (
           <View key={section.heading} style={styles.section}>
-            <Text style={styles.sectionHeading} maxFontSizeMultiplier={1.3}>{section.heading}</Text>
+            <Text style={styles.sectionHeading} accessibilityRole="header" maxFontSizeMultiplier={1.3}>{section.heading}</Text>
             {section.body.map((paragraph, index) =>
               paragraph.startsWith('- ') ? (
                 <View key={index} style={styles.bulletRow}>

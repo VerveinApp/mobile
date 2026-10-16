@@ -213,13 +213,20 @@ export function EnergyGauge({ size = 260, value, onChange, previousValue = null 
 
   /** Used by VoiceOver/TalkBack increment/decrement — the drag path ticks and reports separately. */
   const handleAccessibilityAction = (event: { nativeEvent: { actionName: string } }) => {
-    const current = value !== null ? value - 1 : -1;
+    // Nothing picked yet: the first swipe either way lands on the middle
+    // (Okay), not on Empty, so both directions are one step from anything.
+    const middle = Math.floor(SEGMENT_COUNT / 2);
+    const current = value !== null ? value - 1 : null;
     const next =
-      event.nativeEvent.actionName === 'increment'
-        ? Math.min(current + 1, SEGMENT_COUNT - 1)
-        : event.nativeEvent.actionName === 'decrement'
-          ? Math.max(current - 1, 0)
-          : null;
+      current === null
+        ? event.nativeEvent.actionName === 'increment' || event.nativeEvent.actionName === 'decrement'
+          ? middle
+          : null
+        : event.nativeEvent.actionName === 'increment'
+          ? Math.min(current + 1, SEGMENT_COUNT - 1)
+          : event.nativeEvent.actionName === 'decrement'
+            ? Math.max(current - 1, 0)
+            : null;
     if (next === null) return;
     hapticSelect();
     lastIndex.set(next);
@@ -238,7 +245,10 @@ export function EnergyGauge({ size = 260, value, onChange, previousValue = null 
             min: 1,
             max: SEGMENT_COUNT,
             now: isSet ? (value as number) : undefined,
-            text: isSet ? `${value} of ${SEGMENT_COUNT}${selected ? `, ${selected.label}` : ''}` : 'Not set',
+            // The drawn "last time" marker, spoken too.
+            text: `${isSet ? `${value} of ${SEGMENT_COUNT}${selected ? `, ${selected.label}` : ''}` : 'Not set'}${
+              previousValue !== null ? `. Last check-in: ${LEVELS[previousValue - 1].label}` : ''
+            }`,
           }}
           accessibilityActions={[
             { name: 'increment', label: 'Increase energy level' },

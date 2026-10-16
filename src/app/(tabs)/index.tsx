@@ -127,6 +127,16 @@ async function loadHomeData(isPremium: boolean | null) {
  * variable-height, data-driven surface, so normal flexbox + ScrollView is
  * the right tool here, not a departure to apologize for.
  */
+/** What a week dot says to VoiceOver ("Wednesday, today, done") — the
+ * letters alone said nothing about the day. A scheduled day that passed
+ * without a session is a rest day, never "missed". */
+function weekDayLabel(day: WeekDay): string {
+  const name = day.weekday.charAt(0).toUpperCase() + day.weekday.slice(1);
+  const state =
+    day.completed === true ? 'done' : !day.isScheduled || (!day.isFuture && !day.isToday) ? 'rest day' : 'planned';
+  return `${name}${day.isToday ? ', today' : ''}, ${state}`;
+}
+
 export default function SummaryScreen() {
   const insets = useSafeAreaInsets();
   const colors = useAppColors();
@@ -668,7 +678,7 @@ function WeeklyActivity({
       <Text style={styles.sectionKicker} accessibilityRole="header" maxFontSizeMultiplier={1.3}>THIS WEEK</Text>
       <View style={styles.weekRow}>
         {weekActivity.days.map((day, index) => (
-          <View key={day.weekday} style={styles.weekDayCol}>
+          <View key={day.weekday} style={styles.weekDayCol} accessible accessibilityLabel={weekDayLabel(day)}>
             <Text style={styles.weekDayLetter} maxFontSizeMultiplier={1.2}>{WEEKDAY_LETTERS[index]}</Text>
             <View
               style={[

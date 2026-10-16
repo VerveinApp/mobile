@@ -56,6 +56,11 @@ import { MovementRestrictionsSheet } from '@/components/settings/movement-restri
 import { StandingSymptomsSheet } from '@/components/settings/standing-symptoms-sheet';
 import { SkeletonBlock, SkeletonCard } from '@/components/ui/skeleton';
 
+// "ft / lb" read aloud is "f t slash l b".
+const SPOKEN_OPTION_LABELS: Record<string, string> = {
+  imperial: 'Feet and pounds',
+  metric: 'Centimeters and kilograms',
+};
 const UNIT_OPTIONS: { id: UnitSystem; label: string }[] = [
   { id: 'imperial', label: 'ft / lb' },
   { id: 'metric', label: 'cm / kg' },
@@ -769,6 +774,9 @@ export default function SettingsScreen() {
                       onPressIn={interaction.press.onPressIn}
                       onPressOut={interaction.press.onPressOut}
                       style={styles.unitPillHit}
+                      accessibilityRole="button"
+                      accessibilityLabel={SPOKEN_OPTION_LABELS[option.id] ?? option.label}
+                      accessibilityState={{ selected: isSelected }}
                     >
                       <View style={[styles.unitPillVisual, isSelected && styles.unitPillVisualSelected]}>
                         <Text
@@ -934,6 +942,9 @@ export default function SettingsScreen() {
                       onPressIn={interaction.press.onPressIn}
                       onPressOut={interaction.press.onPressOut}
                       style={styles.unitPillHit}
+                      accessibilityRole="button"
+                      accessibilityLabel={SPOKEN_OPTION_LABELS[option.id] ?? option.label}
+                      accessibilityState={{ selected: isSelected }}
                     >
                       <View style={[styles.unitPillVisual, isSelected && styles.unitPillVisualSelected]}>
                         <Text
@@ -955,6 +966,7 @@ export default function SettingsScreen() {
               </View>
               <Switch
                 value={hapticsOn}
+                accessibilityLabel="Haptics"
                 onValueChange={handleToggleHaptics}
                 trackColor={{ false: hapticsTrackOff, true: '#438C63' }}
                 thumbColor="#ffffff"
@@ -1506,6 +1518,7 @@ function AppLockRow({
       </View>
       <Switch
         value={value}
+        accessibilityLabel={label}
         onValueChange={onValueChange}
         disabled={!available}
         trackColor={{ false: trackOffColor, true: '#438C63' }}

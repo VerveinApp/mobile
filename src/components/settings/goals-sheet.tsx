@@ -237,6 +237,7 @@ export const GoalsSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void 
             <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>Target weight</Text>
             <Switch
               value={targetWeightEnabled}
+              accessibilityLabel="Target weight"
               onValueChange={handleToggleTargetWeight}
               trackColor={{ false: colors.pillBorder, true: '#438C63' }}
             />
@@ -269,6 +270,7 @@ export const GoalsSheet = forwardRef<BottomSheetModal, { onDismiss?: () => void 
             <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>Target lift</Text>
             <Switch
               value={targetLiftEnabled}
+              accessibilityLabel="Target lift"
               onValueChange={handleToggleTargetLift}
               trackColor={{ false: colors.pillBorder, true: '#438C63' }}
             />
