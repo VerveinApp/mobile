@@ -90,6 +90,25 @@ export default function ProgressHistoryScreen() {
   // never reset by a later reload (a delete or a new past-session log
   // shouldn't silently re-collapse a month the user opened by hand).
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set());
+  // A day tapped on Progress's calendar opens here pre-expanded and
+  // highlighted — and now also scrolled into view, once, so it isn't left
+  // below the fold of an expanded month.
+  const scrollRef = useRef<ScrollView>(null);
+  // The layer the scroll view fills, measured for where the list's top sits
+  // on screen (a ScrollView can't measure itself).
+  const viewportRef = useRef<View>(null);
+  const hasScrolledToTarget = useRef(false);
+  const scrollToTarget = useCallback((row: View) => {
+    const scrollView = scrollRef.current;
+    const viewport = viewportRef.current;
+    if (hasScrolledToTarget.current || !scrollView || !viewport) return;
+    hasScrolledToTarget.current = true;
+    row.measureInWindow((_x, rowY) => {
+      viewport.measureInWindow((_vx, viewY) => {
+        scrollView.scrollTo({ y: Math.max(0, rowY - viewY - 96), animated: true });
+      });
+    });
+  }, []);
   const hasSetDefaultExpandedMonth = useRef(false);
   const [unit, setUnit] = useState<UnitSystem>('imperial');
   // Each day's logged weight × reps per exercise, for the expanded log.
@@ -224,8 +243,8 @@ export default function ProgressHistoryScreen() {
           </View>
         </ScrollView>
       ) : (
-      <ReanimatedAnimated.View style={styles.fadeLayer} entering={entering}>
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ReanimatedAnimated.View ref={viewportRef} style={styles.fadeLayer} entering={entering}>
+        <ScrollView ref={scrollRef} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.summaryRow}>
             <View style={styles.summaryCard}>
               <Text style={styles.summaryValue} maxFontSizeMultiplier={1.15}>{thisWeekCount}</Text>
@@ -299,6 +318,7 @@ export default function ProgressHistoryScreen() {
                               styles={styles}
                               colors={colors}
                               onDelete={() => handleDelete(entry.date)}
+                              onTargetLayout={entry.date === targetDate ? scrollToTarget : undefined}
                             />
                           ))}
                         </View>
@@ -336,6 +356,7 @@ function HistoryRow({
   styles,
   colors,
   onDelete,
+  onTargetLayout,
 }: {
   entry: SessionHistoryEntry;
   exercises: WorkoutLogExercise[] | undefined;
@@ -350,8 +371,11 @@ function HistoryRow({
   styles: ReturnType<typeof createStyles>;
   colors: ReturnType<typeof useAppColors>;
   onDelete: () => void;
+  /** Only on the row for the tapped calendar day — told once it's laid out. */
+  onTargetLayout?: (row: View) => void;
 }) {
   const [expanded, setExpanded] = useState(isTarget);
+  const rowRef = useRef<View>(null);
   const hasLog = !!exercises && exercises.length > 0;
   const doneCount = exercises?.filter((e) => e.completed).length ?? 0;
 
@@ -362,7 +386,12 @@ function HistoryRow({
   };
 
   return (
-    <ReanimatedAnimated.View layout={LIST_ROW_LAYOUT} exiting={LIST_ROW_EXITING}>
+    <ReanimatedAnimated.View
+      ref={rowRef}
+      layout={LIST_ROW_LAYOUT}
+      exiting={LIST_ROW_EXITING}
+      onLayout={onTargetLayout ? () => rowRef.current && onTargetLayout(rowRef.current) : undefined}
+    >
     <SwipeRow
       renderActions={() => (
         <Pressable
