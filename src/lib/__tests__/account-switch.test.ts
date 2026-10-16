@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { claimLocalDataIfUnowned, forgetLocalDataOwner, prepareLocalDataForAccount } from '@/lib/account-switch';
+import { buildBackupPayload, clearAllLocalData } from '@/lib/data-backup';
 import { getAccountStartDate, hasCompletedOnboarding, markOnboardingComplete } from '@/lib/onboarding-draft';
 import { getProgressPhotos } from '@/lib/progress-photos';
 import { getSessionHistory, recordPastSessionCompletion } from '@/lib/session-history';
@@ -109,3 +110,57 @@ describe('claimLocalDataIfUnowned', () => {
     expect((await getProfile())?.name).toBe('Sam');
   });
 });
+
+describe('account switching edge cases', () => {
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+  });
+
+  it("carries one person's flags with their account, never to the next", async () => {
+    await seedAccountData('Alex');
+    await prepareLocalDataForAccount('user-a');
+    await AsyncStorage.multiSet([
+      ['vervein.paywallShown.v1', 'true'],
+      ['vervein.healthKitConnected.v1', 'true'],
+    ]);
+
+    await prepareLocalDataForAccount('user-b');
+    expect(await AsyncStorage.getItem('vervein.paywallShown.v1')).toBeNull();
+    expect(await AsyncStorage.getItem('vervein.healthKitConnected.v1')).toBeNull();
+
+    await prepareLocalDataForAccount('user-a');
+    expect(await AsyncStorage.getItem('vervein.paywallShown.v1')).toBe('true');
+    expect(await AsyncStorage.getItem('vervein.healthKitConnected.v1')).toBe('true');
+  });
+
+  it('finishes a switch the app was killed in the middle of, without losing the first account', async () => {
+    await seedAccountData('Alex');
+    await prepareLocalDataForAccount('user-a');
+    // The state a kill leaves behind: Alex set aside, the device cleared,
+    // the switch to user-b marked but never finished.
+    await AsyncStorage.setItem(
+      'vervein.accountStash.user-a.v1',
+      JSON.stringify({ payload: await buildBackupPayload(), onboarded: true, accountStartDate: '2026-09-01' })
+    );
+    await AsyncStorage.setItem('vervein.accountSwitchPending.v1', JSON.stringify({ from: 'user-a', to: 'user-b' }));
+    await clearAllLocalData();
+
+    expect(await prepareLocalDataForAccount('user-b')).toBe('same-account');
+    expect(await getProfile()).toBeNull();
+
+    expect(await prepareLocalDataForAccount('user-a')).toBe('restored');
+    expect((await getProfile())?.name).toBe('Alex');
+    expect(await getSessionHistory()).toHaveLength(1);
+  });
+
+  it("never overwrites an account's set-aside data with an empty device", async () => {
+    await seedAccountData('Alex');
+    await prepareLocalDataForAccount('user-a');
+    await prepareLocalDataForAccount('user-b'); // Alex set aside; device fresh for user-b
+    // user-b never onboards; Alex's stash must survive user-b's empty device
+    // being set aside and Alex coming back.
+    expect(await prepareLocalDataForAccount('user-a')).toBe('restored');
+    expect((await getProfile())?.name).toBe('Alex');
+  });
+});
+
