@@ -1095,7 +1095,7 @@ export default function EnergyCheckInScreen() {
     return () => {
       cancelled = true;
     };
-  }, [isDoneWithoutSummary, sessionExercises]);
+  }, [isDoneWithoutSummary, sessionExercises, sessionDate]);
   const isLastExercise = preview ? currentExerciseIndex >= preview.exercises.length - 1 : false;
   // Derived, not separately tracked — completedExercises is already the
   // real source of truth for "is this one done," so there's no second copy
